@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev, staging, prod]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: grokflow
+          POSTGRES_PASSWORD: grokflow
+          POSTGRES_DB: grokflow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U grokflow"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Lint (smoke import)
+        run: python -c "from app.main import app; print('app loaded:', app.title)"
+        env:
+          DATABASE_URL: postgresql+asyncpg://grokflow:grokflow@localhost:5432/grokflow
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: ci_secret_long_enough_to_pass_validation
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123=
+
+      - name: Run tests
+        run: pytest -q
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: ci_secret_long_enough_to_pass_validation
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123=
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package.json
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Type check
+        run: npx tsc -b --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: https://api.example.com

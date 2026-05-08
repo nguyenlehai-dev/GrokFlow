@@ -1,0 +1,29 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Build-time API URL. For single-domain deploy with nginx proxy → "" (relative paths).
+# For separate API subdomain → "https://api.example.com".
+ARG VITE_API_BASE_URL=
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
+COPY package.json ./
+RUN npm install --no-audit --no-fund
+
+COPY . .
+RUN npm run build
+
+
+FROM nginx:1.27-alpine AS runner
+
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Helper script served at /static/grokflow-helper.py
+COPY helper/grokflow-helper.py /usr/share/nginx/html/static/grokflow-helper.py
+
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+  CMD wget -qO- http://localhost/ >/dev/null || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

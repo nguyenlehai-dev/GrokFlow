@@ -1,0 +1,107 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-grokflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:-grokflow}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grokflow}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    # No ports exposed externally — only reachable via internal network.
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    image: grokflow/backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: ./.env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-grokflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grokflow}
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_STORAGE_PATH: /app/storage
+      PROFILE_BASE_PATH: /app/browser_profiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage_data:/app/storage
+      - profile_data:/app/browser_profiles
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    image: grokflow/backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: ./.env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-grokflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grokflow}
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_STORAGE_PATH: /app/storage
+      PROFILE_BASE_PATH: /app/browser_profiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage_data:/app/storage
+      - profile_data:/app/browser_profiles
+    command: ["python", "-m", "app.workers.run"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_API_URL:?set in .env.prod, e.g. https://api.example.com}
+    image: grokflow/frontend:${TAG:-latest}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set in .env.prod, e.g. grokflow.example.com}
+      API_DOMAIN: ${API_DOMAIN:?set in .env.prod, e.g. api.grokflow.example.com}
+      CADDY_EMAIL: ${CADDY_EMAIL:?set in .env.prod for Let's Encrypt account}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
+  profile_data:
+  caddy_data:
+  caddy_config:

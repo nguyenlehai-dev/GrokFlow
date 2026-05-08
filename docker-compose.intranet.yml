@@ -1,0 +1,144 @@
+# Intranet HTTP deployment — truy cập qua http://<server-ip>:5173 (FE) và :8000 (API).
+# Dùng cho LAN/staging không có TLS. Production public nên dùng docker-compose.cloudflare.yml.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-grokflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:-grokflow}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grokflow}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits: { memory: 1G, cpus: "1.0" }
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits: { memory: 384M, cpus: "0.5" }
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    image: grokflow/backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: ./.env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-grokflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grokflow}
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_STORAGE_PATH: /app/storage
+      PROFILE_BASE_PATH: /app/browser_profiles
+      # Host path so backend can pass it to spawned VNC containers via Docker API.
+      PROFILE_BASE_PATH_HOST: ${PWD}/browser_profiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage_data:/app/storage
+      # Bind mount so paths inside backend match host paths (needed for spawning VNC).
+      - ./browser_profiles:/app/browser_profiles
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { memory: 768M, cpus: "1.0" }
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    image: grokflow/backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: ./.env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-grokflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grokflow}
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_STORAGE_PATH: /app/storage
+      PROFILE_BASE_PATH: /app/browser_profiles
+      # Cap concurrent in-flight tasks; sized to fit per-profile slots.
+      # Each in-flight task drives 1 Chromium tab (~150MB inside VNC container).
+      WORKER_MAX_IN_FLIGHT: ${WORKER_MAX_IN_FLIGHT:-8}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage_data:/app/storage
+      - ./browser_profiles:/app/browser_profiles
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["python", "-m", "app.workers.run"]
+    deploy:
+      resources:
+        limits: { memory: 512M, cpus: "1.0" }
+
+  idle-cleanup:
+    image: grokflow/backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: ./.env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-grokflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grokflow}
+      LOCAL_STORAGE_PATH: /app/storage
+      PROFILE_BASE_PATH: /app/browser_profiles
+      PROFILE_BASE_PATH_HOST: ${PWD}/browser_profiles
+      # Aggressive defaults: stop idle VNC after 2h and reap orphan containers
+      # every 15min so a quiet system stays under 1GB total.
+      IDLE_CLEANUP_HOURS: ${IDLE_CLEANUP_HOURS:-2}
+      IDLE_CLEANUP_INTERVAL: ${IDLE_CLEANUP_INTERVAL:-900}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./browser_profiles:/app/browser_profiles
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["python", "-m", "app.workers.idle_cleanup"]
+    deploy:
+      resources:
+        limits: { memory: 192M, cpus: "0.25" }
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+    image: grokflow/frontend:${TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    deploy:
+      resources:
+        limits: { memory: 128M, cpus: "0.25" }
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:

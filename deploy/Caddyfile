@@ -1,0 +1,36 @@
+{
+    email {$CADDY_EMAIL}
+    # Uncomment to use Let's Encrypt staging while testing TLS issuance:
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# Frontend SPA
+{$DOMAIN} {
+    encode gzip
+
+    @api path /api/* /v1/* /docs /openapi.json /redoc /health
+    handle @api {
+        reverse_proxy backend:8000
+    }
+
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
+
+# Public API on its own subdomain (recommended for production)
+{$API_DOMAIN} {
+    encode gzip
+
+    reverse_proxy backend:8000
+
+    log {
+        output stdout
+        format console
+    }
+}

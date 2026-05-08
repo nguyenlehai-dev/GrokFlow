@@ -1,0 +1,107 @@
+# Cloudflare Tunnel deployment với single hostname.
+#
+# Frontend nginx route /api/, /v1/, /docs, /health → backend.
+# Cloudflare Tunnel chỉ cần 1 public hostname trỏ về frontend:80.
+#
+# Yêu cầu:
+#   - Cloudflare account + domain (vd vpspanel.io.vn) trên Cloudflare DNS
+#     hoặc CNAME thủ công trỏ về <tunnel-id>.cfargotunnel.com
+#   - Tunnel token (Zero Trust → Networks → Tunnels → Create → Docker → copy token)
+#   - Public hostname route trong Cloudflare dashboard:
+#       <DOMAIN>  →  service: HTTP  url: frontend:80
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-grokflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:-grokflow}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grokflow}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    image: grokflow/backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: ./.env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-grokflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grokflow}
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_STORAGE_PATH: /app/storage
+      PROFILE_BASE_PATH: /app/browser_profiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage_data:/app/storage
+      - profile_data:/app/browser_profiles
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    image: grokflow/backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: ./.env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-grokflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grokflow}
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_STORAGE_PATH: /app/storage
+      PROFILE_BASE_PATH: /app/browser_profiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage_data:/app/storage
+      - profile_data:/app/browser_profiles
+    command: ["python", "-m", "app.workers.run"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        # Empty = bundle dùng relative URL → cùng origin với frontend (qua nginx proxy).
+        VITE_API_BASE_URL: ""
+    image: grokflow/frontend:${TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:?set in .env.prod}"]
+    depends_on:
+      - frontend
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
+  profile_data:

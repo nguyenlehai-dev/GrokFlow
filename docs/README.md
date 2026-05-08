@@ -1,0 +1,42 @@
+# GrokFlow Documentation
+
+Tài liệu nội bộ cho dev team. Tổ chức theo 2 nhóm chính:
+
+- [`docs/answer/`](./answer/) — phân tích, kiến trúc, quyết định thiết kế, ADR, hướng dẫn setup. Trả lời câu hỏi *"vì sao"* và *"làm thế nào"*.
+- [`docs/api/`](./api/) — đặc tả REST API (cả internal dashboard và public v1). Trả lời câu hỏi *"endpoint nào, payload gì"*.
+
+## Index
+
+### Answer
+
+- [Phân tích dự án (gốc)](./answer/phan-tich-du-an-ui-ux-pro-max.md)
+- [Kiến trúc tổng thể](./answer/architecture.md)
+- [Setup môi trường dev](./answer/setup.md)
+- [Sơ đồ luồng nghiệp vụ](./answer/flows.md)
+- [Mô hình dữ liệu (ERD + bảng)](./answer/data-model.md)
+- [Bảo mật](./answer/security.md)
+- [Provider integration (Grok/Flow + viết provider mới)](./answer/providers.md)
+- [Storage drivers](./answer/storage.md)
+- [Rate limit](./answer/rate-limit.md)
+- [Roadmap MVP theo Phase](./answer/roadmap.md)
+- [Deployment lên VPS (Caddy + Let's Encrypt)](./answer/deployment.md)
+- [Deploy với Cloudflare Tunnel (LAN/private server)](./answer/deploy-cloudflare-tunnel.md)
+
+### API
+
+- [Tổng quan API](./api/README.md)
+- [Auth API](./api/auth.md)
+- [API Keys API](./api/api-keys.md)
+- [Profiles API](./api/profiles.md)
+- [Jobs API (internal)](./api/jobs.md)
+- [Files API](./api/files.md)
+- [Audit Logs API](./api/audit.md)
+- [Admin API](./api/admin.md)
+- [Settings API](./api/settings.md)
+- [Webhooks](./api/webhooks.md)
+- [Public API v1 (cho khách tích hợp)](./api/public-v1.md)
+- [Mã lỗi](./api/errors.md)
+
+## Quy ước cập nhật docs
+
+Bất kỳ thay đổi nào về API, schema DB, luồng nghiệp vụ phải đi kèm cập nhật doc tương ứng trong cùng PR. Doc lệch code là bug.

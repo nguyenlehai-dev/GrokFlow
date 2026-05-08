@@ -27,3 +27,28 @@ $RECYCLE.BIN/
 
 # Local
 *.local
+
+# App data + secrets — NEVER commit
+backend/storage/
+backend/browser_profiles/
+browser_profiles/
+backend/.env
+frontend/.env
+.env
+.env.prod
+.env.staging
+*.pem
+*.key
+cookies.txt
+
+# Claude tooling
+.claude/
+
+# Deploy probe scripts (one-shot debugging)
+deploy/probe*.py
+deploy/inspect*.py
+
+# Build artefacts
+*.tgz
+frontend/dist/
+
