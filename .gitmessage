@@ -1,0 +1,15 @@
+# <type>[scope]: <subject> [#issue_id]
+#
+# Subject line ≤ 50 chars, no trailing period, imperative mood.
+#
+# Types: feat | fix | refactor | docs | chore | style | perf | vendor
+#
+# --- body (optional, wrap at 72 chars) ---
+#
+# Explain WHY the change is needed, not what (the diff shows what).
+#
+# --- footer (optional) ---
+#
+# Closes #<id>
+# BREAKING CHANGE: <description>
+# Co-Authored-By: Name <email>
