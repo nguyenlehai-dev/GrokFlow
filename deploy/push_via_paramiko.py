@@ -30,6 +30,10 @@ DEFAULT_FILES = [
     "backend/alembic/versions/0004_job_next_attempt.py",
     "frontend/src/modules/jobs/JobDetailDrawer.tsx",
     "frontend/src/modules/jobs/CreateJobModal.tsx",
+    "frontend/src/modules/jobs/JobsPage.tsx",
+    "frontend/src/modules/dashboard/DashboardPage.tsx",
+    "frontend/src/modules/api-docs/ApiDocsPage.tsx",
+    "docker-compose.intranet.yml",
 ]
 
 

@@ -14,11 +14,11 @@ import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.browser import vnc_manager
 from app.core.database import SessionLocal
-from app.models import Profile
+from app.models import Job, JobLog, Profile
 
 
 async def cleanup(idle_hours: float) -> int:
@@ -35,6 +35,19 @@ async def cleanup(idle_hours: float) -> int:
                 print(f"[idle-cleanup] reaped orphan VNC: {reaped}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[idle-cleanup] orphan reap failed: {exc}", flush=True)
+
+        # JobLog TTL: keep ~30 days. Logs of long-finished jobs are debug-only.
+        log_ttl_days = float(os.environ.get("JOBLOG_TTL_DAYS", "30"))
+        log_cutoff = datetime.now(timezone.utc) - timedelta(days=log_ttl_days)
+        try:
+            res = await db.execute(
+                delete(JobLog).where(JobLog.created_at < log_cutoff)
+            )
+            if res.rowcount:
+                print(f"[idle-cleanup] pruned {res.rowcount} JobLog rows older than {log_ttl_days}d", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[idle-cleanup] joblog prune failed: {exc}", flush=True)
+        await db.commit()
 
         # Profiles likely backed by a running container
         rows = (await db.execute(

@@ -118,6 +118,27 @@ async def _maybe_send_webhook(db: AsyncSession, job: Job) -> None:
                       message=f"Webhook exception: {type(exc).__name__}: {exc}"))
 
 
+async def _watch_for_cancel(job_id: uuid.UUID, target: asyncio.Task,
+                            interval: int = 5) -> None:
+    """Background poll: every N seconds re-read job.status. If user cancels,
+    abort the running provider task. Exits cleanly when the task ends."""
+    while not target.done():
+        try:
+            await asyncio.sleep(interval)
+            if target.done():
+                return
+            async with SessionLocal() as db2:
+                fresh = await db2.get(Job, job_id)
+                if fresh and fresh.status == "cancelled":
+                    target.cancel()
+                    return
+        except asyncio.CancelledError:
+            return
+        except Exception:  # noqa: BLE001
+            # transient DB error — keep watching, don't tear down the run
+            continue
+
+
 async def process_one(db: AsyncSession, job: Job) -> None:
     # Race window: user may have hit Cancel between claim and process. The
     # claim step set status="running" but cancel() can still write "cancelled".
@@ -176,15 +197,41 @@ async def process_one(db: AsyncSession, job: Job) -> None:
                 db.add(JobLog(job_id=job.id, level="warning",
                               message=f"Failed input image: {exc}"))
 
-        result = await provider.run(JobInput(
+        # Run provider as a task + watchdog that aborts on user cancel.
+        provider_task = asyncio.create_task(provider.run(JobInput(
             prompt=job.prompt,
             job_type=job.job_type,
             options=job.input_payload,
             profile_path=profile.profile_path if profile else "",
             attachments=attachments,
-        ))
+        )))
+        watcher = asyncio.create_task(_watch_for_cancel(job.id, provider_task))
+        cancelled_mid_run = False
+        try:
+            result = await provider_task
+        except asyncio.CancelledError:
+            cancelled_mid_run = True
+            result = None  # short-circuit to cancelled-handling below
+        finally:
+            watcher.cancel()
+            try:
+                await watcher
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
 
-        if result.success and result.files:
+        if cancelled_mid_run:
+            job.status = "cancelled"
+            job.completed_at = datetime.now(timezone.utc)
+            job.error_message = "[cancelled] Cancelled by user during provider run"
+            db.add(JobLog(job_id=job.id, level="info",
+                          message="Provider task cancelled mid-run"))
+            # skip the success/retry paths
+            result = None
+
+        if result is None:
+            # cancelled_mid_run path — already wrote terminal status above.
+            pass
+        elif result.success and result.files:
             job.status = "uploading_result"
             saved_ids: list[uuid.UUID] = []
             total_bytes = 0

@@ -19,11 +19,27 @@ interface Job {
   completed_at: string | null;
 }
 
+const STATUS_FILTERS = [
+  { v: "",            label: "Tất cả" },
+  { v: "queued",      label: "Queued" },
+  { v: "running",     label: "Running" },
+  { v: "processing_provider", label: "Processing" },
+  { v: "success",     label: "Success" },
+  { v: "failed",      label: "Failed" },
+  { v: "cancelled",   label: "Cancelled" },
+];
+
 export function JobsPage() {
   const qc = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<string>("");
   const { data, isLoading } = useQuery({
-    queryKey: ["jobs"],
-    queryFn: async () => (await api.get<Job[]>("/api/jobs?limit=100")).data,
+    queryKey: ["jobs", statusFilter],
+    queryFn: async () => {
+      const url = statusFilter
+        ? `/api/jobs?limit=100&status=${statusFilter}`
+        : "/api/jobs?limit=100";
+      return (await api.get<Job[]>(url)).data;
+    },
     refetchInterval: 5000,
   });
   const [open, setOpen] = useState(false);
@@ -39,11 +55,48 @@ export function JobsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
   });
 
+  // Bulk: cancel every job that's still pre-terminal.
+  const cancelAll = useMutation({
+    mutationFn: async () => {
+      const cancellable = (data ?? []).filter((j) =>
+        ["pending", "queued", "running", "processing_provider"].includes(j.status),
+      );
+      await Promise.allSettled(cancellable.map((j) => api.post(`/api/jobs/${j.id}/cancel`)));
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+
+  const inFlightCount = (data ?? []).filter((j) =>
+    ["pending", "queued", "running", "processing_provider"].includes(j.status),
+  ).length;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-semibold">Jobs</h1>
-        <button onClick={() => setOpen(true)} className="btn-primary">+ Tạo job</button>
+        <div className="flex items-center gap-2">
+          <select
+            className="input w-auto py-1.5"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            {STATUS_FILTERS.map((s) => (
+              <option key={s.v} value={s.v}>{s.label}</option>
+            ))}
+          </select>
+          {inFlightCount > 0 && (
+            <button
+              onClick={() => {
+                if (confirm(`Cancel ${inFlightCount} job đang chạy / chờ?`)) cancelAll.mutate();
+              }}
+              className="btn-ghost text-rose-600"
+              disabled={cancelAll.isPending}
+            >
+              {cancelAll.isPending ? "Đang cancel..." : `Cancel all (${inFlightCount})`}
+            </button>
+          )}
+          <button onClick={() => setOpen(true)} className="btn-primary">+ Tạo job</button>
+        </div>
       </div>
 
       {isLoading ? (
