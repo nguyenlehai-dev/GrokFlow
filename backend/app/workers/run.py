@@ -122,7 +122,7 @@ async def _maybe_send_webhook(db: AsyncSession, job: Job) -> None:
 
 
 async def _watch_for_cancel(job_id: uuid.UUID, target: asyncio.Task,
-                            interval: int = 5) -> None:
+                            interval: int = 3) -> None:
     """Background poll: every N seconds re-read job.status. If user cancels,
     abort the running provider task. Exits cleanly when the task ends."""
     while not target.done():
@@ -200,6 +200,11 @@ async def process_one(db: AsyncSession, job: Job) -> None:
                 db.add(JobLog(job_id=job.id, level="warning",
                               message=f"Failed input image: {exc}"))
 
+        # Hard wall-clock cap on the whole provider run. If anything
+        # inside hangs (Chromium freeze, dead CDP, page.evaluate stuck,
+        # etc.) we cut the cord rather than letting the job sit in
+        # processing_provider forever. Image: 5 min, video: 8 min.
+        hard_cap = 300 if job.job_type != "video" else 480
         # Run provider as a task + watchdog that aborts on user cancel.
         provider_task = asyncio.create_task(provider.run(JobInput(
             prompt=job.prompt,
@@ -210,17 +215,36 @@ async def process_one(db: AsyncSession, job: Job) -> None:
         )))
         watcher = asyncio.create_task(_watch_for_cancel(job.id, provider_task))
         cancelled_mid_run = False
+        timed_out = False
         try:
-            result = await provider_task
+            result = await asyncio.wait_for(
+                asyncio.shield(provider_task), timeout=hard_cap,
+            )
         except asyncio.CancelledError:
             cancelled_mid_run = True
-            result = None  # short-circuit to cancelled-handling below
+            result = None
+        except asyncio.TimeoutError:
+            timed_out = True
+            provider_task.cancel()
+            try:
+                await provider_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            result = None
         finally:
             watcher.cancel()
             try:
                 await watcher
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
+
+        if timed_out:
+            from app.providers.base import JobResult as _JR
+            result = _JR(
+                success=False, error_code="rate_limited",
+                error_message=f"Provider hung past {hard_cap}s hard cap (Chromium overload).",
+                retryable=True,
+            )
 
         if cancelled_mid_run:
             job.status = "cancelled"
