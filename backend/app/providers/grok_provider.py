@@ -540,39 +540,49 @@ class GrokProvider(Provider):
 
                 # Post-submit sanity check: Grok normally navigates to
                 # /imagine/post/<id> within a few seconds OR shows a
-                # rate-limit toast. If neither happens after 12s the
-                # submit was silently dropped (most often = account quota
-                # exhausted on free tier).
-                pre_submit_url = page.url
+                # rate-limit toast. If neither happens we WAIT longer
+                # (some accounts are slow) but log what's happening.
+                # Slot-paid accounts may take 5-15s before nav.
                 navigated = False
-                for _ in range(12):
+                for _ in range(20):
                     await asyncio.sleep(1)
                     if "/imagine/post/" in (page.url or ""):
                         navigated = True
                         self._log(tag, f"navigated to {page.url}")
                         break
                 if not navigated:
-                    # Look for explicit error or quota text
+                    # Sidebar promotional text "Upgrade to SuperGrok" is
+                    # ALWAYS present — must NOT match. Look only for
+                    # specific quota / throttle messages that appear as
+                    # toasts or inline error messages.
                     body_tail = (await page.evaluate(
                         "() => (document.body.innerText || '').slice(-3000).toLowerCase()"
                     ))
-                    quota_hits = [
-                        "you've reached", "you have reached", "daily limit",
-                        "rate limit", "too many requests", "try again",
-                        "upgrade to", "out of credit", "quota",
+                    # Specific phrases ONLY emitted by Grok when actually
+                    # blocking a request. "upgrade to" alone is too broad
+                    # (matches the sidebar promo).
+                    quota_phrases = [
+                        "you've reached your", "you have reached your",
+                        "daily limit reached", "daily limit has been reached",
+                        "rate limit exceeded",
+                        "too many requests",
+                        "try again in",
+                        "out of credits",
+                        "quota exceeded",
+                        "please slow down",
+                        "monthly limit",
                     ]
-                    found = next((h for h in quota_hits if h in body_tail), None)
+                    found = next((h for h in quota_phrases if h in body_tail), None)
                     if found:
                         return JobResult(
                             success=False, error_code="rate_limited",
                             error_message=(
-                                f"Grok rejected submit silently — quota/throttle "
-                                f"text matched: '{found}'. Đợi cooldown hoặc dùng "
-                                f"account khác."
+                                f"Grok rejected submit — '{found}'. Đợi cooldown "
+                                f"hoặc dùng account khác."
                             ),
                             retryable=True,
                         )
-                    self._log(tag, f"WARN no /post/ nav after 12s, still on {page.url}")
+                    self._log(tag, f"no /post/ nav after 20s, still on {page.url} — proceeding to poll anyway")
 
                 # Poll BOTH images and videos simultaneously. For video jobs we
                 # care about <video> elements with non-empty src; for image jobs
