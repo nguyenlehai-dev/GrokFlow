@@ -204,19 +204,27 @@ class GrokProvider(Provider):
                 # entirely; they're either brand new or already invisible.
                 try:
                     pages = list(context.pages)
-                    if len(pages) > 6:
+                    if len(pages) > 4:
                         gc_count = 0
-                        for old in pages[:-6]:  # keep newest 6 untouched
+                        for old in pages[:-4]:  # keep newest 4 untouched
                             try:
                                 u = old.url or ""
                                 if not u or u == "about:blank":
                                     continue  # skip — could be a fresh tab
                                 if "grok.com" not in u and "x.ai" not in u:
-                                    await old.close()
+                                    await asyncio.wait_for(old.close(), timeout=2)
                                     gc_count += 1
                                     continue
-                                # On grok.com — ping body. Tabs in active use
-                                # have substantial content (the chat UI).
+                                # /imagine/post/<id> = a completed result page
+                                # left over from a previous job. We've already
+                                # downloaded what we needed from it; close to
+                                # free the renderer process.
+                                if "/imagine/post/" in u:
+                                    await asyncio.wait_for(old.close(), timeout=2)
+                                    gc_count += 1
+                                    continue
+                                # On grok.com homepage with empty body — broken
+                                # tab from a crashed run.
                                 try:
                                     body_len = await old.evaluate(
                                         "() => (document.body && document.body.innerText || '').length",
@@ -224,10 +232,8 @@ class GrokProvider(Provider):
                                     )
                                 except Exception:  # noqa: BLE001
                                     body_len = -1
-                                # Only close if body is genuinely empty (broken)
-                                # AND the URL has been on grok for a while.
                                 if body_len == 0:
-                                    await old.close()
+                                    await asyncio.wait_for(old.close(), timeout=2)
                                     gc_count += 1
                             except Exception:  # noqa: BLE001
                                 pass
@@ -689,9 +695,6 @@ class GrokProvider(Provider):
                 new_urls_set: set[str] = set()
                 new_video_urls: set[str] = set()
 
-                rate_limit_detected: str | None = None
-                pro_required_detected: str | None = None
-                next_text_check = time.monotonic()  # cheap text check ~every 6s
                 next_progress_log = time.monotonic() + 15
 
                 while time.monotonic() < deadline:
@@ -718,42 +721,17 @@ class GrokProvider(Provider):
                         next_progress_log = time.monotonic() + 30
                         self._log(tag, f"polling… imgs={len(new_urls_set)} vids={len(new_video_urls)} elapsed={int(time.monotonic() - (deadline - timeout_ms/1000))}s")
 
-                    # Periodic rate-limit / Pro-required text scan.
-                    if time.monotonic() >= next_text_check:
-                        next_text_check = time.monotonic() + 6
-                        try:
-                            text = (await page.evaluate(
-                                "() => (document.body.innerText || '').slice(-2000)"
-                            )).lower()
-                        except Exception:  # noqa: BLE001
-                            text = ""
-                        for hint in RATE_LIMIT_HINTS:
-                            if hint in text:
-                                rate_limit_detected = hint
-                                break
-                        if not rate_limit_detected:
-                            for hint in PRO_REQUIRED_HINTS:
-                                if hint in text:
-                                    pro_required_detected = hint
-                                    break
-                        if rate_limit_detected or pro_required_detected:
-                            break
+                    # In-loop text scanning was removed: it generated too many
+                    # false-positives by matching phrases that appear in chat
+                    # history sidebar, tooltips, or partial streaming responses.
+                    # If Grok actually throttles, the polling loop will time
+                    # out naturally with a clearer 'No new media within timeout'
+                    # which the worker retries with backoff. Genuine quota text
+                    # is still scanned BEFORE polling starts (right after submit
+                    # if the URL didn't navigate to /post/).
 
                     # Tight poll loop — 1s catches new image URLs sooner.
                     await asyncio.sleep(1)
-
-                if rate_limit_detected and not (new_urls_set or new_video_urls):
-                    return JobResult(
-                        success=False, error_code="rate_limited",
-                        error_message=f"Grok account rate-limited: '{rate_limit_detected}'. Wait or use a different profile.",
-                        retryable=True,
-                    )
-                if pro_required_detected and not (new_urls_set or new_video_urls):
-                    return JobResult(
-                        success=False, error_code="provider_blocked",
-                        error_message=f"Grok account lacks required subscription: '{pro_required_detected}'.",
-                        retryable=False,
-                    )
 
                 if not new_urls_set and not new_video_urls:
                     err_msg = "No new media within timeout"
@@ -884,7 +862,7 @@ class GrokProvider(Provider):
             # connection; closing it doesn't kill the underlying Chromium.
             if page is not None:
                 try:
-                    await page.close()
+                    await asyncio.wait_for(page.close(), timeout=3)
                 except Exception:  # noqa: BLE001
                     pass
 
