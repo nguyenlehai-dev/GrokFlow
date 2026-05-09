@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, X, Play, Pause } from "lucide-react";
 import { api } from "@/core/api/axios";
 
 interface JobFile {
@@ -38,7 +38,7 @@ export function ResultGalleryModal({
   onClose,
 }: {
   jobId: string;
-  jobType?: string;  // kept for caller backward-compat; render decides per-file mime
+  jobType?: string;
   onClose: () => void;
 }) {
   const { data: files = [], isLoading } = useQuery({
@@ -46,21 +46,48 @@ export function ResultGalleryModal({
     queryFn: async () => (await api.get<JobFile[]>(`/api/jobs/${jobId}/files`)).data,
   });
   const [idx, setIdx] = useState(0);
+  const [autoPlay, setAutoPlay] = useState(false);
   const cur = files[idx];
   const blob = useBlobUrl(cur?.download_url ?? null);
 
   const next = () => setIdx((i) => (files.length ? (i + 1) % files.length : 0));
   const prev = () => setIdx((i) => (files.length ? (i - 1 + files.length) % files.length : 0));
 
+  // Auto-advance — only for image-only galleries (videos play through their own controls)
+  const allImages = files.length > 0 && files.every((f) =>
+    (f.mime_type || "").startsWith("image/"),
+  );
+  useEffect(() => {
+    if (!autoPlay || files.length < 2 || !allImages) return;
+    const id = setInterval(() => {
+      setIdx((i) => (i + 1) % files.length);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [autoPlay, files.length, allImages]);
+
+  // Keyboard nav
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") prev();
       if (e.key === "ArrowRight") next();
       if (e.key === "Escape") onClose();
+      if (e.key === " ") { e.preventDefault(); setAutoPlay((a) => !a); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [files.length]);
+
+  // Touch swipe support
+  const touchStartX = useRef<number | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(dx) > 50) {
+      if (dx > 0) prev(); else next();
+    }
+    touchStartX.current = null;
+  };
 
   const fmtSize = (n: number | null) => {
     if (!n) return "";
@@ -76,17 +103,36 @@ export function ResultGalleryModal({
           <div>
             <div className="text-lg font-semibold">{cur?.file_name ?? "Result"}</div>
             <div className="text-xs text-slate-300">
-              {files.length > 0 && `${idx + 1} / ${files.length}`}
+              {files.length > 0 && (
+                <>
+                  Ảnh <span className="font-mono">{idx + 1}</span> / <span className="font-mono">{files.length}</span>
+                </>
+              )}
               {cur && ` • ${fmtSize(cur.file_size)}`}
               {cur && ` • ${cur.mime_type}`}
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded hover:bg-white/10">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            {files.length > 1 && allImages && (
+              <button
+                onClick={() => setAutoPlay((a) => !a)}
+                className="p-2 rounded hover:bg-white/10"
+                title={autoPlay ? "Tạm dừng slideshow (Space)" : "Phát slideshow tự động (Space)"}
+              >
+                {autoPlay ? <Pause size={18} /> : <Play size={18} />}
+              </button>
+            )}
+            <button onClick={onClose} className="p-2 rounded hover:bg-white/10" title="Đóng (Esc)">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 relative bg-slate-950 rounded-lg overflow-hidden flex items-center justify-center min-h-[400px]">
+        <div
+          className="flex-1 relative bg-slate-950 rounded-lg overflow-hidden flex items-center justify-center min-h-[400px] select-none"
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+        >
           {isLoading && <p className="text-slate-400">Đang tải danh sách file…</p>}
           {!isLoading && files.length === 0 && (
             <p className="text-slate-400">Job này chưa có file kết quả.</p>
@@ -97,6 +143,7 @@ export function ResultGalleryModal({
               || (cur.file_type === "video" && !(cur.mime_type || "").startsWith("image/"));
             return isVideo ? (
               <video
+                key={cur.id}
                 src={blob}
                 controls
                 autoPlay
@@ -105,7 +152,13 @@ export function ResultGalleryModal({
                 className="max-h-[80vh] max-w-full"
               />
             ) : (
-              <img src={blob} alt={cur.file_name} className="max-h-[80vh] max-w-full object-contain" />
+              <img
+                key={cur.id}
+                src={blob}
+                alt={cur.file_name}
+                className="max-h-[80vh] max-w-full object-contain transition-opacity duration-200"
+                draggable={false}
+              />
             );
           })()}
 
@@ -113,66 +166,127 @@ export function ResultGalleryModal({
             <>
               <button
                 onClick={prev}
-                className="absolute left-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white"
-                aria-label="Previous"
+                className="absolute left-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white transition"
+                aria-label="Previous (←)"
               >
                 <ChevronLeft size={28} />
               </button>
               <button
                 onClick={next}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white"
-                aria-label="Next"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white transition"
+                aria-label="Next (→)"
               >
                 <ChevronRight size={28} />
               </button>
+
+              {/* Slide indicator dots */}
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+                {files.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setIdx(i)}
+                    className={`w-2 h-2 rounded-full transition-all ${
+                      i === idx ? "bg-white w-6" : "bg-white/40 hover:bg-white/70"
+                    }`}
+                    aria-label={`Đến ảnh ${i + 1}`}
+                  />
+                ))}
+              </div>
             </>
           )}
         </div>
 
-        {/* Thumbnails */}
+        {/* Thumbnails strip */}
         {files.length > 1 && (
-          <div className="flex gap-2 mt-3 overflow-x-auto">
+          <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
             {files.map((f, i) => (
-              <Thumb key={f.id} file={f} active={i === idx} onClick={() => setIdx(i)} />
+              <Thumb key={f.id} file={f} active={i === idx} onClick={() => setIdx(i)} idx={i + 1} />
             ))}
           </div>
         )}
 
-        {/* Download */}
+        {/* Download — current + all */}
         {cur && blob && (
-          <div className="mt-3 flex justify-center">
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
             <a
               href={blob}
               download={cur.file_name}
               className="inline-flex items-center gap-2 bg-brand-500 hover:bg-brand-600 text-white px-5 py-2 rounded-md font-medium"
             >
-              <Download size={18} /> Tải xuống {cur.file_name}
+              <Download size={18} /> Tải ảnh hiện tại
             </a>
+            {files.length > 1 && (
+              <DownloadAllButton files={files} />
+            )}
           </div>
+        )}
+
+        {files.length > 1 && (
+          <p className="text-xs text-slate-400 text-center mt-2">
+            ← → chuyển ảnh • Space play/pause • Esc đóng • vuốt trái/phải trên mobile
+          </p>
         )}
       </div>
     </div>
   );
 }
 
-function Thumb({ file, active, onClick }: { file: JobFile; active: boolean; onClick: () => void }) {
+function Thumb({ file, active, onClick, idx }: { file: JobFile; active: boolean; onClick: () => void; idx: number }) {
   const blob = useBlobUrl(file.download_url);
   return (
     <button
       onClick={onClick}
-      className={`flex-shrink-0 w-20 h-20 rounded border-2 overflow-hidden ${
+      className={`relative flex-shrink-0 w-20 h-20 rounded border-2 overflow-hidden transition ${
         active ? "border-brand-500" : "border-transparent opacity-60 hover:opacity-100"
       }`}
+      title={file.file_name}
     >
       {blob ? (
         (file.mime_type || "").startsWith("video/") ? (
           <video src={blob} className="w-full h-full object-cover" muted playsInline />
         ) : (
-          <img src={blob} className="w-full h-full object-cover" alt="" />
+          <img src={blob} className="w-full h-full object-cover" alt="" draggable={false} />
         )
       ) : (
         <div className="w-full h-full bg-slate-700 animate-pulse" />
       )}
+      <span className="absolute top-0.5 left-0.5 bg-black/60 text-white text-[10px] font-mono px-1 rounded">
+        {idx}
+      </span>
+    </button>
+  );
+}
+
+function DownloadAllButton({ files }: { files: JobFile[] }) {
+  const [busy, setBusy] = useState(false);
+  const downloadAll = async () => {
+    setBusy(true);
+    try {
+      // Sequential to avoid hammering the server / browser concurrent-download cap
+      for (const f of files) {
+        const r = await api.get(f.download_url, { responseType: "blob" });
+        const url = URL.createObjectURL(r.data);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = f.file_name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        // small delay so browser doesn't bunch downloads into a single zip prompt
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      onClick={downloadAll}
+      disabled={busy}
+      className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-5 py-2 rounded-md font-medium disabled:opacity-60"
+    >
+      <Download size={18} /> {busy ? "Đang tải…" : `Tải tất cả (${files.length})`}
     </button>
   );
 }
