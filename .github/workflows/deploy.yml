@@ -1,40 +1,56 @@
 name: Deploy
 
+# Auto-deploy is handled VPS-side by a cron job that polls origin/prod
+# every minute (see deploy/auto_deploy.sh and docs/BRANCHING.md).
+# The cron approach removed the need for GitHub runners to reach the
+# LAN-only VPS over SSH.
+#
+# This workflow is kept as a manual gate: it runs on prod-branch push
+# to log the deploy event in GitHub's Actions tab (visible audit trail)
+# and optionally pings a public health URL after the VPS has had a
+# chance to pull. No SSH from the runner.
+
 on:
   push:
-    branches: [prod, staging]
+    branches: [prod]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: "Target environment"
-        required: true
-        type: choice
-        options: [staging, prod]
 
 concurrency:
   group: deploy-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  notify:
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup SSH
+      - name: Log deploy intent
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Author: ${{ github.event.head_commit.author.name }}"
+          echo "Message: ${{ github.event.head_commit.message }}"
+          echo ""
+          echo "VPS cron will pull this commit within 60s. Tail"
+          echo "/var/log/grokflow-deploy.log on the VPS to watch."
 
-      - name: Trigger deploy on server
-        run: |
-          ssh -i ~/.ssh/id_ed25519 \
-              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-              "cd /opt/grokflow && BRANCH=${{ github.ref_name }} TAG=${{ github.sha }} bash deploy/deploy.sh"
+      - name: Wait for VPS to pull (90s grace)
+        run: sleep 90
 
-      - name: Smoke check
+      - name: Public health check (optional)
+        env:
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
         run: |
-          curl -fsS --max-time 10 "https://${{ secrets.HEALTH_URL }}/health" | tee /dev/stderr | grep -q '"status":"ok"'
+          if [ -z "$HEALTH_URL" ]; then
+            echo "HEALTH_URL secret not set — skipping smoke check."
+            exit 0
+          fi
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 10 "https://$HEALTH_URL/health" 2>&1 | grep -q '"status":"ok"'; then
+              echo "Health check passed on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i: not yet healthy, retrying in 15s..."
+            sleep 15
+          done
+          echo "Health check failed after 10 attempts."
+          exit 1
