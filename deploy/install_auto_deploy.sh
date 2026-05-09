@@ -17,7 +17,7 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/nguyenlehai-dev/GrokFlow.git}"
 REPO_DIR="${REPO_DIR:-/home/vpsroot/grokflow}"
 BRANCH="${BRANCH:-prod}"
-LOG="${LOG:-/var/log/grokflow-deploy.log}"
+LOG="${LOG:-/home/vpsroot/grokflow-deploy.log}"  # user-writable; no sudo needed
 
 cd "$REPO_DIR"
 
@@ -31,18 +31,19 @@ fi
 # Make sure remote is correct
 git remote set-url origin "$REPO_URL"
 
-# 2. Fetch + reset to origin/<branch>. Untracked files (.env.prod,
-# browser_profiles/, storage/) are preserved by `git reset --hard`.
+# 2. Fetch + sync to origin/<branch>. The dir was previously populated
+# via SFTP deploys, so files exist on disk that match (or don't quite
+# match) what's tracked by origin. We use `checkout -f -B` to:
+#   - create or reset local branch `$BRANCH` to origin/$BRANCH
+#   - force-overwrite tracked files that diverged
+# Untracked files (.env.prod, browser_profiles/, storage/, *.log) are
+# preserved because they're not in the index.
 echo "==> Fetching origin/$BRANCH"
-git fetch origin "$BRANCH"
+git fetch --quiet origin "$BRANCH"
 
-# Create local tracking branch if missing
-if ! git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    git checkout -b "$BRANCH" "origin/$BRANCH"
-else
-    git checkout "$BRANCH"
-    git reset --hard "origin/$BRANCH"
-fi
+echo "==> Syncing working tree to origin/$BRANCH"
+git checkout -f -B "$BRANCH" "origin/$BRANCH"
+git reset --hard "origin/$BRANCH"
 
 # Make scripts executable
 chmod +x deploy/auto_deploy.sh deploy/install_auto_deploy.sh 2>/dev/null || true
@@ -51,9 +52,8 @@ chmod +x deploy/auto_deploy.sh deploy/install_auto_deploy.sh 2>/dev/null || true
 # prevents overlapping runs while a deploy is in progress.
 CRON_LINE="* * * * * $REPO_DIR/deploy/auto_deploy.sh $BRANCH >> $LOG 2>&1"
 
-# Make sure log file exists and is writable
-sudo touch "$LOG" 2>/dev/null || touch "$LOG" 2>/dev/null || true
-sudo chown "$(whoami)" "$LOG" 2>/dev/null || true
+# Ensure log file exists (user-writable, no sudo dance needed)
+touch "$LOG" 2>/dev/null || true
 
 # Append to crontab (idempotent — replaces existing line if present)
 ( crontab -l 2>/dev/null | grep -v "auto_deploy.sh" ; echo "$CRON_LINE" ) | crontab -
