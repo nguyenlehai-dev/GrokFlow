@@ -441,35 +441,87 @@ class GrokProvider(Provider):
                         retryable=True,
                     )
 
-                # Wait for Submit button to become enabled.
-                submit_btn = None
+                # Wait for Submit button to become enabled (signal that React
+                # accepted the prompt input).
+                btn_enabled = False
                 for _ in range(20):
-                    submit_btn = await page.query_selector("button[aria-label='Submit']:not([disabled])")
-                    if submit_btn:
+                    btn_enabled = await page.evaluate(
+                        """() => {
+                            const b = document.querySelector("button[aria-label='Submit']");
+                            return !!b && !b.disabled && b.offsetParent !== null;
+                        }"""
+                    )
+                    if btn_enabled:
                         break
                     await asyncio.sleep(0.5)
+
+                # Try every known submission method until one works. JS click
+                # bypasses Playwright's element-stability checks (which time
+                # out under heavy Chromium load) — it dispatches the click
+                # event directly. We fall back through ElementHandle.click,
+                # keyboard Enter (re-resolving the editor if its handle went
+                # stale), and finally Ctrl+Enter.
                 submitted = False
-                if submit_btn:
+                if btn_enabled:
                     try:
-                        # 5s instead of Playwright's default 30s. When the
-                        # click handler is starved we'd rather bail and use
-                        # the keyboard Enter fallback below than block the
-                        # whole job for 30s.
-                        await submit_btn.click(timeout=5000)
-                        submitted = True
-                        self._log(tag, "submit clicked")
+                        submitted = await page.evaluate(
+                            """() => {
+                                const b = document.querySelector("button[aria-label='Submit']");
+                                if (b && !b.disabled) { b.click(); return true; }
+                                return false;
+                            }"""
+                        )
+                        if submitted:
+                            self._log(tag, "submit via JS click")
                     except Exception as exc:  # noqa: BLE001
-                        self._log(tag, f"submit click failed: {exc}")
-                if not submitted:
-                    # Last resort: keyboard Enter on the prompt element.
+                        self._log(tag, f"JS click failed: {exc}")
+
+                if not submitted and btn_enabled:
                     try:
-                        await prompt_el.focus()
+                        btn = await page.query_selector("button[aria-label='Submit']:not([disabled])")
+                        if btn:
+                            await btn.click(timeout=3000, force=True)
+                            submitted = True
+                            self._log(tag, "submit via ElementHandle force click")
+                    except Exception as exc:  # noqa: BLE001
+                        self._log(tag, f"force click failed: {exc}")
+
+                if not submitted:
+                    # Re-resolve the editor handle in case the DOM shifted
+                    # (post-attach Grok rebuilds the prompt bar). Then send
+                    # Enter via the page-level keyboard which doesn't rely
+                    # on a specific ElementHandle.
+                    try:
+                        fresh_pm = await page.query_selector(
+                            ".tiptap.ProseMirror, .ProseMirror, [contenteditable='true']"
+                        )
+                        if fresh_pm:
+                            await fresh_pm.click(timeout=2000)
+                            await asyncio.sleep(0.1)
                         await page.keyboard.press("Enter")
+                        submitted = True
                         self._log(tag, "submit via Enter fallback")
+                    except Exception as exc:  # noqa: BLE001
+                        self._log(tag, f"Enter fallback failed: {exc}")
+
+                if not submitted:
+                    try:
+                        await page.keyboard.press("Control+Enter")
+                        submitted = True
+                        self._log(tag, "submit via Ctrl+Enter fallback")
                     except Exception:  # noqa: BLE001
-                        return JobResult(success=False, error_code="timeout",
-                                         error_message="Submit button never enabled — prompt may not have registered",
-                                         retryable=True)
+                        pass
+
+                if not submitted:
+                    return JobResult(
+                        success=False, error_code="timeout",
+                        error_message=(
+                            "Submit button never accepted click after 4 attempts "
+                            "(JS click, force click, Enter, Ctrl+Enter). "
+                            "Likely Chromium overload — sẽ retry."
+                        ),
+                        retryable=True,
+                    )
 
                 # Poll BOTH images and videos simultaneously. For video jobs we
                 # care about <video> elements with non-empty src; for image jobs
