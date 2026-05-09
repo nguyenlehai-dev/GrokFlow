@@ -111,3 +111,4 @@ vendor(docker-compose): bump redis to latest
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full rules.
+
