@@ -51,10 +51,10 @@ function Stat({ label, value, accent, sub }: {
 }
 
 export function DashboardPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: fetchCounts,
-    refetchInterval: 5000,  // live update
+    refetchInterval: 5000,
   });
 
   return (
@@ -63,35 +63,39 @@ export function DashboardPage() {
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <span className="text-xs text-slate-400">Auto-refresh mỗi 5s</span>
       </div>
-      {isLoading ? (
+      {isLoading && !data ? (
         <p className="text-slate-500">Đang tải...</p>
-      ) : (
+      ) : error && !data ? (
+        <div className="card text-rose-600 text-sm">
+          Không tải được dashboard: {(error as any)?.message ?? "lỗi không xác định"}
+        </div>
+      ) : data ? (
         <>
           <div className="grid gap-4 md:grid-cols-4">
             <Stat
               label="Slot pool"
-              value={`${data!.usedSlots}/${data!.totalSlots}`}
-              sub={`${data!.profilesLoggedIn} profile sẵn sàng`}
-              accent={data!.totalSlots > 0 && data!.usedSlots / data!.totalSlots >= 1 ? "text-rose-600"
-                : data!.totalSlots > 0 && data!.usedSlots / data!.totalSlots >= 0.7 ? "text-amber-600"
+              value={`${data.usedSlots}/${data.totalSlots}`}
+              sub={`${data.profilesLoggedIn} profile sẵn sàng`}
+              accent={data.totalSlots > 0 && data.usedSlots / data.totalSlots >= 1 ? "text-rose-600"
+                : data.totalSlots > 0 && data.usedSlots / data.totalSlots >= 0.7 ? "text-amber-600"
                 : "text-emerald-600"}
             />
-            <Stat label="Đang chờ" value={data!.jobsQueued} accent="text-blue-600" />
-            <Stat label="Đang chạy" value={data!.jobsRunning} accent="text-amber-600" />
+            <Stat label="Đang chờ" value={data.jobsQueued} accent="text-blue-600" />
+            <Stat label="Đang chạy" value={data.jobsRunning} accent="text-amber-600" />
             <Stat
               label="Profile cần login lại"
-              value={data!.needLogin}
-              accent={data!.needLogin > 0 ? "text-rose-600" : "text-slate-900"}
+              value={data.needLogin}
+              accent={data.needLogin > 0 ? "text-rose-600" : "text-slate-900"}
             />
           </div>
           <div className="grid gap-4 md:grid-cols-4">
-            <Stat label="Tổng job" value={data!.jobsTotal} />
-            <Stat label="Thành công" value={data!.jobsSuccess} accent="text-emerald-600" />
-            <Stat label="Lỗi" value={data!.jobsFailed} accent="text-rose-600" />
-            <Stat label="API Keys" value={data!.apiKeys} />
+            <Stat label="Tổng job" value={data.jobsTotal} />
+            <Stat label="Thành công" value={data.jobsSuccess} accent="text-emerald-600" />
+            <Stat label="Lỗi" value={data.jobsFailed} accent="text-rose-600" />
+            <Stat label="API Keys" value={data.apiKeys} />
           </div>
         </>
-      )}
+      ) : null}
     </div>
   );
 }
