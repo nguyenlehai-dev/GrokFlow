@@ -538,11 +538,29 @@ class GrokProvider(Provider):
                         retryable=True,
                     )
 
-                # Post-submit sanity check: Grok normally navigates to
-                # /imagine/post/<id> within a few seconds OR shows a
-                # rate-limit toast. If neither happens we WAIT longer
-                # (some accounts are slow) but log what's happening.
-                # Slot-paid accounts may take 5-15s before nav.
+                # Track network calls right around submit so we can detect
+                # silent shadow-bans (Grok's anti-abuse system that drops
+                # generate calls but still fires telemetry, with no UI
+                # feedback). Telemetry endpoints we expect regardless:
+                #   /api/log_metric
+                #   /_data/v1/a/t/?...
+                # A real generate triggers calls to /api/conversation,
+                # /api/imagine, or /rest/app-chat/* — none of which fire
+                # when shadow-banned.
+                generate_call_seen = {"hit": False}
+                generate_patterns = re.compile(
+                    r"/(api/(imagine|conversation|rest/app-chat)|rest/app-chat)/"
+                )
+
+                def _on_request(req):
+                    try:
+                        if generate_patterns.search(req.url):
+                            generate_call_seen["hit"] = True
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                page.on("request", _on_request)
+
                 navigated = False
                 for _ in range(20):
                     await asyncio.sleep(1)
@@ -551,38 +569,43 @@ class GrokProvider(Provider):
                         self._log(tag, f"navigated to {page.url}")
                         break
                 if not navigated:
+                    # If the click didn't even reach Grok's generate endpoint,
+                    # the account is shadow-banned (anti-abuse silent drop).
+                    # No UI feedback, no error toast — only telemetry pings.
+                    if not generate_call_seen["hit"]:
+                        page.remove_listener("request", _on_request)
+                        return JobResult(
+                            success=False, error_code="provider_blocked",
+                            error_message=(
+                                "Grok shadow-banned account: submit click did NOT "
+                                "trigger any generate API call (only telemetry). "
+                                "Account đã bị Grok throttle silent — đợi 24h, "
+                                "đổi account, hoặc upgrade Pro/Heavy."
+                            ),
+                            retryable=False,  # terminal — retrying won't help
+                        )
+
                     # Sidebar promotional text "Upgrade to SuperGrok" is
-                    # ALWAYS present — must NOT match. Look only for
-                    # specific quota / throttle messages that appear as
-                    # toasts or inline error messages.
+                    # ALWAYS present — must NOT match.
                     body_tail = (await page.evaluate(
                         "() => (document.body.innerText || '').slice(-3000).toLowerCase()"
                     ))
-                    # Specific phrases ONLY emitted by Grok when actually
-                    # blocking a request. "upgrade to" alone is too broad
-                    # (matches the sidebar promo).
                     quota_phrases = [
                         "you've reached your", "you have reached your",
                         "daily limit reached", "daily limit has been reached",
-                        "rate limit exceeded",
-                        "too many requests",
-                        "try again in",
-                        "out of credits",
-                        "quota exceeded",
-                        "please slow down",
-                        "monthly limit",
+                        "rate limit exceeded", "too many requests",
+                        "try again in", "out of credits",
+                        "quota exceeded", "please slow down", "monthly limit",
                     ]
                     found = next((h for h in quota_phrases if h in body_tail), None)
                     if found:
                         return JobResult(
                             success=False, error_code="rate_limited",
-                            error_message=(
-                                f"Grok rejected submit — '{found}'. Đợi cooldown "
-                                f"hoặc dùng account khác."
-                            ),
+                            error_message=f"Grok rejected submit — '{found}'.",
                             retryable=True,
                         )
-                    self._log(tag, f"no /post/ nav after 20s, still on {page.url} — proceeding to poll anyway")
+                    self._log(tag, f"no /post/ nav but generate API was called — slow account, polling anyway")
+                page.remove_listener("request", _on_request)
 
                 # Poll BOTH images and videos simultaneously. For video jobs we
                 # care about <video> elements with non-empty src; for image jobs
