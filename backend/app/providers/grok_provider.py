@@ -359,71 +359,75 @@ class GrokProvider(Provider):
                 seen_urls = await self._collect_image_urls(page)
                 seen_video_urls = await self._collect_video_urls(page)
 
-                # ProseMirror is a controlled contenteditable — clearing
-                # innerHTML breaks its internal state, so we use a `paste` event
-                # which ProseMirror handles natively (transactionally inserts
-                # text into its document model and updates React state).
+                # ProseMirror needs REAL keyboard events (keydown/press/up) to
+                # trigger its keymap plugin and update the editor's internal
+                # transaction state. Without that, even if pm.innerText shows
+                # the text, React's onSubmit reads view.state.doc.textContent
+                # (which stays empty) and the submit becomes a no-op.
                 #
-                # `click()` sets the cursor inside the editor (ProseMirror's
-                # view.focus()), and dispatching paste targets THIS page's CDP
-                # session so concurrent tabs don't interfere with each other.
+                # Strategy:
+                #   1. click() to focus + place cursor inside the editor
+                #   2. keyboard.type with small delay → fires real key events
+                #      that ProseMirror's input plugin captures and dispatches
+                #      transactions for
+                #   3. verify by reading pm.innerText
+                #   4. if still empty, fall back to paste event then insert_text
                 try:
-                    await prompt_el.click()
+                    await prompt_el.click(timeout=2000)
                 except Exception:  # noqa: BLE001
-                    await prompt_el.focus()
-                await asyncio.sleep(0.1)
-
-                injected = await page.evaluate(
-                    """(args) => {
-                        const [el, text] = args;
-                        if (!el) return false;
-                        // First select-all + delete via execCommand so the new paste
-                        // replaces (not appends) any leftover content.
-                        try { document.execCommand('selectAll', false); } catch (e) {}
-                        try { document.execCommand('delete', false); } catch (e) {}
-                        // Construct a synthetic paste event ProseMirror will accept.
-                        const dt = new DataTransfer();
-                        dt.setData('text/plain', text);
-                        const ev = new ClipboardEvent('paste', {
-                            bubbles: true, cancelable: true, clipboardData: dt,
-                        });
-                        try { el.focus(); } catch (e) {}
-                        const ok = el.dispatchEvent(ev);
-                        // Some builds of ProseMirror only listen on the inner editor; fall
-                        // back to dispatching on the deepest contenteditable child too.
-                        const inner = el.querySelector('[contenteditable=\"true\"]') || el;
-                        if (inner !== el) inner.dispatchEvent(ev);
-                        return ok;
-                    }""",
-                    [prompt_el, prompt_text],
-                )
-                self._log(tag, f"prompt injected via paste (len={len(prompt_text)}, ok={injected})")
-                await asyncio.sleep(0.4)
-
-                # Verify ProseMirror actually accepted the paste. If empty, try
-                # a keyboard.insert_text fallback (works on logged-in editor
-                # without ProseMirror clipboard handlers).
-                pm_text = await page.evaluate(
-                    """() => {
-                        const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
-                        return pm ? (pm.innerText || '').trim() : '';
-                    }"""
-                )
-                if not pm_text:
-                    self._log(tag, "paste produced empty PM, trying insert_text fallback")
                     try:
                         await prompt_el.focus()
-                        await asyncio.sleep(0.1)
-                        await page.keyboard.insert_text(prompt_text)
-                        await asyncio.sleep(0.3)
-                        pm_text = await page.evaluate(
-                            """() => {
-                                const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
-                                return pm ? (pm.innerText || '').trim() : '';
-                            }"""
-                        )
                     except Exception:  # noqa: BLE001
                         pass
+                await asyncio.sleep(0.15)
+
+                # Slow type: each character → keydown/press/up events that
+                # ProseMirror's plugin chain handles and updates state for.
+                # Per-tab CDP target — concurrent tabs each get their own
+                # event stream, no focus contention.
+                pm_text = ""
+                try:
+                    await page.keyboard.type(prompt_text, delay=12)
+                    await asyncio.sleep(0.3)
+                    pm_text = await page.evaluate(
+                        """() => {
+                            const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
+                            return pm ? (pm.innerText || '').trim() : '';
+                        }"""
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._log(tag, f"keyboard.type failed: {exc}")
+
+                self._log(tag, f"prompt typed via keyboard.type (len={len(prompt_text)}, pm_filled={bool(pm_text)})")
+
+                # Fallback paste-event if typing somehow produced nothing.
+                if not pm_text:
+                    self._log(tag, "keyboard.type produced empty PM, trying paste event")
+                    injected = await page.evaluate(
+                        """(args) => {
+                            const [el, text] = args;
+                            if (!el) return false;
+                            const dt = new DataTransfer();
+                            dt.setData('text/plain', text);
+                            const ev = new ClipboardEvent('paste', {
+                                bubbles: true, cancelable: true, clipboardData: dt,
+                            });
+                            try { el.focus(); } catch (e) {}
+                            const ok = el.dispatchEvent(ev);
+                            const inner = el.querySelector('[contenteditable=\"true\"]') || el;
+                            if (inner !== el) inner.dispatchEvent(ev);
+                            return ok;
+                        }""",
+                        [prompt_el, prompt_text],
+                    )
+                    await asyncio.sleep(0.4)
+                    pm_text = await page.evaluate(
+                        """() => {
+                            const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
+                            return pm ? (pm.innerText || '').trim() : '';
+                        }"""
+                    )
+                    self._log(tag, f"paste fallback: ok={injected}, pm_filled={bool(pm_text)}")
 
                 if not pm_text:
                     # Detect logged-out state: page shows Sign in/Sign up AND
@@ -522,6 +526,42 @@ class GrokProvider(Provider):
                         ),
                         retryable=True,
                     )
+
+                # Post-submit sanity check: Grok normally navigates to
+                # /imagine/post/<id> within a few seconds OR shows a
+                # rate-limit toast. If neither happens after 12s the
+                # submit was silently dropped (most often = account quota
+                # exhausted on free tier).
+                pre_submit_url = page.url
+                navigated = False
+                for _ in range(12):
+                    await asyncio.sleep(1)
+                    if "/imagine/post/" in (page.url or ""):
+                        navigated = True
+                        self._log(tag, f"navigated to {page.url}")
+                        break
+                if not navigated:
+                    # Look for explicit error or quota text
+                    body_tail = (await page.evaluate(
+                        "() => (document.body.innerText || '').slice(-3000).toLowerCase()"
+                    ))
+                    quota_hits = [
+                        "you've reached", "you have reached", "daily limit",
+                        "rate limit", "too many requests", "try again",
+                        "upgrade to", "out of credit", "quota",
+                    ]
+                    found = next((h for h in quota_hits if h in body_tail), None)
+                    if found:
+                        return JobResult(
+                            success=False, error_code="rate_limited",
+                            error_message=(
+                                f"Grok rejected submit silently — quota/throttle "
+                                f"text matched: '{found}'. Đợi cooldown hoặc dùng "
+                                f"account khác."
+                            ),
+                            retryable=True,
+                        )
+                    self._log(tag, f"WARN no /post/ nav after 12s, still on {page.url}")
 
                 # Poll BOTH images and videos simultaneously. For video jobs we
                 # care about <video> elements with non-empty src; for image jobs
