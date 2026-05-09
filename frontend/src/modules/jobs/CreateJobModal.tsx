@@ -56,9 +56,10 @@ const SIZES_FROM_ASPECT: Record<string, string> = {
   "2:3":  "720x1080",
 };
 
-const GROK_MODELS = ["aurora", "grok-2-image", "grok-3-image"];
-const FLOW_MODELS = ["veo-3", "veo-2"];
-const STYLES = ["natural", "vivid", "anime", "photographic"];
+// Grok web UI doesn't expose model / style / variant-count / seed pickers.
+// Form schema still includes those fields so the existing Pydantic
+// JobCreate payload validates, but they're hidden from the UI to match
+// Grok's actual prompt bar.
 // Grok Imagine video — durations match the LIVE UI exactly: 6s | 10s.
 const VIDEO_DURATIONS = [6, 10];
 const VIDEO_RESOLUTIONS = ["480p", "720p"] as const;
@@ -321,22 +322,6 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* Image-only Style (kept as a prompt hint, not a Grok button) */}
-          {jobType === "image" && (
-            <div>
-              <label className="text-sm font-medium">Style</label>
-              <select className="input" {...register("style")}>
-                {STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          )}
-
-          <div>
-            <label className="text-sm font-medium">Model</label>
-            <select className="input" {...register("model")}>
-              {(provider === "grok" ? GROK_MODELS : FLOW_MODELS).map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
         </div>
 
         {jobType === "video" && (
@@ -354,16 +339,9 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-sm font-medium">Số biến thể (n)</label>
-            <input type="number" className="input" min={1} max={4} {...register("n", { valueAsNumber: true })} />
-          </div>
-          <div>
-            <label className="text-sm font-medium">Seed (optional, để 0 = random)</label>
-            <input type="number" className="input" placeholder="0" {...register("seed", { valueAsNumber: true })} />
-          </div>
-        </div>
+        <p className="text-xs text-slate-500">
+          Grok luôn render <strong>4 variants</strong> mỗi job — sẽ hiện đủ trong gallery sau khi xong.
+        </p>
 
         <div className="flex justify-end gap-2 pt-3 border-t">
           <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
