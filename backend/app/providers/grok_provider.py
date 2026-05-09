@@ -202,43 +202,35 @@ class GrokProvider(Provider):
                 # parked on a non-grok URL (e.g., abandoned redirect) OR on
                 # grok.com with an empty body for some time. Skip about:blank
                 # entirely; they're either brand new or already invisible.
+                # Aggressive tab GC: close every grok.com tab from previous
+                # worker runs. Each `_run_image` invocation needs ONLY ONE
+                # fresh tab (created on the next line via `context.new_page`).
+                # Tabs from past attempts/retries serve no purpose and just
+                # starve Chromium's renderer thread (193% CPU on a 4-tab
+                # /imagine pile-up = no React mount → wait_for_selector
+                # times out → false 'rate_limited' verdict).
+                #
+                # We skip:
+                #   - about:blank (could be a sibling tab being prepared by
+                #     another concurrent worker)
+                #   - non-grok URLs we don't own (just leave them alone)
                 try:
                     pages = list(context.pages)
-                    if len(pages) > 4:
-                        gc_count = 0
-                        for old in pages[:-4]:  # keep newest 4 untouched
-                            try:
-                                u = old.url or ""
-                                if not u or u == "about:blank":
-                                    continue  # skip — could be a fresh tab
-                                if "grok.com" not in u and "x.ai" not in u:
-                                    await asyncio.wait_for(old.close(), timeout=2)
-                                    gc_count += 1
-                                    continue
-                                # /imagine/post/<id> = a completed result page
-                                # left over from a previous job. We've already
-                                # downloaded what we needed from it; close to
-                                # free the renderer process.
-                                if "/imagine/post/" in u:
-                                    await asyncio.wait_for(old.close(), timeout=2)
-                                    gc_count += 1
-                                    continue
-                                # On grok.com homepage with empty body — broken
-                                # tab from a crashed run.
-                                try:
-                                    body_len = await old.evaluate(
-                                        "() => (document.body && document.body.innerText || '').length",
-                                        timeout=1500,
-                                    )
-                                except Exception:  # noqa: BLE001
-                                    body_len = -1
-                                if body_len == 0:
-                                    await asyncio.wait_for(old.close(), timeout=2)
-                                    gc_count += 1
-                            except Exception:  # noqa: BLE001
-                                pass
-                        if gc_count:
-                            self._log(tag, f"tab-GC closed {gc_count} stale tab(s) (was {len(pages)})")
+                    gc_count = 0
+                    for old in pages:
+                        try:
+                            u = old.url or ""
+                            if not u or u == "about:blank":
+                                continue
+                            if "grok.com" not in u and "x.ai" not in u:
+                                continue  # not ours; leave alone
+                            # All grok tabs from prior runs go.
+                            await asyncio.wait_for(old.close(), timeout=2)
+                            gc_count += 1
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if gc_count:
+                        self._log(tag, f"tab-GC closed {gc_count} grok.com tab(s) before opening new")
                 except Exception:  # noqa: BLE001
                     pass
 
