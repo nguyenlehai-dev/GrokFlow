@@ -344,7 +344,20 @@ class GrokProvider(Provider):
                     if opts.get("duration"):
                         try:
                             await self._set_duration(page, int(opts["duration"]))
-                            self._log(tag, f"duration set to {opts['duration']}s")
+                            # Verify the duration radio is now aria-checked.
+                            actual = await page.evaluate(
+                                """() => {
+                                    const r = Array.from(document.querySelectorAll(
+                                        '[role=radio]'
+                                    )).find(e => e.getAttribute('aria-checked') === 'true'
+                                                 && /^\\d+s$/.test((e.innerText||'').trim()));
+                                    return r ? r.innerText.trim() : null;
+                                }"""
+                            )
+                            if actual and actual != f"{opts['duration']}s":
+                                self._log(tag, f"WARN duration: requested {opts['duration']}s, Grok shows {actual}")
+                            else:
+                                self._log(tag, f"duration set to {opts['duration']}s (verified={actual})")
                         except Exception as exc:  # noqa: BLE001
                             self._log(tag, f"duration set failed: {exc}")
 
@@ -973,41 +986,65 @@ class GrokProvider(Provider):
                 pass
 
     @staticmethod
-    async def _set_segmented(page, label: str) -> None:
-        """Click a Grok segmented-control button by exact label text.
-
-        Used for Speed/Quality, Image/Video, and similar toggles. JS-based
-        click works per-tab and doesn't depend on OS keyboard focus.
+    async def _click_by_label(page, candidates: list[str]) -> str | None:
+        """Click the first visible button/radio whose innerText exactly
+        matches one of `candidates`. Uses Playwright's real CDP click
+        (trusted event) so React state managers actually fire — JS
+        `b.click()` produces isTrusted=false which Grok's radio handlers
+        sometimes ignore, leaving e.g. duration stuck on the previous
+        selection (the '10s clicked but Grok rendered 6s' bug).
         """
-        await page.evaluate(
-            """(target) => {
-                const visible = (el) => el && el.offsetParent !== null;
-                const btns = Array.from(document.querySelectorAll('button, [role="tab"], [role="radio"]'));
-                const b = btns.find(b => (b.innerText || '').trim() === target && visible(b));
-                if (b) { b.click(); return true; }
-                return false;
-            }""",
-            label,
-        )
-        await asyncio.sleep(0.4)
+        # Find the matching element from the page first
+        try:
+            handle = await page.evaluate_handle(
+                """(targets) => {
+                    const visible = (el) => el && el.offsetParent !== null;
+                    const els = Array.from(document.querySelectorAll(
+                        'button, [role=tab], [role=radio], [role=menuitem], [role=option]'
+                    ));
+                    for (const t of targets) {
+                        const m = els.find(e => (e.innerText || '').trim() === t && visible(e));
+                        if (m) return m;
+                    }
+                    return null;
+                }""",
+                candidates,
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            el = handle.as_element()
+            if el is None:
+                return None
+            # bbox + real mouse click → trusted event
+            bbox = await el.bounding_box()
+            if bbox:
+                cx = bbox["x"] + bbox["width"] / 2
+                cy = bbox["y"] + bbox["height"] / 2
+                await page.mouse.click(cx, cy)
+                await asyncio.sleep(0.4)
+                # Read the matched label back so we can log what we hit
+                matched = await el.evaluate("(e) => (e.innerText || '').trim()")
+                return matched
+            # Fallback: ElementHandle.click (still trusted via CDP)
+            await el.click(timeout=3000, force=True)
+            await asyncio.sleep(0.4)
+            return await el.evaluate("(e) => (e.innerText || '').trim()")
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    async def _set_segmented(page, label: str) -> None:
+        await GrokProvider._click_by_label(page, [label])
 
     @staticmethod
     async def _set_duration(page, seconds: int) -> None:
-        """Click a duration option (e.g., 6s/15s) on Grok video controls."""
-        target_labels = [f"{seconds}s", f"{seconds} sec", f"{seconds} seconds", str(seconds)]
-        await page.evaluate(
-            """(targets) => {
-                const visible = (el) => el && el.offsetParent !== null;
-                const els = Array.from(document.querySelectorAll('button, [role=menuitem], [role=option], [role=radio]'));
-                for (const t of targets) {
-                    const m = els.find(e => (e.innerText || '').trim() === t && visible(e));
-                    if (m) { m.click(); return true; }
-                }
-                return false;
-            }""",
-            target_labels,
+        # Grok's video bar uses '6s' / '10s' exactly. Keep older label
+        # variants as fallbacks in case of UI revisions.
+        await GrokProvider._click_by_label(
+            page,
+            [f"{seconds}s", f"{seconds} sec", f"{seconds} seconds"],
         )
-        await asyncio.sleep(0.3)
 
     @staticmethod
     async def _attach_files(page, attachments: list) -> None:
