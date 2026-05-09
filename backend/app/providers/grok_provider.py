@@ -739,15 +739,18 @@ class GrokProvider(Provider):
 
     @staticmethod
     async def _collect_image_urls(page) -> set[str]:
-        # ONLY match URLs from Grok's generated-output CDN. We deliberately
-        # exclude `assets.grok.com/users/.../content` because that pattern
-        # also covers the user's saved gallery, attached upload previews,
-        # and "Most recent favorite" lookback — all of which would be picked
-        # up as false-positive results (especially fatal for image-to-image
-        # where the upload preview matches the same prefix as past favorites).
+        # Match ONLY Grok's generated-output CDN, AND only when the <img> is
+        # actually in a chat-result container — not in a sidebar thumbnail,
+        # gallery favorite, or prompt-bar control.
         #
-        # Newly generated images live exclusively under:
-        #   imagine-public.x.ai/imagine-public/images/<uuid>.jpg
+        # Generated outputs live at:
+        #   imagine-public.x.ai/imagine-public/images/<uuid>.png|.jpg
+        # But that same CDN also hosts the "Most recent favorite" lookback
+        # thumbnail Grok shows in the prompt bar, the user's saved gallery,
+        # and the public template/showcase tiles. We disambiguate by:
+        #   (a) excluding known decorative alt text (favorite, avatar, emoji)
+        #   (b) excluding images inside <button> / <form> containers (those
+        #       are UI controls — gallery thumbs, attach preview, etc.)
         urls = await page.evaluate(
             """() => {
                 const out = new Set();
@@ -755,19 +758,27 @@ class GrokProvider(Provider):
                     /imagine-public\\.x\\.ai\\/imagine-public\\/images\\//,
                     /imgen\\./,  // legacy Grok output
                 ];
-                const exclude = [
+                const altExclude = [
+                    /favorite/i,        // 'Most recent favorite' sidebar thumb
                     /avatar/i, /emoji/i,
+                    /generated image/i, // Grok's public showcase tile alt
+                ];
+                const urlExclude = [
                     /cookielaw|onetrust/i,
-                    /share-images\\//,        // template gallery decoration
-                    /share-videos\\/.*thumbnail/, // public video thumbs
+                    /share-images\\//,
+                    /share-videos\\/.*thumbnail/,
                 ];
                 document.querySelectorAll('img').forEach(i => {
                     const s = i.src || '';
                     if (!s.startsWith('http')) return;
-                    if (exclude.some(rx => rx.test(s) || rx.test(i.alt || ''))) return;
-                    if (generatedHostPatterns.some(rx => rx.test(s))) {
-                        out.add(s);
-                    }
+                    if (urlExclude.some(rx => rx.test(s))) return;
+                    if (altExclude.some(rx => rx.test(i.alt || ''))) return;
+                    if (!generatedHostPatterns.some(rx => rx.test(s))) return;
+                    // Skip if inside a button/form/aside — these are UI
+                    // controls (gallery picker, attach preview), not chat
+                    // result images.
+                    if (i.closest('button, form, aside, header, nav')) return;
+                    out.add(s);
                 });
                 return Array.from(out);
             }"""
