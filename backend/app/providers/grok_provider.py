@@ -217,9 +217,11 @@ class GrokProvider(Provider):
                 page = await context.new_page()
                 self._log(tag, "new tab opened")
 
-                # Route to dedicated Imagine URL: /imagine for image, /imagine/video for video.
-                target_url = self.GROK_IMAGINE_VIDEO if job.job_type == "video" else self.GROK_IMAGINE
-                self._log(tag, f"goto {target_url}")
+                # Always go to /imagine — the dedicated /imagine/video URL
+                # was deprecated in late 2025 (renders an empty page now).
+                # Image vs Video is selected via the in-page radio toggle.
+                target_url = self.GROK_IMAGINE
+                self._log(tag, f"goto {target_url} (job_type={job.job_type})")
                 # Serialize the goto step across concurrent jobs on this
                 # Chromium — N parallel React boots can deadlock the renderer
                 # and trigger ERR_ABORTED / TimeoutError storms.
@@ -282,21 +284,30 @@ class GrokProvider(Provider):
                     except Exception:  # noqa: BLE001
                         continue
 
-                # Switch to Image / Video tab segmented control on Imagine.
+                # Switch Image / Video mode via the radio toggle in the
+                # prompt bar. Buttons have role=radio + aria-checked. We
+                # only click if the target isn't already checked, and we
+                # verify the switch happened.
                 want_video = job.job_type == "video"
+                target_tab = "Video" if want_video else "Image"
                 try:
-                    target_tab = "Video" if want_video else "Image"
-                    await page.evaluate(
-                        f"""(target) => {{
-                            const btns = Array.from(document.querySelectorAll('button'));
-                            const b = btns.find(b => (b.innerText||'').trim() === target && b.offsetParent !== null);
-                            if (b) b.click();
-                        }}""",
+                    switched = await page.evaluate(
+                        """(target) => {
+                            const radios = Array.from(document.querySelectorAll(
+                                "[role=radio]"
+                            )).filter(b => b.offsetParent !== null);
+                            const b = radios.find(r => (r.innerText||"").trim() === target);
+                            if (!b) return { found: false };
+                            const already = b.getAttribute("aria-checked") === "true";
+                            if (!already) b.click();
+                            return { found: true, already, after: b.getAttribute("aria-checked") };
+                        }""",
                         target_tab,
                     )
-                    await asyncio.sleep(0.5)
-                except Exception:  # noqa: BLE001
-                    pass
+                    self._log(tag, f"mode toggle '{target_tab}': {switched}")
+                    await asyncio.sleep(0.6)
+                except Exception as exc:  # noqa: BLE001
+                    self._log(tag, f"mode toggle failed: {exc}")
 
                 # Apply UI controls from options. Prefer explicit aspect/quality/
                 # duration over the size-derived ratio.

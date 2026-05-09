@@ -226,13 +226,21 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
         {(jobType === "image" || (provider === "grok" && jobType === "video")) && (
           <div>
             <label className="text-sm font-medium">
-              Ảnh tham chiếu ({jobType === "video" ? "image-to-video" : "style reference"}, optional)
+              Ảnh tham chiếu (optional) — quyết định mode:
             </label>
-            {jobType === "image" && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
-                ⚠ Grok dùng ảnh này làm <strong>style/composition reference</strong> — sẽ generate ảnh MỚI dựa trên prompt, KHÔNG edit pixel ảnh gốc. Để đổi màu/sửa chi tiết của ảnh có sẵn, dùng tính năng Edit của Grok trên ảnh đã tạo (chưa wire vào GrokFlow).
-              </p>
-            )}
+            <p className="text-xs text-slate-600 mt-1">
+              {jobType === "image" ? (
+                <>
+                  • Không upload → <strong>prompt → image</strong> (text-to-image)<br />
+                  • Có upload → <strong>image + prompt → image</strong> (Grok dùng ảnh làm style/composition reference, generate ảnh mới)
+                </>
+              ) : (
+                <>
+                  • Không upload → <strong>prompt → video</strong> (text-to-video)<br />
+                  • Có upload → <strong>image → video</strong> (Grok animate ảnh upload theo prompt)
+                </>
+              )}
+            </p>
             <div className="flex items-center gap-3 mt-1">
               {inputImage ? (
                 <div className="relative">
