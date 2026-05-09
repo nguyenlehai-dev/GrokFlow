@@ -12,12 +12,28 @@ import asyncio
 import re
 import time
 
+import asyncio as _asyncio_for_lock
+
 import httpx
 from playwright.async_api import TimeoutError as PWTimeout
 from playwright.async_api import async_playwright
 
 from app.browser import vnc_manager
 from app.providers.base import JobInput, JobResult, Provider, ResultFile
+
+# Per-profile navigation lock: page.goto() on a busy Chromium triggers
+# a render-thread storm if many concurrent tabs each try to bootstrap React
+# at once. Serializing the navigation step alone keeps tail latency bounded.
+# Other phases (typing, polling) remain fully concurrent.
+_NAV_LOCKS: dict[str, _asyncio_for_lock.Lock] = {}
+
+
+def _nav_lock(profile_id: str) -> _asyncio_for_lock.Lock:
+    lock = _NAV_LOCKS.get(profile_id)
+    if lock is None:
+        lock = _asyncio_for_lock.Lock()
+        _NAV_LOCKS[profile_id] = lock
+    return lock
 
 
 PROMPT_TEXTAREA = [
@@ -131,7 +147,18 @@ class GrokProvider(Provider):
         self._log(tag, "start: connect_over_cdp")
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.connect_over_cdp(ws_url, timeout=10000)
+                # Bigger CDP-connect timeout: when Chromium is overloaded the
+                # initial WS handshake can take >5s. We catch PWTimeout below
+                # and map to rate_limited (long backoff) instead of looping
+                # immediately.
+                try:
+                    browser = await p.chromium.connect_over_cdp(ws_url, timeout=20000)
+                except PWTimeout:
+                    return JobResult(
+                        success=False, error_code="rate_limited",
+                        error_message="CDP connect timed out — Chromium is overloaded",
+                        retryable=True,
+                    )
                 context = browser.contexts[0] if browser.contexts else None
                 if not context:
                     await browser.close()
@@ -139,19 +166,34 @@ class GrokProvider(Provider):
                                      error_message="No browser context found",
                                      retryable=True)
 
-                # Stale-tab GC: drop any tab parked on grok.com that isn't the
-                # most recent N. Keeps Chromium memory bounded across many runs.
-                # Iframes (Stripe, etc.) are NOT in `context.pages`, so this
-                # count reflects real tabs only.
+                # Stale-tab GC. CRITICAL: another in-flight worker task may be
+                # mid-evaluate on a tab; if we close it, that task throws
+                # TargetClosedError. So we ONLY close tabs that are clearly
+                # idle (empty body / not a grok.com page / about:blank).
+                # Active worker tabs always have grok.com loaded with content.
                 try:
                     pages = list(context.pages)
-                    MAX_KEEP_TABS = 4
-                    if len(pages) > MAX_KEEP_TABS:
+                    if len(pages) > 4:
                         gc_count = 0
-                        for old in pages[:-MAX_KEEP_TABS]:
+                        for old in pages[:-4]:  # keep newest 4 untouched
                             try:
-                                await old.close()
-                                gc_count += 1
+                                u = old.url or ""
+                                if not u or u == "about:blank" or "grok.com" not in u:
+                                    await old.close()
+                                    gc_count += 1
+                                    continue
+                                # Ping the tab — if body is empty / unreachable,
+                                # it's truly stale (worker process died mid-job).
+                                try:
+                                    body_len = await old.evaluate(
+                                        "() => (document.body && document.body.innerText || '').length",
+                                        timeout=2000,
+                                    )
+                                except Exception:  # noqa: BLE001
+                                    body_len = 0
+                                if body_len < 50:
+                                    await old.close()
+                                    gc_count += 1
                             except Exception:  # noqa: BLE001
                                 pass
                         if gc_count:
@@ -159,22 +201,40 @@ class GrokProvider(Provider):
                 except Exception:  # noqa: BLE001
                     pass
 
-                # Always open a NEW tab — multi-tab support: many jobs can run
-                # in parallel against the same Chromium / same profile.
                 page = await context.new_page()
                 self._log(tag, "new tab opened")
 
                 # Route to dedicated Imagine URL: /imagine for image, /imagine/video for video.
                 target_url = self.GROK_IMAGINE_VIDEO if job.job_type == "video" else self.GROK_IMAGINE
                 self._log(tag, f"goto {target_url}")
+                # Serialize the goto step across concurrent jobs on this
+                # Chromium — N parallel React boots can deadlock the renderer
+                # and trigger ERR_ABORTED / TimeoutError storms.
+                lock = _nav_lock(profile_id)
                 try:
-                    await page.goto(target_url, wait_until="domcontentloaded",
-                                    timeout=self.NAV_TIMEOUT_MS)
-                    await asyncio.sleep(2)  # let SPA render
+                    async with lock:
+                        await page.goto(target_url, wait_until="domcontentloaded",
+                                        timeout=self.NAV_TIMEOUT_MS)
+                        await asyncio.sleep(2)  # let SPA render
                 except PWTimeout:
-                    return JobResult(success=False, error_code="timeout",
-                                     error_message="Navigation timed out",
-                                     retryable=True)
+                    # Navigation timeout means Chromium itself is overloaded.
+                    # Mark this as rate_limited (longer backoff) so we don't
+                    # immediately spawn another tab and worsen the cascade.
+                    return JobResult(
+                        success=False, error_code="rate_limited",
+                        error_message=("Navigation timed out — Chromium is overloaded. "
+                                       "Reduce profile.max_concurrent_jobs or wait."),
+                        retryable=True,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    msg = str(exc)
+                    if "ERR_ABORTED" in msg or "ERR_FAILED" in msg or "net::" in msg:
+                        return JobResult(
+                            success=False, error_code="rate_limited",
+                            error_message=f"Navigation aborted: {msg[:120]}",
+                            retryable=True,
+                        )
+                    raise
 
                 title = await page.title()
                 if "Just a moment" in title or "Cloudflare" in title:
