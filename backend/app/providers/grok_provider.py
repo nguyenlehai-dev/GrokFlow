@@ -155,11 +155,18 @@ class GrokProvider(Provider):
                 # and map to rate_limited (long backoff) instead of looping
                 # immediately.
                 try:
-                    browser = await p.chromium.connect_over_cdp(ws_url, timeout=20000)
+                    # 12s — long enough for an idle Chromium, short enough
+                    # that we fail fast and retry instead of hanging forever
+                    # when ghost WS sessions are queued.
+                    browser = await p.chromium.connect_over_cdp(ws_url, timeout=12000)
                 except PWTimeout:
                     return JobResult(
                         success=False, error_code="rate_limited",
-                        error_message="CDP connect timed out — Chromium is overloaded",
+                        error_message=(
+                            "CDP connect timed out — Chromium busy or has stale "
+                            "WS sessions from a cancelled run. Sẽ retry sau "
+                            "backoff để Chromium phục hồi."
+                        ),
                         retryable=True,
                     )
                 context = browser.contexts[0] if browser.contexts else None
