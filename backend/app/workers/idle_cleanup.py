@@ -14,11 +14,14 @@ import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 
+from pathlib import Path
+
 from sqlalchemy import delete, select
 
 from app.browser import vnc_manager
+from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models import Job, JobLog, Profile
+from app.models import File as FileModel, Job, JobLog, Profile
 
 
 async def cleanup(idle_hours: float) -> int:
@@ -48,6 +51,39 @@ async def cleanup(idle_hours: float) -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"[idle-cleanup] joblog prune failed: {exc}", flush=True)
         await db.commit()
+
+        # File TTL: delete generated/uploaded files older than N days.
+        # Default 60 days — long enough for users to download, short
+        # enough that the storage volume doesn't grow forever. The DB
+        # row is removed too, and the on-disk blob is best-effort
+        # unlinked from local storage.
+        file_ttl_days = float(os.environ.get("FILE_TTL_DAYS", "60"))
+        file_cutoff = datetime.now(timezone.utc) - timedelta(days=file_ttl_days)
+        try:
+            old_files = (await db.execute(
+                select(FileModel).where(FileModel.created_at < file_cutoff)
+            )).scalars().all()
+            removed = 0
+            bytes_freed = 0
+            for f in old_files:
+                # Best-effort unlink for local-storage driver only.
+                if f.storage_driver == "local":
+                    try:
+                        path = Path(settings.LOCAL_STORAGE_PATH) / f.storage_path
+                        if path.exists():
+                            sz = path.stat().st_size
+                            path.unlink()
+                            bytes_freed += sz
+                    except Exception:  # noqa: BLE001
+                        pass
+                await db.delete(f)
+                removed += 1
+            if removed:
+                await db.commit()
+                mb = bytes_freed / 1024 / 1024
+                print(f"[idle-cleanup] pruned {removed} files older than {file_ttl_days}d ({mb:.1f} MB freed)", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[idle-cleanup] file prune failed: {exc}", flush=True)
 
         # Profiles likely backed by a running container
         rows = (await db.execute(

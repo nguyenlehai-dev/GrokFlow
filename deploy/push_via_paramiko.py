@@ -105,12 +105,31 @@ def main() -> int:
     base = (f"cd {args.remote_dir} && docker compose --env-file .env.prod "
             f"-f {args.compose_file}")
 
+    # Pre-deploy disk safety check. If we're already over 80% it means
+    # something's leaking — bail before adding another 1.5 GB layer.
+    df = run(client, "df --output=pcent / | tail -1 | tr -dc 0-9", check=False)
+    try:
+        pct = int(df.strip() or 0)
+    except ValueError:
+        pct = 0
+    if pct >= 90:
+        print(f"!! disk at {pct}% — running emergency prune before build")
+        run(client, "docker builder prune -af 2>&1 | tail -3", check=False)
+        run(client, "docker image prune -af 2>&1 | tail -3", check=False)
+
+    backend_changed = any(str(f).startswith(str(repo / "backend")) for f in files)
+    frontend_changed = any(str(f).startswith(str(repo / "frontend")) for f in files)
+    compose_changed = any(str(f).endswith(".yml") for f in files)
+
     if not args.skip_restart:
-        # Order matters: backend image bakes the source (incl. migration files),
-        # so we MUST rebuild the image before running alembic upgrade — otherwise
-        # the migration file is invisible to the running container.
-        print("==> Rebuilding backend / worker / idle-cleanup (with new code)")
-        run(client, f"{base} up -d --build backend worker idle-cleanup")
+        if backend_changed or compose_changed:
+            print("==> Rebuilding backend / worker / idle-cleanup (with new code)")
+            run(client, f"{base} up -d --build backend worker idle-cleanup")
+        else:
+            # Source unchanged — image is already correct, just ensure the
+            # services are running. No rebuild = no new buildkit layer.
+            print("==> Backend code unchanged, skipping rebuild")
+            run(client, f"{base} up -d backend worker idle-cleanup")
 
     if not args.skip_migrate:
         # Wait for backend to come up (post-rebuild restart)
@@ -126,18 +145,25 @@ def main() -> int:
         print("==> Restarting worker after migration")
         run(client, f"{base} restart worker idle-cleanup")
 
-    if not args.skip_restart and any(
-        str(f).endswith(".tsx") or str(f).endswith(".ts") for f in files
-    ):
+    if not args.skip_restart and frontend_changed:
         print("==> Rebuilding frontend")
         run(client, f"{base} up -d --build frontend")
+    elif not args.skip_restart and not frontend_changed:
+        print("==> Frontend code unchanged, skipping rebuild")
 
-    # After every deploy, reclaim Docker build-cache that buildkit
-    # accumulates from each `up -d --build`. Without this, the cache grew
-    # to 76GB on a 98GB disk and broke jobs with [Errno 28] No space left.
+    # Tighter prune: keep only 2h of cache. With deploys batched within
+    # minutes that still benefits from layer reuse, but stale cache
+    # never piles up beyond a single working session.
     print("==> Pruning Docker build cache + dangling images")
-    run(client, "docker builder prune -f --filter 'until=24h' 2>&1 | tail -3", check=False)
+    run(client, "docker builder prune -f --filter 'until=2h' 2>&1 | tail -3", check=False)
     run(client, "docker image prune -f 2>&1 | tail -3", check=False)
+    # Hard ceiling check
+    df_after = run(client, "df --output=pcent / | tail -1 | tr -dc 0-9", check=False)
+    try:
+        pct_after = int(df_after.strip() or 0)
+    except ValueError:
+        pct_after = 0
+    print(f"==> Disk after prune: {pct_after}% used")
 
     print("==> Final status")
     run(client, f"{base} ps")
