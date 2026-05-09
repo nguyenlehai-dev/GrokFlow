@@ -28,6 +28,7 @@ DEFAULT_FILES = [
     "backend/app/modules/jobs/router.py",
     "backend/app/modules/files/service.py",
     "backend/alembic/versions/0004_job_next_attempt.py",
+    "frontend/src/core/api/axios.ts",
     "frontend/src/modules/jobs/JobDetailDrawer.tsx",
     "frontend/src/modules/jobs/CreateJobModal.tsx",
     "frontend/src/modules/jobs/JobsPage.tsx",
