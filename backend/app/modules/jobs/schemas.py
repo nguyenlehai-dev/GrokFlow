@@ -38,6 +38,11 @@ class JobCreate(BaseModel):
     options: dict[str, Any] | None = None
 
 
+class JobUpdate(BaseModel):
+    prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+    options: dict[str, Any] | None = None
+
+
 class JobOut(BaseModel):
     id: uuid.UUID
     provider: str

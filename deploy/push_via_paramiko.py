@@ -32,6 +32,7 @@ DEFAULT_FILES = [
     "frontend/src/core/api/axios.ts",
     "frontend/src/modules/jobs/JobDetailDrawer.tsx",
     "frontend/src/modules/jobs/CreateJobModal.tsx",
+    "frontend/src/modules/jobs/EditJobModal.tsx",
     "frontend/src/modules/jobs/JobsPage.tsx",
     "frontend/src/modules/dashboard/DashboardPage.tsx",
     "frontend/src/modules/api-docs/ApiDocsPage.tsx",
