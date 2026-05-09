@@ -559,6 +559,60 @@ class GrokProvider(Provider):
                     return JobResult(success=False, error_code="timeout",
                                      error_message=err_msg, retryable=True)
 
+                # Video preset (Fun / Custom / Spicy) — Grok shows these as a
+                # row of buttons under the rendered video. Clicking one
+                # triggers a regenerate at the new preset; we wait for the
+                # NEW URL set then keep ONLY the regenerated videos.
+                mode = (opts.get("mode") or "").strip().lower()
+                if want_video and new_video_urls and mode and mode != "normal":
+                    label_map = {
+                        "fun":    ["Fun"],
+                        "custom": ["Custom"],
+                        "spicy":  ["Spicy", "Spicy mode", "18+"],
+                    }
+                    targets = label_map.get(mode, [])
+                    clicked = False
+                    if targets:
+                        try:
+                            clicked = await page.evaluate(
+                                """(targets) => {
+                                    const visible = (e) => e && e.offsetParent !== null;
+                                    const all = Array.from(document.querySelectorAll(
+                                      'button, [role=button], [role=tab], [role=radio]'
+                                    ));
+                                    for (const t of targets) {
+                                      const m = all.find(e => (e.innerText || '').trim() === t && visible(e));
+                                      if (m && !m.disabled) { m.click(); return t; }
+                                    }
+                                    return null;
+                                }""",
+                                targets,
+                            )
+                        except Exception:  # noqa: BLE001
+                            clicked = False
+                    if clicked:
+                        self._log(tag, f"video preset '{clicked}' clicked, awaiting regen")
+                        before = set(new_video_urls)
+                        regen_deadline = time.monotonic() + 180  # 3 min cap
+                        regen_stable: float | None = None
+                        regen_set: set[str] = set()
+                        while time.monotonic() < regen_deadline:
+                            cur = await self._collect_video_urls(page)
+                            new = cur - before - seen_video_urls
+                            if new and new != regen_set:
+                                regen_set = new
+                                regen_stable = time.monotonic()
+                            if regen_set and regen_stable and (time.monotonic() - regen_stable) >= 6.0:
+                                break
+                            await asyncio.sleep(2)
+                        if regen_set:
+                            self._log(tag, f"preset regen produced {len(regen_set)} new video(s)")
+                            new_video_urls = regen_set  # keep ONLY the preset version
+                        else:
+                            self._log(tag, f"preset '{mode}' clicked but no new video — falling back to original")
+                    else:
+                        self._log(tag, f"preset '{mode}' button not available (account tier?)")
+
                 cookies = await context.cookies()
                 jar = httpx.Cookies()
                 for c in cookies:

@@ -28,6 +28,7 @@ interface Form {
   aspect: string;
   quality: "speed" | "quality";
   duration: number;
+  mode: "normal" | "fun" | "custom" | "spicy";
 }
 
 const ASPECTS = [
@@ -57,6 +58,16 @@ const STYLES = ["natural", "vivid", "anime", "photographic"];
 // will pick what the account allows).
 const VIDEO_DURATIONS = [3, 6, 9, 15];
 
+// Grok video presets shown after the first generation. "spicy" is NSFW and
+// gated on most account tiers — provider will fall back to "normal" if the
+// preset button is unavailable.
+const VIDEO_MODES = [
+  { v: "normal", label: "Normal (mặc định)" },
+  { v: "fun",    label: "Fun (thiên về hài, cường điệu)" },
+  { v: "custom", label: "Custom (dùng prompt nguyên văn)" },
+  { v: "spicy",  label: "Spicy (18+) — cần Pro/Heavy" },
+];
+
 export function CreateJobModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -71,7 +82,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     defaultValues: {
       provider: "grok", job_type: "image", profile_id: "",
       size: "1024x1024", aspect: "1:1", quality: "speed", duration: 6,
-      model: "aurora", style: "natural", n: 1, seed: null,
+      mode: "normal", model: "aurora", style: "natural", n: 1, seed: null,
     },
   });
   const provider = watch("provider");
@@ -121,7 +132,9 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
       options: {
         aspect: v.aspect,
         quality: v.quality,
-        ...(v.job_type === "video" ? { duration: Number(v.duration) } : {}),
+        ...(v.job_type === "video"
+          ? { duration: Number(v.duration), mode: v.mode }
+          : {}),
       },
     };
     if (v.profile_id) payload.profile_id = v.profile_id;
@@ -277,6 +290,21 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
             </select>
           </div>
         </div>
+
+        {jobType === "video" && (
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <label className="text-sm font-medium">Mode video (preset hậu kỳ)</label>
+              <select className="input" {...register("mode")}>
+                {VIDEO_MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Sau khi Grok render video, hệ thống tự click preset bạn chọn để regenerate phiên bản đó.
+                <strong> Spicy (18+)</strong> chỉ có với account Pro/Heavy — nếu account thiếu quyền sẽ tự động fallback về Normal.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>
