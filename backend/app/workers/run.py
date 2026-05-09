@@ -26,9 +26,12 @@ from app.workers import webhook
 
 WORKER_ID = os.environ.get("HOSTNAME", "worker") + "-" + str(os.getpid())
 
-# Default exponential backoff (seconds). Rate-limit errors use a longer ramp.
-BACKOFF_SECONDS = [30, 120, 480]
-RATE_LIMIT_BACKOFF_SECONDS = [120, 600, 1800]  # 2m, 10m, 30m
+# Default exponential backoff (seconds). Tuned for fast iteration: timeouts
+# are usually transient (Grok burst) so retry quickly. Rate-limited or
+# overload errors keep the longer ramp because Chromium needs real time
+# to recover.
+BACKOFF_SECONDS = [15, 60, 180]               # 15s → 1m → 3m
+RATE_LIMIT_BACKOFF_SECONDS = [60, 300, 900]   # 1m → 5m → 15m
 TERMINAL_ERROR_CODES = {"cookie_expired", "captcha_required", "provider_blocked",
                         "unsupported_job_type"}
 RUNNING_JOB_STATES = ("running", "processing_provider", "uploading_result")

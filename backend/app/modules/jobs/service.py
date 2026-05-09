@@ -29,8 +29,12 @@ async def _resolve_profile_for_job(
             raise InvalidPayload(f"Profile not ready (status={profile.status}). Ask admin to refresh.")
         return profile
 
-    # Auto-pick: any admin profile with provider matching that has spare slots.
-    # Prefer least-loaded (active_jobs ASC), then least-recently-used.
+    # Auto-pick: any logged_in / running_job admin profile for this provider.
+    # We deliberately do NOT filter by `active_jobs < max_concurrent_jobs` here
+    # — that's a runtime-concurrency check, not a queue-admission gate. Jobs
+    # for a fully-loaded profile should QUEUE behind in-flight ones, not be
+    # rejected. The worker's _try_acquire_slot enforces concurrency at run
+    # time. We just pick the least-loaded profile to spread the queue.
     stmt = (
         select(Profile)
         .join(User, User.id == Profile.user_id)
@@ -38,7 +42,6 @@ async def _resolve_profile_for_job(
             User.role == "admin",
             Profile.provider == provider,
             Profile.status.in_(["logged_in", "running_job"]),
-            Profile.active_jobs < Profile.max_concurrent_jobs,
         )
         .order_by(
             Profile.active_jobs.asc(),
@@ -50,7 +53,7 @@ async def _resolve_profile_for_job(
     if profile:
         return profile
     raise InvalidPayload(
-        f"Không có profile {provider} nào sẵn sàng trong pool. Vui lòng đợi admin login lại."
+        f"Không có profile {provider} nào logged_in. Admin cần Auto-login profile trước."
     )
 
 

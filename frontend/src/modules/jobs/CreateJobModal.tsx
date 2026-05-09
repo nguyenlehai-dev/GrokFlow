@@ -133,11 +133,12 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  // A profile is selectable when it's logged_in, OR it's running_job but still
-  // has spare slots. Status-only check would block 2nd+ job on the same profile.
+  // A profile can accept a job whenever it's "ready" (logged in or already
+  // running another job). Even if all slots are currently occupied the
+  // backend will queue the new job — concurrency is a runtime gate, not a
+  // queue-admission gate.
   const profileSelectable = (p: Profile) =>
-    p.status === "logged_in" ||
-    (p.status === "running_job" && p.active_jobs < p.max_concurrent_jobs);
+    p.status === "logged_in" || p.status === "running_job";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
@@ -176,14 +177,15 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
                   {eligibleProfiles.map((p) => {
                     const selectable = profileSelectable(p);
                     const slots = `${p.active_jobs}/${p.max_concurrent_jobs}`;
-                    const reason = !selectable
-                      ? p.status === "running_job"
-                        ? " — full"
-                        : ` — ${p.status}`
-                      : "";
+                    const full = p.active_jobs >= p.max_concurrent_jobs;
+                    const note = !selectable
+                      ? ` — ${p.status}`
+                      : full
+                        ? " — full, sẽ queue"
+                        : "";
                     return (
                       <option key={p.id} value={p.id} disabled={!selectable}>
-                        {p.name} [{slots}{reason}]
+                        {p.name} [{slots}{note}]
                       </option>
                     );
                   })}
@@ -194,7 +196,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
               <p className="text-xs text-amber-600 mt-1">Chưa có profile {provider}. Tạo profile + Auto login trước.</p>
             )}
             {eligibleProfiles.length > 0 && eligibleProfiles.every((p) => !profileSelectable(p)) && (
-              <p className="text-xs text-rose-600 mt-1">Tất cả profile {provider} đã đầy slot — đợi job chạy xong.</p>
+              <p className="text-xs text-rose-600 mt-1">Profile {provider} chưa logged_in. Admin cần Auto-login.</p>
             )}
           </div>
         </div>

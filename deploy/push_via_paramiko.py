@@ -26,6 +26,7 @@ DEFAULT_FILES = [
     "backend/app/models/__init__.py",
     "backend/app/modules/jobs/schemas.py",
     "backend/app/modules/jobs/router.py",
+    "backend/app/modules/jobs/service.py",
     "backend/app/modules/files/service.py",
     "backend/alembic/versions/0004_job_next_attempt.py",
     "frontend/src/core/api/axios.ts",

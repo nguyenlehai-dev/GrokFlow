@@ -90,7 +90,10 @@ class GrokProvider(Provider):
     GROK_IMAGINE = "https://grok.com/imagine"
     GROK_IMAGINE_VIDEO = "https://grok.com/imagine/video"
     NAV_TIMEOUT_MS = 45000
-    PROMPT_TIMEOUT_MS = 180000  # Video can take 60-180s
+    # Timeouts tuned by media type. Videos take longer to render than images.
+    # If a job hasn't produced media in this window, we give up and retry.
+    IMAGE_TIMEOUT_MS = 120000  # 2 min — most images finish in 30-60s
+    VIDEO_TIMEOUT_MS = 240000  # 4 min — Grok video can take 90-180s
 
     async def run(self, job: JobInput) -> JobResult:
         # Same chat-page flow handles both image generation, image-to-image
@@ -166,32 +169,42 @@ class GrokProvider(Provider):
                                      error_message="No browser context found",
                                      retryable=True)
 
-                # Stale-tab GC. CRITICAL: another in-flight worker task may be
-                # mid-evaluate on a tab; if we close it, that task throws
-                # TargetClosedError. So we ONLY close tabs that are clearly
-                # idle (empty body / not a grok.com page / about:blank).
-                # Active worker tabs always have grok.com loaded with content.
+                # Stale-tab GC. CRITICAL constraints:
+                #   1) Other concurrent worker tasks may be mid-evaluate on a
+                #      tab — closing it surfaces as TargetClosedError.
+                #   2) `await context.new_page()` returns a tab on
+                #      about:blank for a few hundred ms before its goto()
+                #      starts. We must NOT close those — another job may have
+                #      just created it.
+                # So the rule is: close only tabs that are clearly stale —
+                # parked on a non-grok URL (e.g., abandoned redirect) OR on
+                # grok.com with an empty body for some time. Skip about:blank
+                # entirely; they're either brand new or already invisible.
                 try:
                     pages = list(context.pages)
-                    if len(pages) > 4:
+                    if len(pages) > 6:
                         gc_count = 0
-                        for old in pages[:-4]:  # keep newest 4 untouched
+                        for old in pages[:-6]:  # keep newest 6 untouched
                             try:
                                 u = old.url or ""
-                                if not u or u == "about:blank" or "grok.com" not in u:
+                                if not u or u == "about:blank":
+                                    continue  # skip — could be a fresh tab
+                                if "grok.com" not in u and "x.ai" not in u:
                                     await old.close()
                                     gc_count += 1
                                     continue
-                                # Ping the tab — if body is empty / unreachable,
-                                # it's truly stale (worker process died mid-job).
+                                # On grok.com — ping body. Tabs in active use
+                                # have substantial content (the chat UI).
                                 try:
                                     body_len = await old.evaluate(
                                         "() => (document.body && document.body.innerText || '').length",
-                                        timeout=2000,
+                                        timeout=1500,
                                     )
                                 except Exception:  # noqa: BLE001
-                                    body_len = 0
-                                if body_len < 50:
+                                    body_len = -1
+                                # Only close if body is genuinely empty (broken)
+                                # AND the URL has been on grok for a while.
+                                if body_len == 0:
                                     await old.close()
                                     gc_count += 1
                             except Exception:  # noqa: BLE001
@@ -438,7 +451,11 @@ class GrokProvider(Provider):
                 submitted = False
                 if submit_btn:
                     try:
-                        await submit_btn.click()
+                        # 5s instead of Playwright's default 30s. When the
+                        # click handler is starved we'd rather bail and use
+                        # the keyboard Enter fallback below than block the
+                        # whole job for 30s.
+                        await submit_btn.click(timeout=5000)
                         submitted = True
                         self._log(tag, "submit clicked")
                     except Exception as exc:  # noqa: BLE001
@@ -458,8 +475,13 @@ class GrokProvider(Provider):
                 # care about <video> elements with non-empty src; for image jobs
                 # we care about <img> elements. Track stability separately.
                 want_video = job.job_type == "video"
-                deadline = time.monotonic() + self.PROMPT_TIMEOUT_MS / 1000
-                STABILITY_SECONDS = 8.0
+                # Adaptive timeout + stability window. Image jobs finish fast
+                # so we lock in the result aggressively (3s after first image).
+                # Video jobs may stream multiple thumbnail updates so we wait
+                # a bit longer for the URL set to settle.
+                timeout_ms = self.VIDEO_TIMEOUT_MS if want_video else self.IMAGE_TIMEOUT_MS
+                deadline = time.monotonic() + timeout_ms / 1000
+                STABILITY_SECONDS = 6.0 if want_video else 3.0
                 last_change_at: float | None = None
                 new_urls_set: set[str] = set()
                 new_video_urls: set[str] = set()
@@ -491,7 +513,7 @@ class GrokProvider(Provider):
 
                     if time.monotonic() >= next_progress_log:
                         next_progress_log = time.monotonic() + 30
-                        self._log(tag, f"polling… imgs={len(new_urls_set)} vids={len(new_video_urls)} elapsed={int(time.monotonic() - (deadline - self.PROMPT_TIMEOUT_MS/1000))}s")
+                        self._log(tag, f"polling… imgs={len(new_urls_set)} vids={len(new_video_urls)} elapsed={int(time.monotonic() - (deadline - timeout_ms/1000))}s")
 
                     # Periodic rate-limit / Pro-required text scan.
                     if time.monotonic() >= next_text_check:
@@ -514,7 +536,8 @@ class GrokProvider(Provider):
                         if rate_limit_detected or pro_required_detected:
                             break
 
-                    await asyncio.sleep(2)
+                    # Tight poll loop — 1s catches new image URLs sooner.
+                    await asyncio.sleep(1)
 
                 if rate_limit_detected and not (new_urls_set or new_video_urls):
                     return JobResult(

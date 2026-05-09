@@ -113,11 +113,12 @@ def start_for_profile(profile_id: str, profile_path: str, provider_url: str) -> 
     host_profile_path = _container_to_host_path(profile_path)
     _fix_profile_perms(host_profile_path)
 
-    # Resource caps: a profile typically holds 1-8 Chromium tabs at once.
-    # 3GB hard mem cap stops a runaway leak from taking down the host.
-    # Override via env if you have a beefy box and want bigger profile pools.
-    mem_limit = os.environ.get("VNC_MEM_LIMIT", "3g")
-    cpu_quota = int(os.environ.get("VNC_CPU_QUOTA", "150000"))  # 1.5 CPU
+    # Resource caps: each Chromium tab on grok.com costs ~600MB once the
+    # heavy React app + media decoders are loaded. With 4 concurrent slots
+    # we need ~2.4GB for tabs + ~800MB for the rest of Chromium → 4GB cap.
+    # Override via env if you scale slots beyond 4 or up to multiple profiles.
+    mem_limit = os.environ.get("VNC_MEM_LIMIT", "4g")
+    cpu_quota = int(os.environ.get("VNC_CPU_QUOTA", "200000"))  # 2.0 CPU
     container = cli.containers.run(
         image=VNC_IMAGE,
         name=name,
