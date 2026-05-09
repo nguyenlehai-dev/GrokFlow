@@ -132,6 +132,13 @@ def main() -> int:
         print("==> Rebuilding frontend")
         run(client, f"{base} up -d --build frontend")
 
+    # After every deploy, reclaim Docker build-cache that buildkit
+    # accumulates from each `up -d --build`. Without this, the cache grew
+    # to 76GB on a 98GB disk and broke jobs with [Errno 28] No space left.
+    print("==> Pruning Docker build cache + dangling images")
+    run(client, "docker builder prune -f --filter 'until=24h' 2>&1 | tail -3", check=False)
+    run(client, "docker image prune -f 2>&1 | tail -3", check=False)
+
     print("==> Final status")
     run(client, f"{base} ps")
 
