@@ -202,40 +202,37 @@ class GrokProvider(Provider):
                 # parked on a non-grok URL (e.g., abandoned redirect) OR on
                 # grok.com with an empty body for some time. Skip about:blank
                 # entirely; they're either brand new or already invisible.
-                # Aggressive tab GC: close every grok.com tab from previous
-                # worker runs. Each `_run_image` invocation needs ONLY ONE
-                # fresh tab (created on the next line via `context.new_page`).
-                # Tabs from past attempts/retries serve no purpose and just
-                # starve Chromium's renderer thread (193% CPU on a 4-tab
-                # /imagine pile-up = no React mount → wait_for_selector
-                # times out → false 'rate_limited' verdict).
+                # Open the working tab FIRST, then close stale ones. Closing
+                # all tabs before opening the new one would leave Chromium
+                # with zero targets and Target.createTarget fails with
+                # 'Failed to open a new tab' — observed when our GC was
+                # aggressive enough to take the homepage tab too.
                 #
-                # We skip:
-                #   - about:blank (could be a sibling tab being prepared by
-                #     another concurrent worker)
-                #   - non-grok URLs we don't own (just leave them alone)
+                # Snapshot the existing tab list so we know which to close
+                # AFTER our new tab is up.
+                old_pages_to_close = list(context.pages)
+                page = await context.new_page()
+                self._log(tag, "new tab opened")
+
                 try:
-                    pages = list(context.pages)
                     gc_count = 0
-                    for old in pages:
+                    for old in old_pages_to_close:
                         try:
+                            if old is page:
+                                continue  # never close ourselves
                             u = old.url or ""
                             if not u or u == "about:blank":
-                                continue
+                                continue  # may belong to a sibling worker
                             if "grok.com" not in u and "x.ai" not in u:
-                                continue  # not ours; leave alone
-                            # All grok tabs from prior runs go.
+                                continue  # not ours
                             await asyncio.wait_for(old.close(), timeout=2)
                             gc_count += 1
                         except Exception:  # noqa: BLE001
                             pass
                     if gc_count:
-                        self._log(tag, f"tab-GC closed {gc_count} grok.com tab(s) before opening new")
+                        self._log(tag, f"tab-GC closed {gc_count} grok.com tab(s) after opening new")
                 except Exception:  # noqa: BLE001
                     pass
-
-                page = await context.new_page()
-                self._log(tag, "new tab opened")
 
                 # Always go to /imagine — the dedicated /imagine/video URL
                 # was deprecated in late 2025 (renders an empty page now).
