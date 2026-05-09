@@ -739,45 +739,46 @@ class GrokProvider(Provider):
 
     @staticmethod
     async def _collect_image_urls(page) -> set[str]:
-        # Match ONLY Grok's generated-output CDN, AND only when the <img> is
-        # actually in a chat-result container — not in a sidebar thumbnail,
-        # gallery favorite, or prompt-bar control.
-        #
-        # Generated outputs live at:
-        #   imagine-public.x.ai/imagine-public/images/<uuid>.png|.jpg
-        # But that same CDN also hosts the "Most recent favorite" lookback
-        # thumbnail Grok shows in the prompt bar, the user's saved gallery,
-        # and the public template/showcase tiles. We disambiguate by:
-        #   (a) excluding known decorative alt text (favorite, avatar, emoji)
-        #   (b) excluding images inside <button> / <form> containers (those
-        #       are UI controls — gallery thumbs, attach preview, etc.)
+        # Grok's generated-output URLs as of late 2025/early 2026:
+        #   assets.grok.com/users/<userId>/generated/<jobId>/image.(jpg|png|webp)
+        # Older URLs we still keep around as fallbacks:
+        #   imagine-public.x.ai/imagine-public/images/<uuid>.(jpg|png)
+        #   imgen.<...>
+        # The user's saved-gallery / favorites and uploaded preview live at:
+        #   assets.grok.com/users/<userId>/<favId>/content (no /generated/ segment)
+        # We disambiguate via the URL path itself + the prompt-bar form
+        # container (which holds the 'Most recent favorite' thumbnail).
         urls = await page.evaluate(
             """() => {
                 const out = new Set();
-                const generatedHostPatterns = [
+                const generated = [
+                    /assets\\.grok\\.com\\/users\\/[^/]+\\/generated\\//,
                     /imagine-public\\.x\\.ai\\/imagine-public\\/images\\//,
-                    /imgen\\./,  // legacy Grok output
+                    /imgen\\./,
                 ];
                 const altExclude = [
-                    /favorite/i,        // 'Most recent favorite' sidebar thumb
+                    /favorite/i,
                     /avatar/i, /emoji/i,
-                    /generated image/i, // Grok's public showcase tile alt
                 ];
                 const urlExclude = [
                     /cookielaw|onetrust/i,
                     /share-images\\//,
                     /share-videos\\/.*thumbnail/,
+                    /\\/content(\\?|$)/,  // favorites/uploads use /content, generations use /image.{ext}
                 ];
                 document.querySelectorAll('img').forEach(i => {
                     const s = i.src || '';
                     if (!s.startsWith('http')) return;
                     if (urlExclude.some(rx => rx.test(s))) return;
                     if (altExclude.some(rx => rx.test(i.alt || ''))) return;
-                    if (!generatedHostPatterns.some(rx => rx.test(s))) return;
-                    // Skip if inside a button/form/aside — these are UI
-                    // controls (gallery picker, attach preview), not chat
-                    // result images.
-                    if (i.closest('button, form, aside, header, nav')) return;
+                    if (!generated.some(rx => rx.test(s))) return;
+                    // Skip the prompt-bar attach preview (always inside <form>)
+                    // and the 'Most recent favorite' thumbnail (inside <form>
+                    // with role=button). Real result images sit inside the
+                    // chat <article>/<main> grid; some are wrapped in clickable
+                    // <button> thumbnails so we DO accept those as long as
+                    // they're not inside a <form>.
+                    if (i.closest('form, aside, header, nav')) return;
                     out.add(s);
                 });
                 return Array.from(out);
