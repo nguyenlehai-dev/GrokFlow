@@ -61,25 +61,40 @@ IMAGE_RESULT_SELECTORS = [
 # Substrings (lower-cased) that indicate Grok refused/rate-limited the request.
 # Matched against page innerText after submit. Order matters — most specific first.
 RATE_LIMIT_HINTS = [
+    # Specific phrases Grok ONLY emits when actually blocking a request.
+    # Generic substrings like "rate limit" (alone) match unrelated UI text
+    # (sidebar history, tooltip 'Pro has higher rate limits', etc.) and
+    # cause false-positive failures.
     "you've reached your daily limit",
     "you have reached your daily limit",
     "you have reached your limit",
     "daily limit reached",
-    "rate limit",
+    "daily limit has been reached",
+    "rate limit exceeded",
+    "rate limit reached",
+    "you have been rate limited",
+    "you've been rate limited",
     "too many requests",
-    "try again later",
-    "try again in a",
-    "slow down",
-    "wait before",
+    "try again in a few",
+    "try again in 1",  # 'try again in 1 minute', '... 1 hour'
+    "please slow down",
+    "monthly limit",
+    "out of credits",
+    "quota exceeded",
 ]
 
 PRO_REQUIRED_HINTS = [
-    "upgrade to grok",
+    # Phrases that explicitly tell the user a Pro subscription is required
+    # for THIS specific feature. Generic upsell strings ("upgrade to ...")
+    # are too broad — they appear in every Grok page's sidebar.
     "requires a subscription",
-    "available with grok",
-    "subscribe to grok",
-    "x premium",
-    "grok heavy",
+    "requires grok pro",
+    "requires supergrok",
+    "available with grok pro",
+    "available with supergrok",
+    "subscribe to access",
+    "this feature is only available",
+    "premium feature",
 ]
 
 
