@@ -24,9 +24,14 @@ interface Form {
   style: string;
   n: number;
   seed: number | null;
-  // Video-only
+  // Shared
   aspect: string;
+  // Image-only
   quality: "speed" | "quality";
+  // Video-only — Grok video toggles match the live UI exactly:
+  //   Resolution: 480p | 720p
+  //   Duration:   6s   | 10s
+  resolution: "480p" | "720p";
   duration: number;
   mode: "normal" | "fun" | "custom" | "spicy";
 }
@@ -54,9 +59,9 @@ const SIZES_FROM_ASPECT: Record<string, string> = {
 const GROK_MODELS = ["aurora", "grok-2-image", "grok-3-image"];
 const FLOW_MODELS = ["veo-3", "veo-2"];
 const STYLES = ["natural", "vivid", "anime", "photographic"];
-// Grok Imagine video durations (free=6s, Pro=15s; we offer both — provider
-// will pick what the account allows).
-const VIDEO_DURATIONS = [3, 6, 9, 15];
+// Grok Imagine video — durations match the LIVE UI exactly: 6s | 10s.
+const VIDEO_DURATIONS = [6, 10];
+const VIDEO_RESOLUTIONS = ["480p", "720p"] as const;
 
 // Grok video presets shown after the first generation. "spicy" is NSFW and
 // gated on most account tiers — provider will fall back to "normal" if the
@@ -81,7 +86,9 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
   const { register, handleSubmit, watch, control, setValue, formState: { isSubmitting } } = useForm<Form>({
     defaultValues: {
       provider: "grok", job_type: "image", profile_id: "",
-      size: "1024x1024", aspect: "1:1", quality: "speed", duration: 6,
+      size: "1024x1024", aspect: "1:1",
+      quality: "speed",                  // image-only
+      resolution: "720p", duration: 6,   // video-only
       mode: "normal", model: "aurora", style: "natural", n: 1, seed: null,
     },
   });
@@ -131,10 +138,16 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
       // can consume them. Backend's create_job merges these into options.
       options: {
         aspect: v.aspect,
-        quality: v.quality,
-        ...(v.job_type === "video"
-          ? { duration: Number(v.duration), mode: v.mode }
-          : {}),
+        // Match Grok's actual prompt-bar controls:
+        //   image → Speed | Quality (no resolution/duration)
+        //   video → 480p | 720p, 6s | 10s (no Speed/Quality)
+        ...(v.job_type === "image"
+          ? { quality: v.quality }
+          : {
+              resolution: v.resolution,
+              duration: Number(v.duration),
+              mode: v.mode,
+            }),
       },
     };
     if (v.profile_id) payload.profile_id = v.profile_id;
@@ -272,23 +285,44 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
               {ASPECTS.map((a) => <option key={a.v} value={a.v}>{a.label}</option>)}
             </select>
           </div>
-          <div>
-            <label className="text-sm font-medium">Chất lượng</label>
-            <select className="input" {...register("quality")}>
-              <option value="speed">Speed (nhanh)</option>
-              <option value="quality">Quality (chậm, đẹp hơn)</option>
-            </select>
-          </div>
-          {jobType === "video" ? (
+
+          {/* Image-only: Speed / Quality (matches Grok's prompt bar in Image mode) */}
+          {jobType === "image" && (
             <div>
-              <label className="text-sm font-medium">Số giây</label>
-              <select className="input" {...register("duration", { valueAsNumber: true })}>
-                {VIDEO_DURATIONS.map((d) => (
-                  <option key={d} value={d}>{d}s {d === 6 ? "(free)" : d === 15 ? "(Pro)" : ""}</option>
+              <label className="text-sm font-medium">Chất lượng</label>
+              <select className="input" {...register("quality")}>
+                <option value="speed">Speed (nhanh)</option>
+                <option value="quality">Quality (chậm, đẹp hơn)</option>
+              </select>
+            </div>
+          )}
+
+          {/* Video-only: Resolution 480p|720p (matches Grok's live UI) */}
+          {jobType === "video" && (
+            <div>
+              <label className="text-sm font-medium">Độ phân giải</label>
+              <select className="input" {...register("resolution")}>
+                {VIDEO_RESOLUTIONS.map((r) => (
+                  <option key={r} value={r}>{r}</option>
                 ))}
               </select>
             </div>
-          ) : (
+          )}
+
+          {/* Video-only: Duration 6s|10s */}
+          {jobType === "video" && (
+            <div>
+              <label className="text-sm font-medium">Thời lượng</label>
+              <select className="input" {...register("duration", { valueAsNumber: true })}>
+                {VIDEO_DURATIONS.map((d) => (
+                  <option key={d} value={d}>{d}s</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Image-only Style (kept as a prompt hint, not a Grok button) */}
+          {jobType === "image" && (
             <div>
               <label className="text-sm font-medium">Style</label>
               <select className="input" {...register("style")}>
@@ -296,6 +330,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
               </select>
             </div>
           )}
+
           <div>
             <label className="text-sm font-medium">Model</label>
             <select className="input" {...register("model")}>

@@ -319,19 +319,34 @@ class GrokProvider(Provider):
                         self._log(tag, f"aspect set to {ratio}")
                     except Exception as exc:  # noqa: BLE001
                         self._log(tag, f"aspect set failed: {exc}")
-                quality = (opts.get("quality") or "").strip().lower()
-                if quality in ("speed", "quality"):
-                    try:
-                        await self._set_segmented(page, "Speed" if quality == "speed" else "Quality")
-                        self._log(tag, f"quality set to {quality}")
-                    except Exception as exc:  # noqa: BLE001
-                        self._log(tag, f"quality set failed: {exc}")
-                if want_video and opts.get("duration"):
-                    try:
-                        await self._set_duration(page, int(opts["duration"]))
-                        self._log(tag, f"duration set to {opts['duration']}s")
-                    except Exception as exc:  # noqa: BLE001
-                        self._log(tag, f"duration set failed: {exc}")
+                # Mode-specific toggles match Grok's prompt-bar buttons:
+                #   IMAGE mode → 'Speed' / 'Quality' (radio pair)
+                #   VIDEO mode → '480p' / '720p' (resolution radio) and
+                #                '6s' / '10s' (duration radio)
+                if not want_video:
+                    quality = (opts.get("quality") or "").strip().lower()
+                    if quality in ("speed", "quality"):
+                        try:
+                            await self._set_segmented(
+                                page, "Speed" if quality == "speed" else "Quality"
+                            )
+                            self._log(tag, f"quality set to {quality}")
+                        except Exception as exc:  # noqa: BLE001
+                            self._log(tag, f"quality set failed: {exc}")
+                else:
+                    resolution = (opts.get("resolution") or "").strip().lower()
+                    if resolution in ("480p", "720p"):
+                        try:
+                            await self._set_segmented(page, resolution)
+                            self._log(tag, f"resolution set to {resolution}")
+                        except Exception as exc:  # noqa: BLE001
+                            self._log(tag, f"resolution set failed: {exc}")
+                    if opts.get("duration"):
+                        try:
+                            await self._set_duration(page, int(opts["duration"]))
+                            self._log(tag, f"duration set to {opts['duration']}s")
+                        except Exception as exc:  # noqa: BLE001
+                            self._log(tag, f"duration set failed: {exc}")
 
                 prompt_el = await self._find_first(page, PROMPT_TEXTAREA, timeout_ms=15000)
                 if not prompt_el:
