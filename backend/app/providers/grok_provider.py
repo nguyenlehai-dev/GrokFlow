@@ -456,8 +456,12 @@ class GrokProvider(Provider):
                         retryable=True,
                     )
 
-                # Wait for Submit button to become enabled (signal that React
-                # accepted the prompt input).
+                # Wait for Submit button to become enabled AND give React
+                # state time to sync. PM's keymap fires onChange after a
+                # short debounce (~150-300ms); without this wait the submit
+                # handler may read an empty React state even when the DOM
+                # has the typed text.
+                await asyncio.sleep(0.6)
                 btn_enabled = False
                 for _ in range(20):
                     btn_enabled = await page.evaluate(
@@ -470,26 +474,29 @@ class GrokProvider(Provider):
                         break
                     await asyncio.sleep(0.5)
 
-                # Try every known submission method until one works. JS click
-                # bypasses Playwright's element-stability checks (which time
-                # out under heavy Chromium load) — it dispatches the click
-                # event directly. We fall back through ElementHandle.click,
-                # keyboard Enter (re-resolving the editor if its handle went
-                # stale), and finally Ctrl+Enter.
+                # Submit chain ordered by trustedness — Grok's anti-bot
+                # likely checks event.isTrusted in the React onSubmit:
+                #   1. Real mouse click (CDP Input.dispatchMouseEvent →
+                #      isTrusted=true). This is what a human would do.
+                #   2. ElementHandle.click — also CDP-driven, trusted.
+                #   3. Keyboard Enter on focused PM — trusted key event.
+                #   4. JS .click() (last resort) — synthetic, isTrusted=false,
+                #      Grok may ignore but try anyway.
                 submitted = False
+
                 if btn_enabled:
                     try:
-                        submitted = await page.evaluate(
-                            """() => {
-                                const b = document.querySelector("button[aria-label='Submit']");
-                                if (b && !b.disabled) { b.click(); return true; }
-                                return false;
-                            }"""
-                        )
-                        if submitted:
-                            self._log(tag, "submit via JS click")
+                        btn = await page.query_selector("button[aria-label='Submit']:not([disabled])")
+                        if btn:
+                            bbox = await btn.bounding_box()
+                            if bbox:
+                                cx = bbox["x"] + bbox["width"] / 2
+                                cy = bbox["y"] + bbox["height"] / 2
+                                await page.mouse.click(cx, cy)
+                                submitted = True
+                                self._log(tag, f"submit via real mouse click @ ({cx:.0f},{cy:.0f})")
                     except Exception as exc:  # noqa: BLE001
-                        self._log(tag, f"JS click failed: {exc}")
+                        self._log(tag, f"mouse click failed: {exc}")
 
                 if not submitted and btn_enabled:
                     try:
@@ -502,17 +509,13 @@ class GrokProvider(Provider):
                         self._log(tag, f"force click failed: {exc}")
 
                 if not submitted:
-                    # Re-resolve the editor handle in case the DOM shifted
-                    # (post-attach Grok rebuilds the prompt bar). Then send
-                    # Enter via the page-level keyboard which doesn't rely
-                    # on a specific ElementHandle.
                     try:
                         fresh_pm = await page.query_selector(
                             ".tiptap.ProseMirror, .ProseMirror, [contenteditable='true']"
                         )
                         if fresh_pm:
                             await fresh_pm.click(timeout=2000)
-                            await asyncio.sleep(0.1)
+                            await asyncio.sleep(0.15)
                         await page.keyboard.press("Enter")
                         submitted = True
                         self._log(tag, "submit via Enter fallback")
@@ -521,9 +524,15 @@ class GrokProvider(Provider):
 
                 if not submitted:
                     try:
-                        await page.keyboard.press("Control+Enter")
-                        submitted = True
-                        self._log(tag, "submit via Ctrl+Enter fallback")
+                        submitted = await page.evaluate(
+                            """() => {
+                                const b = document.querySelector("button[aria-label='Submit']");
+                                if (b && !b.disabled) { b.click(); return true; }
+                                return false;
+                            }"""
+                        )
+                        if submitted:
+                            self._log(tag, "submit via JS click (last resort, may be ignored)")
                     except Exception:  # noqa: BLE001
                         pass
 
@@ -531,8 +540,8 @@ class GrokProvider(Provider):
                     return JobResult(
                         success=False, error_code="timeout",
                         error_message=(
-                            "Submit button never accepted click after 4 attempts "
-                            "(JS click, force click, Enter, Ctrl+Enter). "
+                            "Submit button never accepted click after 4 methods "
+                            "(mouse.click, force click, Enter, JS click). "
                             "Likely Chromium overload — sẽ retry."
                         ),
                         retryable=True,
@@ -569,24 +578,16 @@ class GrokProvider(Provider):
                         self._log(tag, f"navigated to {page.url}")
                         break
                 if not navigated:
-                    # If the click didn't even reach Grok's generate endpoint,
-                    # the account is shadow-banned (anti-abuse silent drop).
-                    # No UI feedback, no error toast — only telemetry pings.
-                    if not generate_call_seen["hit"]:
-                        page.remove_listener("request", _on_request)
-                        return JobResult(
-                            success=False, error_code="provider_blocked",
-                            error_message=(
-                                "Grok shadow-banned account: submit click did NOT "
-                                "trigger any generate API call (only telemetry). "
-                                "Account đã bị Grok throttle silent — đợi 24h, "
-                                "đổi account, hoặc upgrade Pro/Heavy."
-                            ),
-                            retryable=False,  # terminal — retrying won't help
-                        )
-
-                    # Sidebar promotional text "Upgrade to SuperGrok" is
-                    # ALWAYS present — must NOT match.
+                    # Diagnostic only — log whether generate API was called.
+                    # Do NOT fail the job on this signal alone (false positives
+                    # are worse than waiting through the polling timeout).
+                    self._log(
+                        tag,
+                        f"no /post/ nav after 20s, generate_api_called={generate_call_seen['hit']} — polling anyway",
+                    )
+                    # Quota-text scan — only fail with rate_limited if Grok
+                    # actually surfaced a throttle message. The sidebar
+                    # 'Upgrade to SuperGrok' promo is permanent — exclude.
                     body_tail = (await page.evaluate(
                         "() => (document.body.innerText || '').slice(-3000).toLowerCase()"
                     ))
@@ -599,12 +600,12 @@ class GrokProvider(Provider):
                     ]
                     found = next((h for h in quota_phrases if h in body_tail), None)
                     if found:
+                        page.remove_listener("request", _on_request)
                         return JobResult(
                             success=False, error_code="rate_limited",
                             error_message=f"Grok rejected submit — '{found}'.",
                             retryable=True,
                         )
-                    self._log(tag, f"no /post/ nav but generate API was called — slow account, polling anyway")
                 page.remove_listener("request", _on_request)
 
                 # Poll BOTH images and videos simultaneously. For video jobs we
