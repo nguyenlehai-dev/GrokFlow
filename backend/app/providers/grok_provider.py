@@ -687,24 +687,27 @@ class GrokProvider(Provider):
 
     @staticmethod
     async def _collect_image_urls(page) -> set[str]:
-        # Grok generation output is hosted on these domains. We match by URL
-        # pattern (not DOM container) because Grok's layout changes often.
-        # Excludes: avatars, emoji, OneTrust cookie banner logos, public
-        # template/showcase images that are pre-loaded as decoration.
+        # ONLY match URLs from Grok's generated-output CDN. We deliberately
+        # exclude `assets.grok.com/users/.../content` because that pattern
+        # also covers the user's saved gallery, attached upload previews,
+        # and "Most recent favorite" lookback — all of which would be picked
+        # up as false-positive results (especially fatal for image-to-image
+        # where the upload preview matches the same prefix as past favorites).
+        #
+        # Newly generated images live exclusively under:
+        #   imagine-public.x.ai/imagine-public/images/<uuid>.jpg
         urls = await page.evaluate(
             """() => {
                 const out = new Set();
                 const generatedHostPatterns = [
                     /imagine-public\\.x\\.ai\\/imagine-public\\/images\\//,
-                    /assets\\.grok\\.com\\/users\\/[^\\/]+\\/[^\\/]+\\/content/,
-                    /imgen\\./,  // legacy
+                    /imgen\\./,  // legacy Grok output
                 ];
                 const exclude = [
                     /avatar/i, /emoji/i,
                     /cookielaw|onetrust/i,
-                    /share-images\\//,        // template gallery (not user output)
+                    /share-images\\//,        // template gallery decoration
                     /share-videos\\/.*thumbnail/, // public video thumbs
-                    /favorite/i,              // 'most recent favorite' lookback
                 ];
                 document.querySelectorAll('img').forEach(i => {
                     const s = i.src || '';
