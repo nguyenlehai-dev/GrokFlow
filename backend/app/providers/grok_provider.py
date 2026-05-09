@@ -261,7 +261,23 @@ class GrokProvider(Provider):
                 if job.attachments:
                     try:
                         await self._attach_files(page, job.attachments)
-                        await asyncio.sleep(2)
+                        # Wait for the preview to render. Grok rebuilds the
+                        # prompt-bar DOM after a successful upload, which
+                        # invalidates our previous prompt_el handle.
+                        await asyncio.sleep(2.5)
+                        # Re-find the prompt input — old handle is now detached.
+                        prompt_el = await self._find_first(
+                            page, PROMPT_TEXTAREA, timeout_ms=10000,
+                        ) or await page.query_selector(
+                            ".tiptap.ProseMirror, .ProseMirror, [contenteditable='true']"
+                        )
+                        if not prompt_el:
+                            return JobResult(
+                                success=False, error_code="network_error",
+                                error_message="Prompt input vanished after upload",
+                                retryable=True,
+                            )
+                        self._log(tag, "input image attached, prompt re-resolved")
                     except Exception as exc:  # noqa: BLE001
                         return JobResult(success=False, error_code="network_error",
                                          error_message=f"Failed to attach input image: {exc}",
@@ -691,16 +707,16 @@ class GrokProvider(Provider):
 
     @staticmethod
     async def _attach_files(page, attachments: list) -> None:
-        """Trigger file attach via the 'Attach' button + Playwright file_chooser.
+        """Attach reference images on Grok Imagine.
 
-        Grok hides the <input type=file> behind a button click. We listen for
-        the file chooser, click the button, then set our bytes via setInputFiles
-        with a temp file path.
+        Grok keeps a hidden <input type='file' name='files' accept='image/*'>
+        inside the prompt-bar form, plus a visible 'Upload' button (legacy
+        builds called it 'Attach') that opens the OS file chooser. We try the
+        direct hidden-input path first because it's resilient to UI shuffles.
         """
         import os
         import tempfile
 
-        # Write attachments to temp files so Playwright can attach by path.
         tmp_paths: list[str] = []
         for att in attachments:
             fd, path = tempfile.mkstemp(prefix="grokflow_in_", suffix=f"_{att.name}")
@@ -712,24 +728,41 @@ class GrokProvider(Provider):
                 os.close(fd)
                 raise
 
-        # Two paths to attach:
-        #  (a) direct setInputFiles on hidden input
-        try:
-            input_el = await page.query_selector("input[type='file']")
-            if input_el:
-                await input_el.set_input_files(tmp_paths)
-                return
-        except Exception:  # noqa: BLE001
-            pass
+        # Path A: hidden input set_input_files. Works for current Grok layout
+        # (input is class='hidden' but visible to Playwright).
+        last_err: Exception | None = None
+        for sel in (
+            "input[type='file'][name='files']",
+            "input[type='file'][accept*='image']",
+            "input[type='file']",
+        ):
+            try:
+                el = await page.query_selector(sel)
+                if el:
+                    await el.set_input_files(tmp_paths)
+                    return
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                continue
 
-        # (b) via file_chooser triggered by Attach button
-        attach_btn = await page.query_selector("button[aria-label='Attach']")
-        if not attach_btn:
-            raise RuntimeError("Attach button not found on Grok UI")
-        async with page.expect_file_chooser() as fc_info:
-            await attach_btn.click()
-        chooser = await fc_info.value
-        await chooser.set_files(tmp_paths)
+        # Path B: trigger file chooser by clicking Upload/Attach button.
+        for label in ("Upload", "Attach", "Add image", "Add file"):
+            btn = await page.query_selector(f"button[aria-label='{label}']")
+            if not btn:
+                continue
+            try:
+                async with page.expect_file_chooser(timeout=5000) as fc_info:
+                    await btn.click()
+                chooser = await fc_info.value
+                await chooser.set_files(tmp_paths)
+                return
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                continue
+
+        raise RuntimeError(
+            f"No upload affordance found on Grok UI (last error: {last_err})"
+        )
 
     @staticmethod
     def _compose_prompt(job: JobInput) -> str:
