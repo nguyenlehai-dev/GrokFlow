@@ -251,6 +251,22 @@ class GrokProvider(Provider):
                         )
                     raise
 
+                # Wait for the prompt-bar to actually render before any radio
+                # click attempts. Without this, on a busy Chromium the React
+                # tree isn't mounted yet → the Image/Video radios + duration
+                # buttons don't exist → all our clicks no-op silently.
+                try:
+                    await page.wait_for_selector(
+                        "[role=radio], button[aria-label='Submit']",
+                        timeout=15000, state="visible",
+                    )
+                except PWTimeout:
+                    return JobResult(
+                        success=False, error_code="rate_limited",
+                        error_message="Prompt bar didn't render in 15s — Chromium overloaded.",
+                        retryable=True,
+                    )
+
                 title = await page.title()
                 if "Just a moment" in title or "Cloudflare" in title:
                     return JobResult(success=False, error_code="cookie_expired",
