@@ -18,7 +18,7 @@ class TokenResponse(BaseModel):
 
 class UserResponse(BaseModel):
     id: uuid.UUID
-    email: PermissiveEmail
+    email: str  # plain str on output — don't re-validate stored emails
     full_name: str | None
     role: str
     status: str
@@ -35,7 +35,7 @@ class EntitlementsResponse(BaseModel):
 class MeResponse(BaseModel):
     """Combined response from /api/auth/me — user identity + effective entitlements."""
     id: uuid.UUID
-    email: PermissiveEmail
+    email: str  # plain str on output
     full_name: str | None
     role: str
     status: str

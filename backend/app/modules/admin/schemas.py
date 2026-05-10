@@ -26,7 +26,11 @@ class AdminUserUpdate(BaseModel):
 
 class AdminUserOut(BaseModel):
     id: uuid.UUID
-    email: PermissiveEmail
+    # Plain str on output: don't re-validate stored emails. Older accounts
+    # may have shapes that current input validation would reject (e.g. the
+    # docstring example `admin@local` with no TLD), and serialization should
+    # never reject existing data.
+    email: str
     full_name: str | None
     role: str
     status: str
