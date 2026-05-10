@@ -1,10 +1,12 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
+
+from app.core.types import PermissiveEmail
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: PermissiveEmail
     password: str
 
 
@@ -16,7 +18,7 @@ class TokenResponse(BaseModel):
 
 class UserResponse(BaseModel):
     id: uuid.UUID
-    email: EmailStr
+    email: PermissiveEmail
     full_name: str | None
     role: str
     status: str
@@ -33,7 +35,7 @@ class EntitlementsResponse(BaseModel):
 class MeResponse(BaseModel):
     """Combined response from /api/auth/me — user identity + effective entitlements."""
     id: uuid.UUID
-    email: EmailStr
+    email: PermissiveEmail
     full_name: str | None
     role: str
     status: str

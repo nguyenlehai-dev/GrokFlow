@@ -1,10 +1,12 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
+
+from app.core.types import PermissiveEmail
 
 
 class AdminUserCreate(BaseModel):
-    email: EmailStr
+    email: PermissiveEmail
     password: str = Field(min_length=8, max_length=128)
     full_name: str | None = None
     role: str = Field(default="user", pattern="^(admin|user|support)$")
@@ -24,7 +26,7 @@ class AdminUserUpdate(BaseModel):
 
 class AdminUserOut(BaseModel):
     id: uuid.UUID
-    email: EmailStr
+    email: PermissiveEmail
     full_name: str | None
     role: str
     status: str
