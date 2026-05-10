@@ -1,11 +1,32 @@
 # GrokFlow Documentation
 
-Tài liệu nội bộ cho dev team. Tổ chức theo 2 nhóm chính:
+Tài liệu nội bộ cho dev team. Tổ chức theo 3 nhóm chính:
 
-- [`docs/answer/`](./answer/) — phân tích, kiến trúc, quyết định thiết kế, ADR, hướng dẫn setup. Trả lời câu hỏi *"vì sao"* và *"làm thế nào"*.
-- [`docs/api/`](./api/) — đặc tả REST API (cả internal dashboard và public v1). Trả lời câu hỏi *"endpoint nào, payload gì"*.
+- **[`QUY-TRINH-DEPLOY.md`](./QUY-TRINH-DEPLOY.md)** ⭐ — hướng dẫn nhanh tiếng Việt: code → push → live trong 30s. Đọc trước.
+- [`BRANCHING.md`](./BRANCHING.md) — chi tiết kỹ thuật quy trình branching + auto-deploy (English).
+- [`docs/answer/`](./answer/) — phân tích, kiến trúc, quyết định thiết kế, ADR, hướng dẫn setup.
+- [`docs/api/`](./api/) — đặc tả REST API (cả internal dashboard và public v1).
+
+## Quick start
+
+```bash
+git clone https://github.com/nguyenlehai-dev/GrokFlow.git
+cd GrokFlow && git checkout dev
+# ... edit ...
+git add -A && git commit -m "feat: ..."
+git push origin dev               # CI test trên GitHub
+git checkout prod && git merge --ff-only dev
+git push origin prod              # ← live trong ~30s
+```
+
+Đọc [`QUY-TRINH-DEPLOY.md`](./QUY-TRINH-DEPLOY.md) cho từng bước chi tiết.
 
 ## Index
+
+### Vận hành (deploy / branching)
+
+- ⭐ [Quy trình deploy (tiếng Việt)](./QUY-TRINH-DEPLOY.md)
+- [Branching workflow (English, technical)](./BRANCHING.md)
 
 ### Answer
 

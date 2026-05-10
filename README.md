@@ -2,6 +2,7 @@
 
 Nền tảng quản lý Chrome Profile, API Key và hàng đợi job tự động hóa cho việc tạo nội dung ảnh/video qua các provider như Grok và Flow. Khách hàng tự đăng nhập tài khoản provider; hệ thống chỉ điều phối profile, queue và lưu kết quả.
 
+> ⭐ **Quy trình code & deploy (làm theo từng bước)**: [docs/QUY-TRINH-DEPLOY.md](docs/QUY-TRINH-DEPLOY.md)
 > Phân tích đầy đủ: [docs/answer/phan-tich-du-an-ui-ux-pro-max.md](docs/answer/phan-tich-du-an-ui-ux-pro-max.md)
 > Tổng hợp docs: [docs/README.md](docs/README.md)
 
