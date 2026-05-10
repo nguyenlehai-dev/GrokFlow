@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { ShieldCheck, Sliders } from "lucide-react";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
@@ -52,8 +52,47 @@ export function AdminPage() {
   // "Rendered more hooks than during the previous render" when the role
   // changes between render passes (e.g. /me refresh).
   const me = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+  const clear = useAuthStore((s) => s.clear);
+  const navigate = useNavigate();
   const [tab, setTab] = useState<"users" | "plans">("users");
+  // Re-fetch /me on mount: cached role from localStorage may be stale (e.g.
+  // user logged in as admin earlier, then got demoted, then opened /admin
+  // from cache → backend rejects with 403 even though the cached gate let
+  // them through). Source of truth = backend.
+  const [verified, setVerified] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get("/api/auth/me");
+        if (cancelled) return;
+        setUser(r.data);
+        if (r.data?.role !== "admin") {
+          toast("Tài khoản này không có quyền admin", "error");
+          navigate("/dashboard", { replace: true });
+          return;
+        }
+        setVerified(true);
+      } catch (e: any) {
+        if (e?.response?.status === 401) {
+          clear();
+          navigate("/login", { replace: true });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // While the cached role isn't admin we don't want to even mount the
+  // queries (they'd 403). Render a redirect immediately.
   if (me?.role !== "admin") return <Navigate to="/dashboard" replace />;
+
+  // Wait for the fresh /me confirmation so admin queries don't fire with a
+  // stale token (e.g. cache says admin, DB says user → 403).
+  if (!verified) {
+    return <p className="text-slate-500">Đang xác thực quyền admin...</p>;
+  }
 
   return (
     <div className="space-y-6">
