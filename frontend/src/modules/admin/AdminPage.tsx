@@ -48,10 +48,12 @@ interface Catalog {
 const NULL_PLAN_ID = "00000000-0000-0000-0000-000000000000";
 
 export function AdminPage() {
+  // Hooks MUST run before any conditional return — otherwise React throws
+  // "Rendered more hooks than during the previous render" when the role
+  // changes between render passes (e.g. /me refresh).
   const me = useAuthStore((s) => s.user);
-  if (me?.role !== "admin") return <Navigate to="/dashboard" replace />;
-
   const [tab, setTab] = useState<"users" | "plans">("users");
+  if (me?.role !== "admin") return <Navigate to="/dashboard" replace />;
 
   return (
     <div className="space-y-6">
@@ -61,7 +63,7 @@ export function AdminPage() {
         <TabButton active={tab === "users"} onClick={() => setTab("users")}>Users</TabButton>
         <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>Plans / Gói</TabButton>
       </div>
-      {tab === "users" ? <UsersTab meId={me!.id} /> : <PlansTab />}
+      {tab === "users" ? <UsersTab meId={me.id} /> : <PlansTab />}
     </div>
   );
 }
