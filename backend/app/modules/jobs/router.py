@@ -5,8 +5,15 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from app.core.deps import CurrentUser, DbSession
-from app.core.exceptions import InvalidPayload, NotFound
+from app.core.exceptions import EntitlementBlocked, InvalidPayload, NotFound
 from app.models import File, Job, JobLog
+from app.modules.entitlements.service import (
+    EntitlementDenied,
+    assert_concurrent_jobs,
+    assert_job_options,
+    assert_quota,
+    get_effective_entitlements,
+)
 from app.modules.files import service as files_service
 
 from . import service
@@ -66,6 +73,19 @@ async def create_job(payload: JobCreate, user: CurrentUser, db: DbSession) -> Jo
     if payload.n != 1: options["n"] = payload.n
     if payload.seed is not None: options["seed"] = payload.seed
     if payload.input_image_file_id: options["input_image_file_id"] = str(payload.input_image_file_id)
+
+    eff = await get_effective_entitlements(db, user)
+    try:
+        assert_job_options(
+            eff,
+            job_type=payload.job_type,
+            has_input_image=payload.input_image_file_id is not None,
+            options=options,
+        )
+        await assert_concurrent_jobs(db, user, eff)
+        await assert_quota(db, user, eff)
+    except EntitlementDenied as e:
+        raise EntitlementBlocked(e.code, e.message)
 
     return await service.create_job(
         db,

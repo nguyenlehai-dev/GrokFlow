@@ -3,6 +3,7 @@
 Tài liệu nội bộ cho dev team. Tổ chức theo 3 nhóm chính:
 
 - **[`QUY-TRINH-DEPLOY.md`](./QUY-TRINH-DEPLOY.md)** ⭐ — hướng dẫn nhanh tiếng Việt: code → push → live trong 30s. Đọc trước.
+- **[`PLANS-ENTITLEMENTS.md`](./PLANS-ENTITLEMENTS.md)** — gói (Plan) + phân quyền user; cách bán & override quyền.
 - [`BRANCHING.md`](./BRANCHING.md) — chi tiết kỹ thuật quy trình branching + auto-deploy (English).
 - [`docs/answer/`](./answer/) — phân tích, kiến trúc, quyết định thiết kế, ADR, hướng dẫn setup.
 - [`docs/api/`](./api/) — đặc tả REST API (cả internal dashboard và public v1).
@@ -26,6 +27,7 @@ git push origin prod              # ← live trong ~30s
 ### Vận hành (deploy / branching)
 
 - ⭐ [Quy trình deploy (tiếng Việt)](./QUY-TRINH-DEPLOY.md)
+- [Plans & Entitlements (gói + phân quyền user)](./PLANS-ENTITLEMENTS.md)
 - [Branching workflow (English, technical)](./BRANCHING.md)
 
 ### Answer

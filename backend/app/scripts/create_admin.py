@@ -1,6 +1,7 @@
-"""Create or upsert an admin user. Usage:
+"""Create or upsert a user. Usage:
 
     python -m app.scripts.create_admin --email admin@local --password ChangeMe123!
+    python -m app.scripts.create_admin --email user@local --password ChangeMe123! --role user
 """
 
 import argparse
@@ -13,7 +14,7 @@ from app.core.security import hash_password
 from app.models import User
 
 
-async def main(email: str, password: str, full_name: str | None) -> None:
+async def main(email: str, password: str, full_name: str | None, role: str) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -22,19 +23,19 @@ async def main(email: str, password: str, full_name: str | None) -> None:
         user = result.scalar_one_or_none()
         if user:
             user.password_hash = hash_password(password)
-            user.role = "admin"
+            user.role = role
             user.status = "active"
-            print(f"updated admin user {email}")
+            print(f"updated {role} user {email}")
         else:
             user = User(
                 email=email,
                 password_hash=hash_password(password),
                 full_name=full_name,
-                role="admin",
+                role=role,
                 status="active",
             )
             db.add(user)
-            print(f"created admin user {email}")
+            print(f"created {role} user {email}")
         await db.commit()
 
 
@@ -43,5 +44,6 @@ if __name__ == "__main__":
     p.add_argument("--email", required=True)
     p.add_argument("--password", required=True)
     p.add_argument("--full-name", default=None)
+    p.add_argument("--role", default="admin", choices=["admin", "user"])
     args = p.parse_args()
-    asyncio.run(main(args.email, args.password, args.full_name))
+    asyncio.run(main(args.email, args.password, args.full_name, args.role))

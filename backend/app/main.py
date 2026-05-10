@@ -3,9 +3,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, SessionLocal, engine
 from app.core.monitoring import init_sentry
 from app.modules.admin.router import router as admin_router
+from app.modules.entitlements.service import seed_default_plans
 from app.modules.api_keys.router import router as api_keys_router
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
@@ -22,6 +23,8 @@ init_sentry()
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    async with SessionLocal() as db:
+        await seed_default_plans(db)
     yield
 
 

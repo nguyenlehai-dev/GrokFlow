@@ -1,22 +1,31 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Key, Layers, FileText, Settings, LayoutDashboard, Workflow, LogOut, Shield, ScrollText } from "lucide-react";
 import { useAuthStore } from "@/core/auth/store";
+import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 
+// `feature` (optional) → only show this nav item if the user's entitlements
+// allow it. Admins always pass.
 const baseNav = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/api-keys", label: "API Keys", icon: Key },
-  { to: "/profiles", label: "Profiles", icon: Layers },
-  { to: "/jobs", label: "Jobs", icon: Workflow },
-  { to: "/api-docs", label: "API Docs", icon: FileText },
-  { to: "/audit-logs", label: "Audit Log", icon: ScrollText },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/api-keys",  label: "API Keys",  icon: Key },
+  { to: "/profiles",  label: "Profiles",  icon: Layers },
+  { to: "/jobs",      label: "Jobs",      icon: Workflow },
+  { to: "/api-docs",  label: "API Docs",  icon: FileText,   feature: FEATURE_KEYS.uiApiDocs },
+  { to: "/audit-logs",label: "Audit Log", icon: ScrollText, feature: FEATURE_KEYS.uiAuditLog },
+  { to: "/settings",  label: "Settings",  icon: Settings,   feature: FEATURE_KEYS.uiSettings },
 ];
 const adminNav = [{ to: "/admin", label: "Admin", icon: Shield }];
 
 export function AppShell() {
   const { user, clear } = useAuthStore();
   const navigate = useNavigate();
-  const nav = user?.role === "admin" ? [...baseNav, ...adminNav] : baseNav;
+  const isAdmin = user?.role === "admin";
+  const features = user?.entitlements?.features ?? {};
+  const visibleBase = baseNav.filter(
+    (n) => !n.feature || isAdmin || features[n.feature],
+  );
+  const nav = isAdmin ? [...visibleBase, ...adminNav] : visibleBase;
+  const planName = user?.entitlements?.plan_name;
 
   const onLogout = () => {
     clear();
@@ -50,7 +59,14 @@ export function AppShell() {
       </aside>
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-          <div className="text-sm text-slate-500">Logged in as <span className="font-medium text-slate-800">{user?.email}</span> ({user?.role})</div>
+          <div className="text-sm text-slate-500">
+            Logged in as <span className="font-medium text-slate-800">{user?.email}</span> ({user?.role})
+            {planName && (
+              <span className="ml-2 inline-block rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                {planName}
+              </span>
+            )}
+          </div>
           <button onClick={onLogout} className="btn-ghost"><LogOut size={16} className="mr-2" />Logout</button>
         </header>
         <main className="flex-1 overflow-auto p-6">

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
-import { Image as ImageIcon, X } from "lucide-react";
+import { Image as ImageIcon, Lock, X } from "lucide-react";
 import { api } from "@/core/api/axios";
+import { useFeature } from "@/core/auth/store";
+import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 import { toast } from "@/components/ui/Toast";
 
 interface Profile {
@@ -79,6 +81,18 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [inputImage, setInputImage] = useState<{ file_id: string; preview: string } | null>(null);
 
+  // Entitlements — gate UI options to what the user's plan allows.
+  const canImage = useFeature(FEATURE_KEYS.jobImage);
+  const canVideo = useFeature(FEATURE_KEYS.jobVideo);
+  const canImg2Img = useFeature(FEATURE_KEYS.jobImageToImage);
+  const canImg2Vid = useFeature(FEATURE_KEYS.jobImageToVideo);
+  const canQualityHigh = useFeature(FEATURE_KEYS.imageQualityHigh);
+  const can720p = useFeature(FEATURE_KEYS.videoResolution720p);
+  const can10s = useFeature(FEATURE_KEYS.videoDuration10s);
+  const canSpicy = useFeature(FEATURE_KEYS.videoSpicy);
+  const canFun = useFeature(FEATURE_KEYS.videoFunMode);
+  const canCustom = useFeature(FEATURE_KEYS.videoCustomMode);
+
   const { data: profiles } = useQuery({
     queryKey: ["profiles"],
     queryFn: async () => (await api.get<Profile[]>("/api/profiles")).data,
@@ -101,6 +115,19 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     if (provider === "flow") setValue("job_type", "video");
     setValue("model", provider === "grok" ? "aurora" : "veo-3");
   }, [provider, setValue]);
+
+  // Default the form to whichever job_type the user actually has access to.
+  useEffect(() => {
+    if (jobType === "image" && !canImage && canVideo) setValue("job_type", "video");
+    if (jobType === "video" && !canVideo && canImage) setValue("job_type", "image");
+  }, [canImage, canVideo, jobType, setValue]);
+
+  // Drop ineligible defaults so the form doesn't submit a blocked option.
+  useEffect(() => {
+    if (!canQualityHigh) setValue("quality", "speed");
+    if (!can720p) setValue("resolution", "480p");
+    if (!can10s) setValue("duration", 6);
+  }, [canQualityHigh, can720p, can10s, setValue]);
 
   // Keep `size` in sync with `aspect` (size is what backend currently uses;
   // aspect is what we display + pass through as a hint).
@@ -154,7 +181,13 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     if (v.profile_id) payload.profile_id = v.profile_id;
     if (v.seed != null && Number(v.seed) > 0) payload.seed = Number(v.seed);
     if (inputImage) payload.input_image_file_id = inputImage.file_id;
-    await api.post("/api/jobs", payload);
+    try {
+      await api.post("/api/jobs", payload);
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail?.message ?? e?.message ?? "Tạo job lỗi";
+      toast(msg, "error");
+      return;
+    }
     qc.invalidateQueries({ queryKey: ["jobs"] });
     toast("Job đã được đưa vào hàng đợi", "success");
     onClose();
@@ -186,11 +219,16 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
           <div>
             <label className="text-sm font-medium">Type</label>
             <select className="input" {...register("job_type")} disabled={provider === "flow"}>
-              <option value="image">Image</option>
-              <option value="video">Video</option>
+              <option value="image" disabled={!canImage}>Image{!canImage ? " 🔒" : ""}</option>
+              <option value="video" disabled={!canVideo}>Video{!canVideo ? " 🔒" : ""}</option>
             </select>
             {provider === "grok" && jobType === "video" && (
               <p className="text-xs text-amber-600 mt-1">Cần Grok account có quyền video</p>
+            )}
+            {!canImage && !canVideo && (
+              <p className="text-xs text-rose-600 mt-1">
+                <Lock size={12} className="inline" /> Gói hiện tại chưa được bật tạo job
+              </p>
             )}
           </div>
           <div>
@@ -238,6 +276,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
         </div>
 
         {(jobType === "image" || (provider === "grok" && jobType === "video")) && (
+          (jobType === "image" ? canImg2Img : canImg2Vid) ? (
           <div>
             <label className="text-sm font-medium">
               Ảnh tham chiếu (optional) — quyết định mode:
@@ -277,6 +316,11 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
               />
             </div>
           </div>
+          ) : (
+            <p className="text-xs text-slate-500 italic">
+              <Lock size={12} className="inline" /> Gói hiện tại không hỗ trợ upload ảnh tham chiếu cho {jobType}.
+            </p>
+          )
         )}
 
         <div className="grid grid-cols-4 gap-3">
@@ -293,7 +337,9 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
               <label className="text-sm font-medium">Chất lượng</label>
               <select className="input" {...register("quality")}>
                 <option value="speed">Speed (nhanh)</option>
-                <option value="quality">Quality (chậm, đẹp hơn)</option>
+                <option value="quality" disabled={!canQualityHigh}>
+                  Quality (chậm, đẹp hơn){!canQualityHigh ? " 🔒" : ""}
+                </option>
               </select>
             </div>
           )}
@@ -303,9 +349,14 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
             <div>
               <label className="text-sm font-medium">Độ phân giải</label>
               <select className="input" {...register("resolution")}>
-                {VIDEO_RESOLUTIONS.map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
+                {VIDEO_RESOLUTIONS.map((r) => {
+                  const locked = r === "720p" && !can720p;
+                  return (
+                    <option key={r} value={r} disabled={locked}>
+                      {r}{locked ? " 🔒" : ""}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}
@@ -315,9 +366,14 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
             <div>
               <label className="text-sm font-medium">Thời lượng</label>
               <select className="input" {...register("duration", { valueAsNumber: true })}>
-                {VIDEO_DURATIONS.map((d) => (
-                  <option key={d} value={d}>{d}s</option>
-                ))}
+                {VIDEO_DURATIONS.map((d) => {
+                  const locked = d === 10 && !can10s;
+                  return (
+                    <option key={d} value={d} disabled={locked}>
+                      {d}s{locked ? " 🔒" : ""}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}
@@ -329,11 +385,23 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
             <div>
               <label className="text-sm font-medium">Mode video (preset hậu kỳ)</label>
               <select className="input" {...register("mode")}>
-                {VIDEO_MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
+                {VIDEO_MODES.map((m) => {
+                  const locked =
+                    (m.v === "spicy"  && !canSpicy) ||
+                    (m.v === "fun"    && !canFun) ||
+                    (m.v === "custom" && !canCustom);
+                  return (
+                    <option key={m.v} value={m.v} disabled={locked}>
+                      {m.label}{locked ? " 🔒" : ""}
+                    </option>
+                  );
+                })}
               </select>
               <p className="text-xs text-slate-500 mt-1">
                 Sau khi Grok render video, hệ thống tự click preset bạn chọn để regenerate phiên bản đó.
-                <strong> Spicy (18+)</strong> chỉ có với account Pro/Heavy — nếu account thiếu quyền sẽ tự động fallback về Normal.
+                {canSpicy && (
+                  <> <strong> Spicy (18+)</strong> chỉ có với account Pro/Heavy.</>
+                )}
               </p>
             </div>
           </div>

@@ -1,12 +1,16 @@
 import uuid
 from fastapi import APIRouter, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.deps import CurrentUser, DbSession
-from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
+from app.core.exceptions import EntitlementBlocked, InvalidPayload, NotFound, PermissionDenied
 from app.core.security import generate_api_key
 from app.models import ApiKey
 from app.modules.audit import service as audit
+from app.modules.entitlements.service import (
+    get_effective_entitlements,
+    get_limit,
+)
 
 from .schemas import (
     JOB_TYPES,
@@ -27,6 +31,20 @@ async def list_keys(user: CurrentUser, db: DbSession) -> list[ApiKey]:
 
 @router.post("", response_model=ApiKeyCreatedOut, status_code=status.HTTP_201_CREATED)
 async def create_key(payload: ApiKeyCreate, user: CurrentUser, db: DbSession) -> ApiKeyCreatedOut:
+    eff = await get_effective_entitlements(db, user)
+    cap = get_limit(eff, "max_api_keys")
+    if cap > 0:
+        cur = (await db.execute(
+            select(func.count(ApiKey.id)).where(
+                ApiKey.user_id == user.id, ApiKey.status != "revoked"
+            )
+        )).scalar_one()
+        if cur >= cap:
+            raise EntitlementBlocked(
+                "max_api_keys_exceeded",
+                f"Đã đạt giới hạn {cap} API key của gói. Liên hệ admin để nâng gói.",
+            )
+
     invalid_p = [p for p in payload.allowed_providers if p not in PROVIDERS]
     if invalid_p:
         raise InvalidPayload(f"Unknown providers: {invalid_p}")

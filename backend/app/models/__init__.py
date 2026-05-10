@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -33,6 +34,20 @@ class TimestampMixin:
     )
 
 
+class Plan(Base, TimestampMixin):
+    __tablename__ = "plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    # Plan entitlements: { "features": { "job.video": true, ... },
+    #                      "limits":   { "max_profiles": 3, ... } }
+    entitlements: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
 class User(Base, TimestampMixin):
     __tablename__ = "users"
 
@@ -44,7 +59,12 @@ class User(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
     webhook_url: Mapped[str | None] = mapped_column(Text)
     webhook_secret: Mapped[str | None] = mapped_column(String(128))
+    # Plan + per-user entitlement overrides. plan_id NULL → fall back to default plan.
+    # entitlement_overrides is a partial map merged on top of the plan's entitlements.
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType, ForeignKey("plans.id", ondelete="SET NULL"))
+    entitlement_overrides: Mapped[dict | None] = mapped_column(JSONType)
 
+    plan: Mapped[Plan | None] = relationship()
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     profiles: Mapped[list["Profile"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     jobs: Mapped[list["Job"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -165,4 +185,4 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
-__all__ = ["User", "ApiKey", "Profile", "Job", "JobLog", "File", "AuditLog"]
+__all__ = ["Plan", "User", "ApiKey", "Profile", "Job", "JobLog", "File", "AuditLog"]

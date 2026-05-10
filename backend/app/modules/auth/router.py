@@ -7,8 +7,9 @@ from app.core.exceptions import InvalidCredentials
 from app.core.security import create_access_token, verify_password
 from app.models import User
 from app.modules.audit import service as audit
+from app.modules.entitlements.service import get_effective_entitlements
 
-from .schemas import LoginRequest, TokenResponse, UserResponse
+from .schemas import EntitlementsResponse, LoginRequest, MeResponse, TokenResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -33,6 +34,15 @@ async def logout() -> dict:
     return {"ok": True}
 
 
-@router.get("/me", response_model=UserResponse)
-async def me(user: CurrentUser) -> User:
-    return user
+@router.get("/me", response_model=MeResponse)
+async def me(user: CurrentUser, db: DbSession) -> MeResponse:
+    eff = await get_effective_entitlements(db, user)
+    return MeResponse(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        status=user.status,
+        created_at=user.created_at,
+        entitlements=EntitlementsResponse(**eff),
+    )

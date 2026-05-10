@@ -39,3 +39,13 @@ class InvalidPayload(AppError):
 class RateLimited(AppError):
     def __init__(self) -> None:
         super().__init__(status.HTTP_429_TOO_MANY_REQUESTS, "rate_limited", "Rate limit exceeded")
+
+
+class EntitlementBlocked(AppError):
+    """Raised when the user's plan/overrides don't permit an action.
+
+    Distinct from PermissionDenied (role-based) and RateLimited (transient): this
+    is a soft-deny with a human-readable upgrade hint."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(status.HTTP_402_PAYMENT_REQUIRED, code, message)
