@@ -19,7 +19,7 @@ async function fetchCounts(): Promise<Counts> {
   const [keys, profiles, jobs] = await Promise.all([
     api.get("/api/api-keys"),
     api.get("/api/profiles"),
-    api.get("/api/jobs?limit=500"),
+    api.get("/api/jobs?limit=200"),
   ]);
   const ps = profiles.data as any[];
   const js = jobs.data as any[];
