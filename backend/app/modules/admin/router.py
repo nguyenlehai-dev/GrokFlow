@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from app.core.deps import AdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound
 from app.core.security import hash_password
-from app.models import ApiKey, Job, Plan, Profile, User
+from app.models import ApiKey, Invoice, Job, Payment, Plan, Profile, Subscription, User
 from app.modules.audit import service as audit
 from app.modules.entitlements.catalog import FEATURES, LIMITS
 from app.modules.entitlements.service import get_effective_entitlements
@@ -245,3 +245,97 @@ async def delete_plan(plan_id: uuid.UUID, admin: AdminUser, db: DbSession) -> No
     )
     await db.delete(plan)
     await db.commit()
+
+
+# ============================================================================
+# Billing — admin reconciliation
+# ============================================================================
+
+@router.get("/subscriptions")
+async def list_subscriptions(admin: AdminUser, db: DbSession, status_filter: str | None = None) -> list[dict]:
+    """List all subscriptions across users — for admin reconciliation dashboard."""
+    q = select(Subscription, User.email, Plan.code).join(User, User.id == Subscription.user_id).join(
+        Plan, Plan.id == Subscription.plan_id
+    )
+    if status_filter:
+        q = q.where(Subscription.status == status_filter)
+    q = q.order_by(Subscription.created_at.desc()).limit(200)
+    rows = (await db.execute(q)).all()
+    return [
+        {
+            "id": str(s.id),
+            "user_id": str(s.user_id),
+            "user_email": email,
+            "plan_id": str(s.plan_id),
+            "plan_code": plan_code,
+            "status": s.status,
+            "billing_cycle": s.billing_cycle,
+            "provider": s.provider,
+            "amount": float(s.amount),
+            "currency": s.currency,
+            "current_period_start": s.current_period_start.isoformat() if s.current_period_start else None,
+            "current_period_end": s.current_period_end.isoformat() if s.current_period_end else None,
+            "cancel_at_period_end": s.cancel_at_period_end,
+            "created_at": s.created_at.isoformat(),
+        }
+        for s, email, plan_code in rows
+    ]
+
+
+@router.post("/subscriptions/{subscription_id}/confirm-payment")
+async def confirm_payment(subscription_id: uuid.UUID, admin: AdminUser, db: DbSession) -> dict:
+    """Mark a pending subscription as paid → active, update user.plan_id.
+
+    Use this after manually verifying a bank transfer for provider=manual orders.
+    Side effects:
+      - Subscription.status: pending → active
+      - Subscription.current_period_start/end populated
+      - Payment.status: pending → success, paid_at set
+      - Invoice.status: draft → paid
+      - User.plan_id ← subscription.plan_id (user gets new entitlements)
+    """
+    from app.modules.billing.service import period_end_for_cycle
+
+    sub = await db.get(Subscription, subscription_id)
+    if not sub:
+        raise NotFound("subscription")
+    if sub.status != "pending":
+        raise InvalidPayload(f"Subscription đang ở trạng thái {sub.status}, không phải pending")
+
+    now = datetime.now(timezone.utc)
+    sub.status = "active"
+    sub.current_period_start = now
+    sub.current_period_end = period_end_for_cycle(now, sub.billing_cycle)
+
+    # Find the matching payment + invoice
+    pay = (
+        await db.execute(
+            select(Payment).where(Payment.subscription_id == sub.id, Payment.status == "pending")
+            .order_by(Payment.created_at.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    if pay:
+        pay.status = "success"
+        pay.paid_at = now
+
+    inv = (
+        await db.execute(
+            select(Invoice).where(Invoice.subscription_id == sub.id, Invoice.status == "draft")
+            .order_by(Invoice.created_at.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    if inv:
+        inv.status = "paid"
+        inv.paid_at = now
+
+    # Update user's plan
+    user = await db.get(User, sub.user_id)
+    if user:
+        user.plan_id = sub.plan_id
+
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_confirm_payment", target_type="subscription",
+        target_id=sub.id, metadata={"user_id": str(sub.user_id), "amount": float(sub.amount)},
+    )
+    await db.commit()
+    return {"ok": True, "subscription_id": str(sub.id), "status": "active"}

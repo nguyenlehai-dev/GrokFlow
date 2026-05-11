@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Key, Layers, FileText, Settings, LayoutDashboard, Workflow, LogOut, Shield, ScrollText } from "lucide-react";
+import { Key, Layers, FileText, Settings, LayoutDashboard, Workflow, LogOut, Shield, ScrollText, CreditCard } from "lucide-react";
 import { useAuthStore } from "@/core/auth/store";
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 
@@ -11,6 +11,7 @@ const baseNav = [
   { to: "/profiles",  label: "Profiles",  icon: Layers },
   { to: "/jobs",      label: "Jobs",      icon: Workflow },
   { to: "/api-docs",  label: "API Docs",  icon: FileText,   feature: FEATURE_KEYS.uiApiDocs },
+  { to: "/billing",   label: "Billing",   icon: CreditCard },
   { to: "/audit-logs",label: "Audit Log", icon: ScrollText, feature: FEATURE_KEYS.uiAuditLog },
   { to: "/settings",  label: "Settings",  icon: Settings,   feature: FEATURE_KEYS.uiSettings },
 ];

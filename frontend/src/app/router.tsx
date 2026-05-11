@@ -4,6 +4,9 @@ import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { LoginPage } from "@/modules/auth/LoginPage";
 import { RegisterPage } from "@/modules/auth/RegisterPage";
 import { LandingPage } from "@/modules/landing/LandingPage";
+import { BillingPage } from "@/modules/billing/BillingPage";
+import { PricingPage } from "@/modules/billing/PricingPage";
+import { CheckoutPage } from "@/modules/billing/CheckoutPage";
 import { DashboardPage } from "@/modules/dashboard/DashboardPage";
 import { ApiKeysPage } from "@/modules/api-keys/ApiKeysPage";
 import { ProfilesPage } from "@/modules/profiles/ProfilesPage";
@@ -42,6 +45,9 @@ export const router = createBrowserRouter([
       { path: "profiles", element: <ProfilesPage /> },
       { path: "jobs", element: <JobsPage /> },
       { path: "api-docs", element: <ApiDocsPage /> },
+      { path: "billing", element: <BillingPage /> },
+      { path: "pricing", element: <PricingPage /> },
+      { path: "checkout/:plan_code", element: <CheckoutPage /> },
       { path: "audit-logs", element: <AuditLogPage /> },
       { path: "admin", element: <AdminPage /> },
       { path: "settings", element: <SettingsPage /> },
