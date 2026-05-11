@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { Navigate, useNavigate } from "react-router-dom";
-import { ShieldCheck, Sliders } from "lucide-react";
+import { ShieldCheck, Sliders, Ban, UserCheck, Trash2, Pencil, UserPlus, Plus } from "lucide-react";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -173,7 +173,10 @@ function UsersTab({ meId }: { meId: string }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Users</h2>
-        <button onClick={() => setOpen(true)} className="btn-primary">+ Tạo user</button>
+        <button onClick={() => setOpen(true)} className="btn-primary inline-flex items-center gap-1.5">
+          <UserPlus size={16} />
+          Tạo user
+        </button>
       </div>
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
@@ -256,13 +259,31 @@ function UserRow({
           Quyền
         </button>
         {u.status === "active" ? (
-          <button className="btn-ghost" onClick={() => update.mutate({ status: "banned" })}>Ban</button>
+          <button
+            className="btn-ghost text-amber-600"
+            onClick={() => update.mutate({ status: "banned" })}
+            title="Khóa tài khoản"
+          >
+            <Ban size={14} className="inline mr-1" />
+            Ban
+          </button>
         ) : (
-          <button className="btn-ghost" onClick={() => update.mutate({ status: "active" })}>Activate</button>
+          <button
+            className="btn-ghost text-emerald-600"
+            onClick={() => update.mutate({ status: "active" })}
+            title="Kích hoạt lại tài khoản"
+          >
+            <UserCheck size={14} className="inline mr-1" />
+            Activate
+          </button>
         )}
         {u.id !== meId && (
-          <button className="btn-ghost text-rose-600"
-            onClick={() => confirm(`Xóa user ${u.email}?`) && remove.mutate()}>
+          <button
+            className="btn-ghost text-rose-600"
+            onClick={() => confirm(`Xóa user ${u.email}?`) && remove.mutate()}
+            title="Xóa user"
+          >
+            <Trash2 size={14} className="inline mr-1" />
             Delete
           </button>
         )}
@@ -566,7 +587,10 @@ function PlansTab() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Plans / Gói</h2>
-        <button onClick={() => setCreating(true)} className="btn-primary">+ Tạo plan</button>
+        <button onClick={() => setCreating(true)} className="btn-primary inline-flex items-center gap-1.5">
+          <Plus size={16} />
+          Tạo plan
+        </button>
       </div>
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
@@ -592,11 +616,16 @@ function PlansTab() {
                   <td className="px-4 py-2">{p.sort_order}</td>
                   <td className="px-4 py-2 text-slate-600">{p.description || "—"}</td>
                   <td className="px-4 py-2 space-x-2 whitespace-nowrap">
-                    <button className="btn-ghost" onClick={() => setEditing(p)}>Sửa</button>
+                    <button className="btn-ghost" onClick={() => setEditing(p)} title="Sửa plan">
+                      <Pencil size={14} className="inline mr-1" />
+                      Sửa
+                    </button>
                     <button
                       className="btn-ghost text-rose-600"
                       onClick={() => confirm(`Xóa plan ${p.name}? Users đang dùng sẽ về plan mặc định.`) && remove.mutate(p.id)}
+                      title="Xóa plan"
                     >
+                      <Trash2 size={14} className="inline mr-1" />
                       Xóa
                     </button>
                   </td>

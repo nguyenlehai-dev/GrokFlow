@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Pencil, Trash2, RefreshCw, X as XIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Eye, Images, Pencil, Trash2, RefreshCw, Ban, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus } from "lucide-react";
 import { api } from "@/core/api/axios";
 import { toast } from "@/components/ui/Toast";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -168,13 +168,20 @@ export function JobsPage() {
               onClick={() => {
                 if (confirm(`Cancel ${inFlightCount} job đang chạy / chờ?`)) cancelAll.mutate();
               }}
-              className="btn-ghost text-rose-600"
+              className="btn-ghost text-amber-600 inline-flex items-center gap-1.5"
               disabled={cancelAll.isPending}
             >
+              <Ban size={14} />
               {cancelAll.isPending ? "Đang cancel..." : `Cancel all (${inFlightCount})`}
             </button>
           )}
-          <button onClick={() => setCreateOpen(true)} className="btn-primary">+ Tạo job</button>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="btn-primary inline-flex items-center gap-1.5"
+          >
+            <Plus size={16} />
+            Tạo job
+          </button>
         </div>
       </div>
 
@@ -267,7 +274,7 @@ export function JobsPage() {
                             title="Xem kết quả"
                             onClick={() => setGalleryJob(j)}
                           >
-                            <Eye size={16} className="fill-emerald-100" />
+                            <Images size={16} />
                           </button>
                         )}
                         {/* Edit (queued/pending only) */}
@@ -291,13 +298,13 @@ export function JobsPage() {
                         {/* Cancel (in-flight) */}
                         {cancellable && (
                           <button
-                            className="p-1.5 rounded hover:bg-rose-100 text-rose-600"
+                            className="p-1.5 rounded hover:bg-amber-100 text-amber-600"
                             title="Hủy job"
                             onClick={() => {
                               if (confirm("Hủy job này?")) cancel.mutate(j.id);
                             }}
                           >
-                            <XIcon size={16} />
+                            <Ban size={16} />
                           </button>
                         )}
                         {/* Delete (terminal only) */}
@@ -348,7 +355,7 @@ export function JobsPage() {
                 onClick={() => setPage(1)}
                 title="Trang đầu"
               >
-                «
+                <ChevronsLeft size={14} />
               </button>
               <button
                 className="btn-ghost px-2 py-1 disabled:opacity-30"
@@ -375,7 +382,7 @@ export function JobsPage() {
                 onClick={() => setPage(totalPages)}
                 title="Trang cuối"
               >
-                »
+                <ChevronsRight size={14} />
               </button>
             </div>
           </div>
