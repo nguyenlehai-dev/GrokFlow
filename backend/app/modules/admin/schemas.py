@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from pydantic import BaseModel, Field
 
 from app.core.types import PermissiveEmail
@@ -109,3 +110,130 @@ class AdminStats(BaseModel):
     total_jobs: int
     jobs_24h_success: int
     jobs_24h_failed: int
+
+
+# ---------- Billing (admin) ----------
+
+
+class AdminSubscriptionCreate(BaseModel):
+    user_id: uuid.UUID
+    plan_id: uuid.UUID
+    status: str = Field(default="active", pattern="^(pending|active|past_due|cancelled|expired)$")
+    billing_cycle: str = Field(default="monthly", pattern="^(monthly|yearly)$")
+    provider: str = Field(default="manual")
+    amount: Decimal = Field(default=Decimal(0), ge=0)
+    currency: str = Field(default="VND", max_length=8)
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+
+
+class AdminSubscriptionUpdate(BaseModel):
+    plan_id: uuid.UUID | None = None
+    status: str | None = Field(default=None, pattern="^(pending|active|past_due|cancelled|expired)$")
+    billing_cycle: str | None = Field(default=None, pattern="^(monthly|yearly)$")
+    provider: str | None = None
+    amount: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = None
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool | None = None
+
+
+class AdminSubscriptionOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    user_email: str
+    plan_id: uuid.UUID
+    plan_code: str
+    plan_name: str
+    status: str
+    billing_cycle: str
+    provider: str
+    amount: Decimal
+    currency: str
+    current_period_start: datetime | None
+    current_period_end: datetime | None
+    cancel_at_period_end: bool
+    cancelled_at: datetime | None
+    created_at: datetime
+
+
+class AdminPaymentCreate(BaseModel):
+    user_id: uuid.UUID
+    subscription_id: uuid.UUID | None = None
+    amount: Decimal = Field(gt=0)
+    currency: str = Field(default="VND", max_length=8)
+    status: str = Field(default="success", pattern="^(pending|success|failed|refunded)$")
+    provider: str = Field(default="manual")
+    provider_payment_id: str | None = None
+    payment_method: str | None = None
+    paid_at: datetime | None = None
+    failure_reason: str | None = None
+
+
+class AdminPaymentUpdate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0)
+    status: str | None = Field(default=None, pattern="^(pending|success|failed|refunded)$")
+    provider: str | None = None
+    provider_payment_id: str | None = None
+    payment_method: str | None = None
+    paid_at: datetime | None = None
+    failure_reason: str | None = None
+
+
+class AdminPaymentOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    user_email: str
+    subscription_id: uuid.UUID | None
+    amount: Decimal
+    currency: str
+    status: str
+    provider: str
+    provider_payment_id: str | None
+    payment_method: str | None
+    paid_at: datetime | None
+    failure_reason: str | None
+    created_at: datetime
+
+
+class AdminInvoiceCreate(BaseModel):
+    user_id: uuid.UUID
+    subscription_id: uuid.UUID | None = None
+    payment_id: uuid.UUID | None = None
+    amount: Decimal = Field(gt=0)
+    tax: Decimal = Field(default=Decimal(0), ge=0)
+    currency: str = Field(default="VND", max_length=8)
+    status: str = Field(default="issued", pattern="^(draft|issued|paid|void)$")
+    line_items: list[dict] = Field(default_factory=list)
+    billing_info: dict | None = None
+
+
+class AdminInvoiceUpdate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0)
+    tax: Decimal | None = Field(default=None, ge=0)
+    status: str | None = Field(default=None, pattern="^(draft|issued|paid|void)$")
+    paid_at: datetime | None = None
+    line_items: list[dict] | None = None
+    billing_info: dict | None = None
+    pdf_url: str | None = None
+
+
+class AdminInvoiceOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    user_email: str
+    subscription_id: uuid.UUID | None
+    payment_id: uuid.UUID | None
+    invoice_number: str
+    amount: Decimal
+    tax: Decimal
+    total: Decimal
+    currency: str
+    status: str
+    issued_at: datetime | None
+    paid_at: datetime | None
+    line_items: list
+    billing_info: dict | None
+    pdf_url: str | None
+    created_at: datetime

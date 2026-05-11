@@ -13,7 +13,16 @@ from app.modules.entitlements.catalog import FEATURES, LIMITS
 from app.modules.entitlements.service import get_effective_entitlements
 
 from .schemas import (
+    AdminInvoiceCreate,
+    AdminInvoiceOut,
+    AdminInvoiceUpdate,
+    AdminPaymentCreate,
+    AdminPaymentOut,
+    AdminPaymentUpdate,
     AdminStats,
+    AdminSubscriptionCreate,
+    AdminSubscriptionOut,
+    AdminSubscriptionUpdate,
     AdminUserCreate,
     AdminUserOut,
     AdminUserUpdate,
@@ -248,51 +257,191 @@ async def delete_plan(plan_id: uuid.UUID, admin: AdminUser, db: DbSession) -> No
 
 
 # ============================================================================
-# Billing — admin reconciliation
+# Billing — admin full CRUD
 # ============================================================================
 
-@router.get("/subscriptions")
-async def list_subscriptions(admin: AdminUser, db: DbSession, status_filter: str | None = None) -> list[dict]:
-    """List all subscriptions across users — for admin reconciliation dashboard."""
-    q = select(Subscription, User.email, Plan.code).join(User, User.id == Subscription.user_id).join(
-        Plan, Plan.id == Subscription.plan_id
+
+async def _sub_with_joins(db, sub: Subscription) -> AdminSubscriptionOut:
+    user = await db.get(User, sub.user_id)
+    plan = await db.get(Plan, sub.plan_id)
+    return AdminSubscriptionOut(
+        id=sub.id,
+        user_id=sub.user_id,
+        user_email=user.email if user else "",
+        plan_id=sub.plan_id,
+        plan_code=plan.code if plan else "",
+        plan_name=plan.name if plan else "",
+        status=sub.status,
+        billing_cycle=sub.billing_cycle,
+        provider=sub.provider,
+        amount=sub.amount,
+        currency=sub.currency,
+        current_period_start=sub.current_period_start,
+        current_period_end=sub.current_period_end,
+        cancel_at_period_end=sub.cancel_at_period_end,
+        cancelled_at=sub.cancelled_at,
+        created_at=sub.created_at,
     )
+
+
+async def _pay_with_email(db, pay: Payment) -> AdminPaymentOut:
+    user = await db.get(User, pay.user_id)
+    return AdminPaymentOut(
+        id=pay.id,
+        user_id=pay.user_id,
+        user_email=user.email if user else "",
+        subscription_id=pay.subscription_id,
+        amount=pay.amount,
+        currency=pay.currency,
+        status=pay.status,
+        provider=pay.provider,
+        provider_payment_id=pay.provider_payment_id,
+        payment_method=pay.payment_method,
+        paid_at=pay.paid_at,
+        failure_reason=pay.failure_reason,
+        created_at=pay.created_at,
+    )
+
+
+async def _inv_with_email(db, inv: Invoice) -> AdminInvoiceOut:
+    user = await db.get(User, inv.user_id)
+    return AdminInvoiceOut(
+        id=inv.id,
+        user_id=inv.user_id,
+        user_email=user.email if user else "",
+        subscription_id=inv.subscription_id,
+        payment_id=inv.payment_id,
+        invoice_number=inv.invoice_number,
+        amount=inv.amount,
+        tax=inv.tax,
+        total=inv.total,
+        currency=inv.currency,
+        status=inv.status,
+        issued_at=inv.issued_at,
+        paid_at=inv.paid_at,
+        line_items=inv.line_items,
+        billing_info=inv.billing_info,
+        pdf_url=inv.pdf_url,
+        created_at=inv.created_at,
+    )
+
+
+# -- Subscriptions ---------------------------------------------------------
+
+@router.get("/subscriptions", response_model=list[AdminSubscriptionOut])
+async def list_subscriptions(
+    admin: AdminUser, db: DbSession,
+    status_filter: str | None = None, user_id: uuid.UUID | None = None,
+) -> list[AdminSubscriptionOut]:
+    q = select(Subscription)
     if status_filter:
         q = q.where(Subscription.status == status_filter)
-    q = q.order_by(Subscription.created_at.desc()).limit(200)
-    rows = (await db.execute(q)).all()
-    return [
-        {
-            "id": str(s.id),
-            "user_id": str(s.user_id),
-            "user_email": email,
-            "plan_id": str(s.plan_id),
-            "plan_code": plan_code,
-            "status": s.status,
-            "billing_cycle": s.billing_cycle,
-            "provider": s.provider,
-            "amount": float(s.amount),
-            "currency": s.currency,
-            "current_period_start": s.current_period_start.isoformat() if s.current_period_start else None,
-            "current_period_end": s.current_period_end.isoformat() if s.current_period_end else None,
-            "cancel_at_period_end": s.cancel_at_period_end,
-            "created_at": s.created_at.isoformat(),
-        }
-        for s, email, plan_code in rows
-    ]
+    if user_id:
+        q = q.where(Subscription.user_id == user_id)
+    q = q.order_by(Subscription.created_at.desc()).limit(500)
+    rows = (await db.execute(q)).scalars().all()
+    return [await _sub_with_joins(db, s) for s in rows]
 
 
-@router.post("/subscriptions/{subscription_id}/confirm-payment")
-async def confirm_payment(subscription_id: uuid.UUID, admin: AdminUser, db: DbSession) -> dict:
-    """Mark a pending subscription as paid → active, update user.plan_id.
+@router.post("/subscriptions", response_model=AdminSubscriptionOut, status_code=status.HTTP_201_CREATED)
+async def create_subscription_admin(
+    payload: AdminSubscriptionCreate, admin: AdminUser, db: DbSession,
+) -> AdminSubscriptionOut:
+    """Admin creates a subscription directly (e.g. manual gift, comp, migrated user)."""
+    if not await db.get(User, payload.user_id):
+        raise NotFound("user")
+    if not await db.get(Plan, payload.plan_id):
+        raise NotFound("plan")
+    sub = Subscription(
+        user_id=payload.user_id, plan_id=payload.plan_id, status=payload.status,
+        billing_cycle=payload.billing_cycle, provider=payload.provider,
+        amount=payload.amount, currency=payload.currency,
+        current_period_start=payload.current_period_start,
+        current_period_end=payload.current_period_end,
+    )
+    db.add(sub)
+    await db.flush()
+    # If admin sets status=active, also push user.plan_id so entitlements reflect
+    if payload.status == "active":
+        user = await db.get(User, payload.user_id)
+        if user:
+            user.plan_id = payload.plan_id
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_create_subscription",
+        target_type="subscription", target_id=sub.id,
+        metadata={"user_id": str(payload.user_id), "plan_id": str(payload.plan_id)},
+    )
+    await db.commit()
+    await db.refresh(sub)
+    return await _sub_with_joins(db, sub)
 
-    Use this after manually verifying a bank transfer for provider=manual orders.
-    Side effects:
-      - Subscription.status: pending → active
-      - Subscription.current_period_start/end populated
-      - Payment.status: pending → success, paid_at set
-      - Invoice.status: draft → paid
-      - User.plan_id ← subscription.plan_id (user gets new entitlements)
+
+@router.patch("/subscriptions/{subscription_id}", response_model=AdminSubscriptionOut)
+async def update_subscription_admin(
+    subscription_id: uuid.UUID, payload: AdminSubscriptionUpdate,
+    admin: AdminUser, db: DbSession,
+) -> AdminSubscriptionOut:
+    sub = await db.get(Subscription, subscription_id)
+    if not sub:
+        raise NotFound("subscription")
+    changes: dict = {}
+    plan_changed = False
+    if payload.plan_id is not None:
+        if not await db.get(Plan, payload.plan_id):
+            raise NotFound("plan")
+        sub.plan_id = payload.plan_id; changes["plan_id"] = str(payload.plan_id); plan_changed = True
+    if payload.status is not None:
+        sub.status = payload.status; changes["status"] = payload.status
+    if payload.billing_cycle is not None:
+        sub.billing_cycle = payload.billing_cycle; changes["billing_cycle"] = payload.billing_cycle
+    if payload.provider is not None:
+        sub.provider = payload.provider; changes["provider"] = payload.provider
+    if payload.amount is not None:
+        sub.amount = payload.amount; changes["amount"] = float(payload.amount)
+    if payload.currency is not None:
+        sub.currency = payload.currency
+    if payload.current_period_start is not None:
+        sub.current_period_start = payload.current_period_start
+    if payload.current_period_end is not None:
+        sub.current_period_end = payload.current_period_end
+    if payload.cancel_at_period_end is not None:
+        sub.cancel_at_period_end = payload.cancel_at_period_end
+    # Mirror plan change to user.plan_id only when sub is active.
+    if (plan_changed or payload.status == "active") and sub.status == "active":
+        user = await db.get(User, sub.user_id)
+        if user:
+            user.plan_id = sub.plan_id
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_update_subscription",
+        target_type="subscription", target_id=sub.id, metadata=changes,
+    )
+    await db.commit()
+    await db.refresh(sub)
+    return await _sub_with_joins(db, sub)
+
+
+@router.delete("/subscriptions/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_subscription_admin(
+    subscription_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> None:
+    sub = await db.get(Subscription, subscription_id)
+    if not sub:
+        raise NotFound("subscription")
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_delete_subscription",
+        target_type="subscription", target_id=sub.id,
+    )
+    await db.delete(sub)
+    await db.commit()
+
+
+@router.post("/subscriptions/{subscription_id}/confirm-payment", response_model=AdminSubscriptionOut)
+async def confirm_payment(
+    subscription_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> AdminSubscriptionOut:
+    """Mark a pending subscription as paid → active.
+
+    Side effects: payment→success, invoice→paid, user.plan_id updated, period set.
     """
     from app.modules.billing.service import period_end_for_cycle
 
@@ -307,7 +456,6 @@ async def confirm_payment(subscription_id: uuid.UUID, admin: AdminUser, db: DbSe
     sub.current_period_start = now
     sub.current_period_end = period_end_for_cycle(now, sub.billing_cycle)
 
-    # Find the matching payment + invoice
     pay = (
         await db.execute(
             select(Payment).where(Payment.subscription_id == sub.id, Payment.status == "pending")
@@ -328,7 +476,6 @@ async def confirm_payment(subscription_id: uuid.UUID, admin: AdminUser, db: DbSe
         inv.status = "paid"
         inv.paid_at = now
 
-    # Update user's plan
     user = await db.get(User, sub.user_id)
     if user:
         user.plan_id = sub.plan_id
@@ -338,4 +485,197 @@ async def confirm_payment(subscription_id: uuid.UUID, admin: AdminUser, db: DbSe
         target_id=sub.id, metadata={"user_id": str(sub.user_id), "amount": float(sub.amount)},
     )
     await db.commit()
-    return {"ok": True, "subscription_id": str(sub.id), "status": "active"}
+    await db.refresh(sub)
+    return await _sub_with_joins(db, sub)
+
+
+# -- Payments --------------------------------------------------------------
+
+@router.get("/payments", response_model=list[AdminPaymentOut])
+async def list_payments(
+    admin: AdminUser, db: DbSession,
+    status_filter: str | None = None, user_id: uuid.UUID | None = None,
+) -> list[AdminPaymentOut]:
+    q = select(Payment)
+    if status_filter:
+        q = q.where(Payment.status == status_filter)
+    if user_id:
+        q = q.where(Payment.user_id == user_id)
+    q = q.order_by(Payment.created_at.desc()).limit(500)
+    rows = (await db.execute(q)).scalars().all()
+    return [await _pay_with_email(db, p) for p in rows]
+
+
+@router.post("/payments", response_model=AdminPaymentOut, status_code=status.HTTP_201_CREATED)
+async def create_payment_admin(
+    payload: AdminPaymentCreate, admin: AdminUser, db: DbSession,
+) -> AdminPaymentOut:
+    """Manually record a payment (e.g. cash, bank transfer received offline)."""
+    if not await db.get(User, payload.user_id):
+        raise NotFound("user")
+    if payload.subscription_id and not await db.get(Subscription, payload.subscription_id):
+        raise NotFound("subscription")
+    pay = Payment(
+        user_id=payload.user_id, subscription_id=payload.subscription_id,
+        amount=payload.amount, currency=payload.currency, status=payload.status,
+        provider=payload.provider, provider_payment_id=payload.provider_payment_id,
+        payment_method=payload.payment_method,
+        paid_at=payload.paid_at or (datetime.now(timezone.utc) if payload.status == "success" else None),
+        failure_reason=payload.failure_reason,
+    )
+    db.add(pay)
+    await db.flush()
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_create_payment",
+        target_type="payment", target_id=pay.id,
+        metadata={"user_id": str(payload.user_id), "amount": float(payload.amount)},
+    )
+    await db.commit()
+    await db.refresh(pay)
+    return await _pay_with_email(db, pay)
+
+
+@router.patch("/payments/{payment_id}", response_model=AdminPaymentOut)
+async def update_payment_admin(
+    payment_id: uuid.UUID, payload: AdminPaymentUpdate,
+    admin: AdminUser, db: DbSession,
+) -> AdminPaymentOut:
+    pay = await db.get(Payment, payment_id)
+    if not pay:
+        raise NotFound("payment")
+    changes: dict = {}
+    for field in ("amount", "status", "provider", "provider_payment_id",
+                  "payment_method", "paid_at", "failure_reason"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(pay, field, value)
+            changes[field] = float(value) if field == "amount" else (str(value) if value else None)
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_update_payment",
+        target_type="payment", target_id=pay.id, metadata=changes,
+    )
+    await db.commit()
+    await db.refresh(pay)
+    return await _pay_with_email(db, pay)
+
+
+@router.delete("/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_payment_admin(
+    payment_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> None:
+    pay = await db.get(Payment, payment_id)
+    if not pay:
+        raise NotFound("payment")
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_delete_payment",
+        target_type="payment", target_id=pay.id,
+    )
+    await db.delete(pay)
+    await db.commit()
+
+
+# -- Invoices --------------------------------------------------------------
+
+@router.get("/invoices", response_model=list[AdminInvoiceOut])
+async def list_invoices(
+    admin: AdminUser, db: DbSession,
+    status_filter: str | None = None, user_id: uuid.UUID | None = None,
+) -> list[AdminInvoiceOut]:
+    q = select(Invoice)
+    if status_filter:
+        q = q.where(Invoice.status == status_filter)
+    if user_id:
+        q = q.where(Invoice.user_id == user_id)
+    q = q.order_by(Invoice.created_at.desc()).limit(500)
+    rows = (await db.execute(q)).scalars().all()
+    return [await _inv_with_email(db, i) for i in rows]
+
+
+@router.post("/invoices", response_model=AdminInvoiceOut, status_code=status.HTTP_201_CREATED)
+async def create_invoice_admin(
+    payload: AdminInvoiceCreate, admin: AdminUser, db: DbSession,
+) -> AdminInvoiceOut:
+    """Manually issue an invoice (e.g. for cash sales or post-hoc invoicing)."""
+    from app.modules.billing.service import next_invoice_number
+
+    if not await db.get(User, payload.user_id):
+        raise NotFound("user")
+    inv_no = await next_invoice_number(db)
+    total = payload.amount + payload.tax
+    now = datetime.now(timezone.utc)
+    inv = Invoice(
+        user_id=payload.user_id,
+        subscription_id=payload.subscription_id,
+        payment_id=payload.payment_id,
+        invoice_number=inv_no,
+        amount=payload.amount, tax=payload.tax, total=total,
+        currency=payload.currency, status=payload.status,
+        issued_at=now if payload.status != "draft" else None,
+        paid_at=now if payload.status == "paid" else None,
+        line_items=payload.line_items, billing_info=payload.billing_info,
+    )
+    db.add(inv)
+    await db.flush()
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_create_invoice",
+        target_type="invoice", target_id=inv.id,
+        metadata={"invoice_number": inv_no, "user_id": str(payload.user_id), "total": float(total)},
+    )
+    await db.commit()
+    await db.refresh(inv)
+    return await _inv_with_email(db, inv)
+
+
+@router.patch("/invoices/{invoice_id}", response_model=AdminInvoiceOut)
+async def update_invoice_admin(
+    invoice_id: uuid.UUID, payload: AdminInvoiceUpdate,
+    admin: AdminUser, db: DbSession,
+) -> AdminInvoiceOut:
+    inv = await db.get(Invoice, invoice_id)
+    if not inv:
+        raise NotFound("invoice")
+    changes: dict = {}
+    if payload.amount is not None:
+        inv.amount = payload.amount; changes["amount"] = float(payload.amount)
+    if payload.tax is not None:
+        inv.tax = payload.tax; changes["tax"] = float(payload.tax)
+    if payload.amount is not None or payload.tax is not None:
+        inv.total = inv.amount + inv.tax
+    if payload.status is not None:
+        inv.status = payload.status
+        changes["status"] = payload.status
+        if payload.status == "paid" and not inv.paid_at:
+            inv.paid_at = datetime.now(timezone.utc)
+        if payload.status == "issued" and not inv.issued_at:
+            inv.issued_at = datetime.now(timezone.utc)
+    if payload.paid_at is not None:
+        inv.paid_at = payload.paid_at
+    if payload.line_items is not None:
+        inv.line_items = payload.line_items
+    if payload.billing_info is not None:
+        inv.billing_info = payload.billing_info
+    if payload.pdf_url is not None:
+        inv.pdf_url = payload.pdf_url
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_update_invoice",
+        target_type="invoice", target_id=inv.id, metadata=changes,
+    )
+    await db.commit()
+    await db.refresh(inv)
+    return await _inv_with_email(db, inv)
+
+
+@router.delete("/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_invoice_admin(
+    invoice_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> None:
+    inv = await db.get(Invoice, invoice_id)
+    if not inv:
+        raise NotFound("invoice")
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_delete_invoice",
+        target_type="invoice", target_id=inv.id,
+        metadata={"invoice_number": inv.invoice_number},
+    )
+    await db.delete(inv)
+    await db.commit()
