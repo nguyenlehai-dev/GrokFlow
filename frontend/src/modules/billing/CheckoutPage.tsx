@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useSearchParams, useNavigate, Link, Navigate } from "react-router-dom";
+import { useParams, useSearchParams, Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { CreditCard, Building2, Wallet, Smartphone, Globe, Info } from "lucide-react";
@@ -40,7 +40,6 @@ const formatVnd = (n: number) =>
 export function CheckoutPage() {
   const { plan_code } = useParams<{ plan_code: string }>();
   const [params] = useSearchParams();
-  const navigate = useNavigate();
   const cycle = (params.get("cycle") === "yearly" ? "yearly" : "monthly") as "monthly" | "yearly";
   const [provider, setProvider] = useState("manual");
   const [result, setResult] = useState<CheckoutResp | null>(null);
