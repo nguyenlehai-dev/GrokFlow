@@ -39,6 +39,9 @@ async def seed_default_plans(db: AsyncSession) -> None:
                 is_default=spec.get("is_default", False),
                 sort_order=spec.get("sort_order", 0),
                 entitlements=spec["entitlements"],
+                price_vnd=spec.get("price_vnd"),
+                price_usd_cents=spec.get("price_usd_cents"),
+                is_active=spec.get("is_active", True),
             )
         )
         inserted += 1

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Navigate } from "react-router-dom";
+import { useNavigate, Navigate, Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
@@ -50,6 +50,12 @@ export function LoginPage() {
         <button className="btn-primary w-full" disabled={isSubmitting}>
           {isSubmitting ? "Đang đăng nhập..." : "Đăng nhập"}
         </button>
+        <p className="text-sm text-center text-slate-500">
+          Chưa có tài khoản?{" "}
+          <Link to="/register" className="text-brand-600 hover:underline font-medium">
+            Đăng ký miễn phí
+          </Link>
+        </p>
       </form>
     </div>
   );

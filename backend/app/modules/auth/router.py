@@ -3,13 +3,19 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
-from app.core.exceptions import InvalidCredentials
-from app.core.security import create_access_token, verify_password
-from app.models import User
+from app.core.exceptions import EmailAlreadyRegistered, InvalidCredentials
+from app.core.security import create_access_token, hash_password, verify_password
+from app.models import Plan, User
 from app.modules.audit import service as audit
 from app.modules.entitlements.service import get_effective_entitlements
 
-from .schemas import EntitlementsResponse, LoginRequest, MeResponse, TokenResponse
+from .schemas import (
+    EntitlementsResponse,
+    LoginRequest,
+    MeResponse,
+    RegisterRequest,
+    TokenResponse,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -25,6 +31,43 @@ async def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
     token = create_access_token(subject=str(user.id), extra={"role": user.role})
     await audit.log_action(db, user_id=user.id, action="login", target_type="user", target_id=user.id)
     await db.commit()
+    return TokenResponse(access_token=token, expires_in=settings.JWT_EXPIRES_MINUTES * 60)
+
+
+@router.post("/register", response_model=TokenResponse, status_code=201)
+async def register(payload: RegisterRequest, db: DbSession) -> TokenResponse:
+    """Self-serve signup. Creates a user on the default (Free) plan and returns a JWT.
+
+    Email verification is intentionally not enforced here yet — Free plan limits
+    are low enough that abuse is bounded. Verification flow comes in milestone 1.3.
+    """
+    existing = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+    if existing:
+        raise EmailAlreadyRegistered()
+
+    default_plan = (await db.execute(select(Plan).where(Plan.is_default.is_(True)))).scalar_one_or_none()
+
+    user = User(
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        full_name=payload.full_name,
+        role="user",
+        status="active",
+        plan_id=default_plan.id if default_plan else None,
+    )
+    db.add(user)
+    await db.flush()
+    await audit.log_action(
+        db,
+        user_id=user.id,
+        action="register",
+        target_type="user",
+        target_id=user.id,
+        metadata={"plan": default_plan.code if default_plan else None},
+    )
+    await db.commit()
+
+    token = create_access_token(subject=str(user.id), extra={"role": user.role})
     return TokenResponse(access_token=token, expires_in=settings.JWT_EXPIRES_MINUTES * 60)
 
 

@@ -49,3 +49,12 @@ class EntitlementBlocked(AppError):
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(status.HTTP_402_PAYMENT_REQUIRED, code, message)
+
+
+class EmailAlreadyRegistered(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            status.HTTP_409_CONFLICT,
+            "email_already_registered",
+            "Email này đã được đăng ký. Vui lòng login hoặc dùng email khác.",
+        )

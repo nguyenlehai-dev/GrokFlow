@@ -50,6 +50,8 @@ DEFAULT_PLANS: list[dict] = [
         "description": "Gói miễn phí dùng thử — chỉ tạo ảnh, chất lượng cơ bản",
         "is_default": True,
         "sort_order": 0,
+        "price_vnd": 0,
+        "price_usd_cents": 0,
         "entitlements": {
             "features": {
                 "job.image": True,
@@ -84,6 +86,8 @@ DEFAULT_PLANS: list[dict] = [
         "description": "Gói cơ bản — ảnh + video chất lượng cơ bản",
         "is_default": False,
         "sort_order": 10,
+        "price_vnd": 199000,
+        "price_usd_cents": 999,
         "entitlements": {
             "features": {
                 "job.image": True,
@@ -118,6 +122,8 @@ DEFAULT_PLANS: list[dict] = [
         "description": "Gói chuyên nghiệp — đầy đủ chất lượng cao",
         "is_default": False,
         "sort_order": 20,
+        "price_vnd": 599000,
+        "price_usd_cents": 2999,
         "entitlements": {
             "features": {
                 "job.image": True,
@@ -152,6 +158,9 @@ DEFAULT_PLANS: list[dict] = [
         "description": "Gói doanh nghiệp — full quyền, bao gồm Spicy 18+",
         "is_default": False,
         "sort_order": 30,
+        # Custom pricing — admin sets directly in DB; NULL means "Liên hệ".
+        "price_vnd": None,
+        "price_usd_cents": None,
         "entitlements": {
             "features": {
                 "job.image": True,

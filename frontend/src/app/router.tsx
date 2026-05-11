@@ -2,6 +2,8 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { LoginPage } from "@/modules/auth/LoginPage";
+import { RegisterPage } from "@/modules/auth/RegisterPage";
+import { LandingPage } from "@/modules/landing/LandingPage";
 import { DashboardPage } from "@/modules/dashboard/DashboardPage";
 import { ApiKeysPage } from "@/modules/api-keys/ApiKeysPage";
 import { ProfilesPage } from "@/modules/profiles/ProfilesPage";
@@ -12,7 +14,20 @@ import { AdminPage } from "@/modules/admin/AdminPage";
 import { AuditLogPage } from "@/modules/audit/AuditLogPage";
 
 export const router = createBrowserRouter([
+  { path: "/landing", element: <LandingPage /> },
   { path: "/login", element: <LoginPage /> },
+  { path: "/register", element: <RegisterPage /> },
+  {
+    path: "/app",
+    element: (
+      <ProtectedRoute>
+        <AppShell />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <Navigate to="/dashboard" replace /> },
+    ],
+  },
   {
     path: "/",
     element: (

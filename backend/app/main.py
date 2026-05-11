@@ -12,6 +12,7 @@ from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
 from app.modules.files.router import router as files_router
 from app.modules.jobs.router import router as jobs_router
+from app.modules.plans_public.router import router as plans_public_router
 from app.modules.profiles.router import router as profiles_router
 from app.modules.public_v1.router import router as public_v1_router
 from app.modules.settings.router import router as settings_router
@@ -57,4 +58,5 @@ app.include_router(files_router)
 app.include_router(audit_router)
 app.include_router(admin_router)
 app.include_router(settings_router)
+app.include_router(plans_public_router)
 app.include_router(public_v1_router)

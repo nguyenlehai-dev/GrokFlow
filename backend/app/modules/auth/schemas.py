@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.types import PermissiveEmail
 
@@ -8,6 +8,12 @@ from app.core.types import PermissiveEmail
 class LoginRequest(BaseModel):
     email: PermissiveEmail
     password: str
+
+
+class RegisterRequest(BaseModel):
+    email: PermissiveEmail
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str | None = Field(default=None, max_length=255)
 
 
 class TokenResponse(BaseModel):

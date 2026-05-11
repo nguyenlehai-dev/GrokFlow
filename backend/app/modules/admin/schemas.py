@@ -51,6 +51,9 @@ class PlanIn(BaseModel):
     description: str | None = None
     is_default: bool = False
     sort_order: int = 0
+    price_vnd: int | None = None
+    price_usd_cents: int | None = None
+    is_active: bool = True
     entitlements: dict = Field(
         default_factory=lambda: {"features": {}, "limits": {}},
         description="{features: {key: bool}, limits: {key: int}}",
@@ -62,6 +65,9 @@ class PlanUpdate(BaseModel):
     description: str | None = None
     is_default: bool | None = None
     sort_order: int | None = None
+    price_vnd: int | None = None
+    price_usd_cents: int | None = None
+    is_active: bool | None = None
     entitlements: dict | None = None
 
 
@@ -72,6 +78,9 @@ class PlanOut(BaseModel):
     description: str | None
     is_default: bool
     sort_order: int
+    price_vnd: int | None
+    price_usd_cents: int | None
+    is_active: bool
     entitlements: dict
     created_at: datetime
     updated_at: datetime

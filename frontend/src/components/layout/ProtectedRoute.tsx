@@ -24,6 +24,6 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [token]);
 
-  if (!token) return <Navigate to="/login" replace />;
+  if (!token) return <Navigate to="/landing" replace />;
   return <>{children}</>;
 }

@@ -178,6 +178,9 @@ async def create_plan(payload: PlanIn, admin: AdminUser, db: DbSession) -> Plan:
         description=payload.description,
         is_default=payload.is_default,
         sort_order=payload.sort_order,
+        price_vnd=payload.price_vnd,
+        price_usd_cents=payload.price_usd_cents,
+        is_active=payload.is_active,
         entitlements=payload.entitlements,
     )
     db.add(plan)
@@ -211,6 +214,13 @@ async def update_plan(plan_id: uuid.UUID, payload: PlanUpdate, admin: AdminUser,
                 p.is_default = False
         plan.is_default = payload.is_default
         changes["is_default"] = payload.is_default
+    if payload.price_vnd is not None:
+        plan.price_vnd = payload.price_vnd; changes["price_vnd"] = payload.price_vnd
+    if payload.price_usd_cents is not None:
+        plan.price_usd_cents = payload.price_usd_cents
+        changes["price_usd_cents"] = payload.price_usd_cents
+    if payload.is_active is not None:
+        plan.is_active = payload.is_active; changes["is_active"] = payload.is_active
     if payload.entitlements is not None:
         plan.entitlements = payload.entitlements
         changes["entitlements"] = "updated"
