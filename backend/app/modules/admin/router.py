@@ -17,6 +17,12 @@ from app.core.tenant import (
 from app.models import ApiKey, Invoice, Job, Payment, Plan, Profile, Role, Subscription, User
 
 
+# Sentinel the FE sends to mean "clear this nullable FK" (PATCH bodies
+# can't tell None from "not present" otherwise). Kept identical on FE
+# side as `NULL_FK_SENTINEL` in frontend/src/modules/admin/AdminPage.tsx.
+NULL_FK_SENTINEL = "00000000-0000-0000-0000-000000000000"
+
+
 async def _validate_role_id_for_domain(
     db, role_id: uuid.UUID | None, domain_id: uuid.UUID | None,
 ) -> uuid.UUID | None:
@@ -27,7 +33,7 @@ async def _validate_role_id_for_domain(
     """
     if role_id is None:
         return None
-    if str(role_id) == "00000000-0000-0000-0000-000000000000":
+    if str(role_id) == NULL_FK_SENTINEL:
         return None
     role = await db.get(Role, role_id)
     if not role:
@@ -226,7 +232,7 @@ async def update_user(user_id: uuid.UUID, payload: AdminUserUpdate, admin: Admin
         changes["password"] = "***"
     if payload.plan_id is not None:
         # Allow setting plan_id to a sentinel uuid 0...0 to clear it.
-        if str(payload.plan_id) == "00000000-0000-0000-0000-000000000000":
+        if str(payload.plan_id) == NULL_FK_SENTINEL:
             user.plan_id = None
             changes["plan_id"] = None
         else:
@@ -240,7 +246,7 @@ async def update_user(user_id: uuid.UUID, payload: AdminUserUpdate, admin: Admin
         changes["entitlement_overrides"] = "set" if payload.entitlement_overrides else "cleared"
     if payload.domain_id is not None and admin.role == "super_admin":
         # Sentinel zero-uuid means "clear" (turn into unscoped super-tier).
-        if str(payload.domain_id) == "00000000-0000-0000-0000-000000000000":
+        if str(payload.domain_id) == NULL_FK_SENTINEL:
             user.domain_id = None
             # Clearing the domain also clears any role (role lives under a domain).
             user.role_id = None

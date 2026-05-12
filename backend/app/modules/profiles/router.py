@@ -230,6 +230,23 @@ async def upload_cookies(
         raise InvalidPayload(f"Invalid JSON: {e}")
     if not isinstance(cookies, list):
         raise InvalidPayload("Cookies file must be a JSON array")
+    # Reject obvious garbage before handing to profile_manager — a malformed
+    # cookie store can wedge the profile (Playwright fails to load it next time).
+    # Each entry must look like a Playwright cookie: dict with at least name+value.
+    if len(cookies) > 1000:
+        raise InvalidPayload("Cookies file has too many entries (max 1000)")
+    for i, c in enumerate(cookies):
+        if not isinstance(c, dict):
+            raise InvalidPayload(f"Cookies[{i}] must be an object")
+        if not isinstance(c.get("name"), str) or not c["name"]:
+            raise InvalidPayload(f"Cookies[{i}].name is required (string)")
+        if "value" not in c or not isinstance(c["value"], str):
+            raise InvalidPayload(f"Cookies[{i}].value is required (string)")
+        # domain/path/expires are optional but if present must be the right type
+        if "domain" in c and not isinstance(c["domain"], str):
+            raise InvalidPayload(f"Cookies[{i}].domain must be a string")
+        if "expires" in c and not isinstance(c["expires"], (int, float)):
+            raise InvalidPayload(f"Cookies[{i}].expires must be a number")
 
     try:
         count = await profile_manager.import_cookies(profile.profile_path, cookies)

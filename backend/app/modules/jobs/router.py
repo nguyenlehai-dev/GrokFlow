@@ -74,6 +74,15 @@ async def create_job(payload: JobCreate, user: CurrentUser, db: DbSession) -> Jo
     if payload.seed is not None: options["seed"] = payload.seed
     if payload.input_image_file_id: options["input_image_file_id"] = str(payload.input_image_file_id)
 
+    # If the caller references an input file, validate it exists + belongs to
+    # them BEFORE we burn a quota check and create the job row. Avoids the
+    # orphan case where a job ends up pointing at a deleted/missing file_id.
+    if payload.input_image_file_id:
+        from app.models import File as FileModel
+        f = await db.get(FileModel, payload.input_image_file_id)
+        if not f or f.user_id != user.id:
+            raise InvalidPayload("input_image_file_id không tồn tại hoặc không thuộc về bạn")
+
     eff = await get_effective_entitlements(db, user)
     try:
         assert_job_options(

@@ -19,6 +19,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import SessionLocal
+from app.core.sanitize import scrub_secrets
 from app.models import Job, JobLog, Profile, User
 from app.modules.files import service as files_service
 from app.providers import JobInput, get_provider
@@ -93,7 +94,9 @@ async def _release_slot(db: AsyncSession, profile_id: uuid.UUID,
         # Force terminal status (e.g. blocked/need_login) even if other slots are running
         profile.status = new_status
     if error_message is not None:
-        profile.error_message = error_message
+        # Scrub vendor/provider responses before persisting — they often
+        # echo back tokens, query params with keys, etc.
+        profile.error_message = scrub_secrets(error_message)
     profile.last_used_at = datetime.now(timezone.utc)
 
 
@@ -283,7 +286,11 @@ async def process_one(db: AsyncSession, job: Job) -> None:
                           message=f"Job success: {len(saved_ids)} file(s), {total_bytes} bytes"))
         else:
             error_code = result.error_code or "unknown_error"
-            job.error_message = f"[{error_code}] {result.error_message or 'unknown'}"
+            # Scrub before storing — vendor errors can include URLs with
+            # tokens, API keys in their reply text, JWTs, etc.
+            job.error_message = scrub_secrets(
+                f"[{error_code}] {result.error_message or 'unknown'}"
+            )
             db.add(JobLog(job_id=job.id, level="error",
                           message=f"Provider error: {job.error_message}",
                           context={"error_code": error_code, "extra": result.extra}))
@@ -309,7 +316,11 @@ async def process_one(db: AsyncSession, job: Job) -> None:
 
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"
-        job.error_message = f"Worker exception: {type(exc).__name__}: {exc}"
+        # Same scrub as the provider-error branch — exception text can
+        # contain credentials from connection strings / response bodies.
+        job.error_message = scrub_secrets(
+            f"Worker exception: {type(exc).__name__}: {exc}"
+        )
         job.completed_at = datetime.now(timezone.utc)
         db.add(JobLog(job_id=job.id, level="error", message=job.error_message))
 

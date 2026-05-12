@@ -48,7 +48,11 @@ interface Catalog {
   limits: Record<string, string>;
 }
 
-const NULL_PLAN_ID = "00000000-0000-0000-0000-000000000000";
+// Sentinel the BE recognises as "clear this nullable FK". Used when a
+// PATCH body needs to express "set role_id/domain_id/plan_id back to
+// NULL" — empty-string and undefined are otherwise ambiguous. Mirrors
+// `NULL_FK_SENTINEL` in backend/app/modules/admin/router.py.
+const NULL_FK_SENTINEL = "00000000-0000-0000-0000-000000000000";
 
 export function AdminPage() {
   // Hooks MUST run before any conditional return — otherwise React throws
@@ -490,14 +494,14 @@ function UserPermissionsModal({
       if (Object.keys(featOverride).length) overrides.features = featOverride;
       if (Object.keys(limitOverride).length) overrides.limits = limitOverride;
       const body: any = {
-        plan_id: planId || NULL_PLAN_ID,
+        plan_id: planId || NULL_FK_SENTINEL,
         entitlement_overrides: overrides,
         // Zero-uuid sentinel clears the field (backend understands this).
-        role_id: roleId || NULL_PLAN_ID,
+        role_id: roleId || NULL_FK_SENTINEL,
         role: roleTier,
       };
       if (isSuper) {
-        body.domain_id = domainId || NULL_PLAN_ID;
+        body.domain_id = domainId || NULL_FK_SENTINEL;
       }
       return api.patch(`/api/admin/users/${user.id}`, body);
     },
