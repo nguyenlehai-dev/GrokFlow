@@ -77,22 +77,46 @@ fine. NVMe is a nice-to-have, not a must.
 
 ## 6. Tiered recommendations
 
-### Tier S — Solo / dev / staging
+### Tier S — Solo / dev / small prod (<5 concurrent profiles)
 
-Run the stack at home or on a $5-7 VPS.
+Run the stack on a $5-7 VPS comfortably. Real-world tested capacity at
+<5 concurrent profiles: 1.2 GB idle → 2.15 GB peak (54% of 4 GB).
 
 | Spec | Value |
 |---|---|
 | vCPU | 2 |
 | RAM | 4 GB |
-| Disk | 40 GB SSD |
+| Disk | 40-60 GB SSD |
 | Bandwidth | 1 TB/month |
-| Concurrent VNC profiles | 1-3 |
-| Customers it handles | 1-5 |
+| Concurrent VNC profiles | 1-5 |
+| Customers it handles | 1-10 |
 | Price | ~$5-10/month |
 
-**Picks**: Hetzner CX22 (€4.51), Vultr Cloud Compute 2GB ($12), Linode
-Nanode 1GB ($5), Contabo VPS S ($6).
+**Picks**:
+- ⭐ **Hetzner CX22** (€4.51, ~$5/mo) — best value, pair with Cloudflare
+  for VN-near latency. 2 vCPU / 4 GB / 40 GB NVMe / 20 TB traffic.
+- Vultr Cloud Compute 4 GB Singapore ($24/mo) — best for VN-only
+  audience, low latency without needing Cloudflare.
+- Contabo VPS S ($7/mo) — 4 vCPU / 8 GB / 200 GB but variable perf.
+- Linode Nanode 4GB ($24/mo) / DO Premium AMD 4GB ($24/mo) — polished
+  but pricier than Hetzner.
+
+**Required `.env.prod` tweaks for 4GB headroom**:
+
+```bash
+# Gunicorn — 2 workers fit 4GB easily, handle ~50 req/s
+GUNICORN_WORKERS=2
+
+# Worker queue — cap concurrent in-flight tasks so 5 profiles is the ceiling
+WORKER_MAX_IN_FLIGHT=5
+
+# Close idle VNC sessions after 1h instead of 2h (RAM ondemand)
+IDLE_CLEANUP_HOURS=1
+IDLE_CLEANUP_INTERVAL=600    # check every 10min
+```
+
+These are the same env vars used in production today — just lower
+values. No code change needed.
 
 ### Tier M — Small prod (your current size)
 
