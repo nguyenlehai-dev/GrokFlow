@@ -122,29 +122,35 @@ class DeployResult(BaseModel):
 
 
 def _parse_log(text: str) -> list[GitCommit]:
-    """Parse `git log --format=...` output where each commit is 5 lines + blank."""
+    """Parse `git log` output with a record separator we control (NUL byte).
+
+    Each record is 4 tab-separated fields: hash, author, date, subject.
+    Using tab + null avoids any clash with commit body whitespace.
+    """
     commits: list[GitCommit] = []
-    chunks = [c for c in text.strip().split("\n\n") if c.strip()]
-    for chunk in chunks:
-        lines = chunk.splitlines()
-        if len(lines) < 5:
+    for record in text.split("\x1e"):
+        record = record.strip()
+        if not record:
             continue
-        full_hash = lines[0].strip()
+        parts = record.split("\x1f")
+        if len(parts) < 4:
+            continue
+        full_hash, author, date, subject = parts[0], parts[1], parts[2], parts[3]
         commits.append(GitCommit(
             hash=full_hash,
             short=full_hash[:7],
-            author=lines[1].strip(),
-            date=lines[2].strip(),
-            message="\n".join(lines[3:]).strip(),
+            author=author,
+            date=date,
+            message=subject,
         ))
     return commits
 
 
 def _git_log_cmd(n: int) -> str:
-    fmt = "%H%n%an <%ae>%n%cI%n%s%n%b"
-    return (
-        f"cd {GROKFLOW_PATH} && git log -n {n} --pretty=format:'{fmt}' --no-merges"
-    )
+    # Record-sep \x1e between commits, field-sep \x1f between fields.
+    # %s = subject only (no body), so multi-line bodies don't trip the parser.
+    fmt = "%H%x1f%an <%ae>%x1f%cI%x1f%s%x1e"
+    return f"cd {GROKFLOW_PATH} && git log -n {n} --pretty=format:'{fmt}' --no-merges"
 
 
 # ---------------- Endpoints ----------------
