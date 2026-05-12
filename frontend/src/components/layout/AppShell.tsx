@@ -65,7 +65,7 @@ const NAV: NavEntry[] = [
   },
 
   {
-    type: "group", key: "gateway", label: "Gateway Management", icon: Network, adminOnly: true,
+    type: "group", key: "gateway", label: "Gateway Management", icon: Network,
     items: [
       { type: "link", to: "/gateway/dashboard",  label: "Dashboard",     icon: LayoutDashboard },
       { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers },
