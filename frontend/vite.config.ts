@@ -12,5 +12,8 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    // Allow any hostname so per-domain branding works for new customer hosts
+    // without having to redeploy. Dev server only — prod uses nginx.
+    allowedHosts: true,
   },
 });
