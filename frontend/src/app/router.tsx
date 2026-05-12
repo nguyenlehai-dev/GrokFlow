@@ -20,6 +20,7 @@ import { AdminUsersPage } from "@/modules/admin/AdminUsersPage";
 import { AdminPlansPage } from "@/modules/admin/AdminPlansPage";
 import { AdminBillingPage } from "@/modules/admin/AdminBillingPage";
 import { AdminDomainsPage } from "@/modules/admin/AdminDomainsPage";
+import { AdminGitPage } from "@/modules/admin/AdminGitPage";
 import { AuditLogPage } from "@/modules/audit/AuditLogPage";
 
 // Quản lý Flow — sub-pages, placeholders for now
@@ -84,6 +85,7 @@ export const router = createBrowserRouter([
       { path: "admin/plans", element: <AdminPlansPage /> },
       { path: "admin/billing", element: <AdminBillingPage /> },
       { path: "admin/domains", element: <AdminDomainsPage /> },
+      { path: "admin/git", element: <AdminGitPage /> },
       // Legacy combined view kept reachable for now (e.g. old bookmarks).
       { path: "admin/legacy", element: <AdminPage /> },
 

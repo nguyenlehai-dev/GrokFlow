@@ -5,6 +5,7 @@ import {
   ScrollText, CreditCard, ChevronDown, Globe, Video, GitBranch, Scissors,
   Combine, AudioLines, Replace, Gauge, Maximize2, Crop, Film, Network,
   Boxes, Code2, Activity, Terminal, BookOpen, UserCog, Wrench, Sparkles,
+  Rocket,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuthStore } from "@/core/auth/store";
@@ -86,6 +87,7 @@ const NAV: NavEntry[] = [
       { type: "link", to: "/admin/domains", label: "Domains",     icon: Globe },
       { type: "link", to: "/admin/billing", label: "Billing",     icon: CreditCard },
       { type: "link", to: "/admin/plans",   label: "Plans / Gói", icon: Wrench },
+      { type: "link", to: "/admin/git",     label: "Git / Deploy", icon: Rocket },
     ],
   },
 ];

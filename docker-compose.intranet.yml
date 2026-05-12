@@ -60,6 +60,13 @@ services:
       PROFILE_BASE_PATH: /app/browser_profiles
       # Host path so backend can pass it to spawned VNC containers via Docker API.
       PROFILE_BASE_PATH_HOST: ${PWD}/browser_profiles
+      # SSH credentials for /admin → Git/Deploy (used by app/modules/git_admin).
+      # All four come from .env.prod so secrets stay out of source control.
+      HOST_SSH_HOST: ${HOST_SSH_HOST:-host.docker.internal}
+      HOST_SSH_PORT: ${HOST_SSH_PORT:-22}
+      HOST_SSH_USER: ${HOST_SSH_USER:-vpsroot}
+      HOST_SSH_PASSWORD: ${HOST_SSH_PASSWORD:-}
+      HOST_GROKFLOW_PATH: ${HOST_GROKFLOW_PATH:-/home/vpsroot/grokflow}
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +83,9 @@ services:
       # .conf files here; host nginx includes them via grokflow.conf; a host
       # reloader picks up changes. See deploy/setup-host-nginx.sh.
       - /etc/nginx/grokflow-vhosts:/host_nginx_vhosts
+    # Allow container to reach host's SSH (deploy/git operations from /admin).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 15s
