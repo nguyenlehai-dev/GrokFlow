@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { PublicRouteGuard } from "@/components/layout/PublicRouteGuard";
+import { ComingSoonPage } from "@/components/ui/ComingSoonPage";
 import { LoginPage } from "@/modules/auth/LoginPage";
 import { RegisterPage } from "@/modules/auth/RegisterPage";
 import { LandingPage } from "@/modules/landing/LandingPage";
@@ -15,7 +16,34 @@ import { JobsPage } from "@/modules/jobs/JobsPage";
 import { ApiDocsPage } from "@/modules/api-docs/ApiDocsPage";
 import { SettingsPage } from "@/modules/settings/SettingsPage";
 import { AdminPage } from "@/modules/admin/AdminPage";
+import { AdminUsersPage } from "@/modules/admin/AdminUsersPage";
+import { AdminPlansPage } from "@/modules/admin/AdminPlansPage";
+import { AdminBillingPage } from "@/modules/admin/AdminBillingPage";
+import { AdminDomainsPage } from "@/modules/admin/AdminDomainsPage";
 import { AuditLogPage } from "@/modules/audit/AuditLogPage";
+
+// Quản lý Flow — sub-pages, placeholders for now
+const flowRoutes = [
+  ["cut",             "Cut Video"],
+  ["merge",           "Merge Videos"],
+  ["extract-audio",   "Extract Audio"],
+  ["replace-audio",   "Merge / Replace Audio"],
+  ["change-speed",    "Change Speed"],
+  ["resize",          "Resize"],
+  ["crop",            "Crop Video"],
+  ["extract-frames",  "Extract Frames"],
+  ["docs",            "Flow API Docs"],
+] as const;
+
+// Gateway Management — sub-pages, placeholders
+const gatewayRoutes = [
+  ["vendors",     "Vendor"],
+  ["pools",       "Pools"],
+  ["functions",   "API Functions"],
+  ["requests",    "Requests"],
+  ["playground",  "Playground"],
+  ["docs",        "Gateway API Docs"],
+] as const;
 
 export const router = createBrowserRouter([
   {
@@ -29,17 +57,6 @@ export const router = createBrowserRouter([
   {
     path: "/register",
     element: <PublicRouteGuard flag="allow_register" fallback="/login"><RegisterPage /></PublicRouteGuard>,
-  },
-  {
-    path: "/app",
-    element: (
-      <ProtectedRoute>
-        <AppShell />
-      </ProtectedRoute>
-    ),
-    children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
-    ],
   },
   {
     path: "/",
@@ -59,8 +76,30 @@ export const router = createBrowserRouter([
       { path: "pricing", element: <PricingPage /> },
       { path: "checkout/:plan_code", element: <CheckoutPage /> },
       { path: "audit-logs", element: <AuditLogPage /> },
-      { path: "admin", element: <AdminPage /> },
       { path: "settings", element: <SettingsPage /> },
+
+      // Admin sub-routes (each is admin-guarded internally)
+      { path: "admin", element: <Navigate to="/admin/users" replace /> },
+      { path: "admin/users", element: <AdminUsersPage /> },
+      { path: "admin/plans", element: <AdminPlansPage /> },
+      { path: "admin/billing", element: <AdminBillingPage /> },
+      { path: "admin/domains", element: <AdminDomainsPage /> },
+      // Legacy combined view kept reachable for now (e.g. old bookmarks).
+      { path: "admin/legacy", element: <AdminPage /> },
+
+      // Quản lý Flow placeholders
+      { path: "flow", element: <Navigate to="/flow/cut" replace /> },
+      ...flowRoutes.map(([slug, label]) => ({
+        path: `flow/${slug}`,
+        element: <ComingSoonPage title={`Flow — ${label}`} />,
+      })),
+
+      // Gateway Management placeholders
+      { path: "gateway", element: <Navigate to="/gateway/vendors" replace /> },
+      ...gatewayRoutes.map(([slug, label]) => ({
+        path: `gateway/${slug}`,
+        element: <ComingSoonPage title={`Gateway — ${label}`} />,
+      })),
     ],
   },
 ]);

@@ -25,6 +25,8 @@ const ALL_PAGES = [
   { path: "/profiles", label: "Profiles" },
   { path: "/jobs", label: "Jobs" },
   { path: "/api-docs", label: "API Docs" },
+  { path: "/flow", label: "Flow (toàn nhóm)" },
+  { path: "/gateway", label: "Gateway Management (toàn nhóm)" },
   { path: "/billing", label: "Billing (user)" },
   { path: "/pricing", label: "Pricing" },
   { path: "/checkout", label: "Checkout" },

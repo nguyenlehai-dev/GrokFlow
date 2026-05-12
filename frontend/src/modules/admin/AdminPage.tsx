@@ -158,7 +158,7 @@ function Stat({ label, value, accent }: { label: string; value: number | string;
 // USERS TAB
 // ============================================================================
 
-function UsersTab({ meId }: { meId: string }) {
+export function UsersTab({ meId }: { meId: string }) {
   const { data: users, isLoading } = useQuery({
     queryKey: ["admin-users"],
     queryFn: async () => (await api.get<AdminUser[]>("/api/admin/users")).data,
@@ -572,7 +572,7 @@ function UserPermissionsModal({
 // PLANS TAB
 // ============================================================================
 
-function PlansTab() {
+export function PlansTab() {
   const qc = useQueryClient();
   const { data: plans, isLoading } = useQuery({
     queryKey: ["admin-plans"],
