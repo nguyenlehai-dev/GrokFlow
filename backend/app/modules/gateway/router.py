@@ -516,26 +516,42 @@ async def list_requests(
     q = select(GwRequest).order_by(GwRequest.created_at.desc()).limit(min(limit, 500))
     if admin.role != "super_admin":
         q = q.where(GwRequest.domain_id == admin.domain_id)
-    rows = (await db.execute(q)).scalars().all()
+    rows = list((await db.execute(q)).scalars().all())
 
-    out: list[s.RequestOut] = []
-    for r in rows:
-        vendor = await db.get(GwVendor, r.vendor_id) if r.vendor_id else None
-        pool = await db.get(GwPool, r.pool_id) if r.pool_id else None
-        pk = await db.get(GwPoolApiKey, r.pool_key_id) if r.pool_key_id else None
-        out.append(s.RequestOut(
+    # Batch-fetch vendor/pool/pool-key by id so the response doesn't issue
+    # 3 extra SELECTs per row (was N+1 — limit=500 meant up to 1500 queries).
+    vendor_ids = {r.vendor_id for r in rows if r.vendor_id}
+    pool_ids = {r.pool_id for r in rows if r.pool_id}
+    pool_key_ids = {r.pool_key_id for r in rows if r.pool_key_id}
+
+    async def _map_by_id(model, ids):
+        if not ids:
+            return {}
+        result = await db.execute(select(model).where(model.id.in_(ids)))
+        return {row.id: row for row in result.scalars().all()}
+
+    vendors = await _map_by_id(GwVendor, vendor_ids)
+    pools = await _map_by_id(GwPool, pool_ids)
+    pool_keys = await _map_by_id(GwPoolApiKey, pool_key_ids)
+
+    return [
+        s.RequestOut(
             id=r.id, gw_id=r.gw_id,
-            vendor_id=r.vendor_id, vendor_name=vendor.name if vendor else None,
-            pool_id=r.pool_id, pool_name=pool.name if pool else None,
-            pool_key_id=r.pool_key_id, pool_key_name=pk.name if pk else None,
+            vendor_id=r.vendor_id,
+            vendor_name=vendors[r.vendor_id].name if r.vendor_id in vendors else None,
+            pool_id=r.pool_id,
+            pool_name=pools[r.pool_id].name if r.pool_id in pools else None,
+            pool_key_id=r.pool_key_id,
+            pool_key_name=pool_keys[r.pool_key_id].name if r.pool_key_id in pool_keys else None,
             function_code=r.function_code, model=r.model, status=r.status,
             error_message=r.error_message, latency_ms=r.latency_ms,
             tokens_input=r.tokens_input, tokens_output=r.tokens_output,
             cost_cents=r.cost_cents,
             request_body=r.request_body, response_body=r.response_body,
             created_at=r.created_at,
-        ))
-    return out
+        )
+        for r in rows
+    ]
 
 
 # ============================================================================

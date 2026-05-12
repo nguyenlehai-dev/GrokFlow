@@ -378,6 +378,68 @@ async def delete_plan(plan_id: uuid.UUID, admin: SuperAdminUser, db: DbSession) 
 # ============================================================================
 
 
+async def _bulk_fetch_map(db, model, ids: set[uuid.UUID]) -> dict[uuid.UUID, object]:
+    """Fetch many rows by primary key in a single SELECT ... WHERE id IN (...).
+
+    Returns {id: row}. Empty input → empty dict (no query).
+    Used by the billing list endpoints to avoid the N+1 that hit when each
+    row's user / plan was loaded with its own db.get().
+    """
+    if not ids:
+        return {}
+    rows = (await db.execute(select(model).where(model.id.in_(ids)))).scalars().all()
+    return {row.id: row for row in rows}
+
+
+async def _subs_to_out(
+    db, subs: list[Subscription],
+) -> list[AdminSubscriptionOut]:
+    user_ids = {s.user_id for s in subs if s.user_id}
+    plan_ids = {s.plan_id for s in subs if s.plan_id}
+    users = await _bulk_fetch_map(db, User, user_ids)
+    plans = await _bulk_fetch_map(db, Plan, plan_ids)
+    out: list[AdminSubscriptionOut] = []
+    for sub in subs:
+        u = users.get(sub.user_id)
+        p = plans.get(sub.plan_id)
+        out.append(AdminSubscriptionOut(
+            id=sub.id,
+            user_id=sub.user_id,
+            user_email=u.email if u else "",
+            plan_id=sub.plan_id,
+            plan_code=p.code if p else "",
+            plan_name=p.name if p else "",
+            status=sub.status,
+            billing_cycle=sub.billing_cycle,
+            provider=sub.provider,
+            amount=sub.amount,
+            currency=sub.currency,
+            current_period_start=sub.current_period_start,
+            current_period_end=sub.current_period_end,
+            cancel_at_period_end=sub.cancel_at_period_end,
+            cancelled_at=sub.cancelled_at,
+            created_at=sub.created_at,
+        ))
+    return out
+
+
+async def _pays_to_out(db, pays: list[Payment]) -> list[AdminPaymentOut]:
+    user_ids = {p.user_id for p in pays if p.user_id}
+    users = await _bulk_fetch_map(db, User, user_ids)
+    return [
+        AdminPaymentOut(
+            id=p.id, user_id=p.user_id,
+            user_email=users[p.user_id].email if p.user_id in users else "",
+            subscription_id=p.subscription_id,
+            amount=p.amount, currency=p.currency, status=p.status,
+            provider=p.provider, provider_payment_id=p.provider_payment_id,
+            payment_method=p.payment_method, paid_at=p.paid_at,
+            failure_reason=p.failure_reason, created_at=p.created_at,
+        )
+        for p in pays
+    ]
+
+
 async def _sub_with_joins(db, sub: Subscription) -> AdminSubscriptionOut:
     user = await db.get(User, sub.user_id)
     plan = await db.get(Plan, sub.plan_id)
@@ -443,6 +505,25 @@ async def _inv_with_email(db, inv: Invoice) -> AdminInvoiceOut:
     )
 
 
+async def _invs_to_out(db, invs: list[Invoice]) -> list[AdminInvoiceOut]:
+    user_ids = {i.user_id for i in invs if i.user_id}
+    users = await _bulk_fetch_map(db, User, user_ids)
+    return [
+        AdminInvoiceOut(
+            id=i.id, user_id=i.user_id,
+            user_email=users[i.user_id].email if i.user_id in users else "",
+            subscription_id=i.subscription_id, payment_id=i.payment_id,
+            invoice_number=i.invoice_number,
+            amount=i.amount, tax=i.tax, total=i.total,
+            currency=i.currency, status=i.status,
+            issued_at=i.issued_at, paid_at=i.paid_at,
+            line_items=i.line_items, billing_info=i.billing_info,
+            pdf_url=i.pdf_url, created_at=i.created_at,
+        )
+        for i in invs
+    ]
+
+
 # -- Subscriptions ---------------------------------------------------------
 
 @router.get("/subscriptions", response_model=list[AdminSubscriptionOut])
@@ -456,8 +537,8 @@ async def list_subscriptions(
     if user_id:
         q = q.where(Subscription.user_id == user_id)
     q = q.order_by(Subscription.created_at.desc()).limit(500)
-    rows = (await db.execute(q)).scalars().all()
-    return [await _sub_with_joins(db, s) for s in rows]
+    rows = list((await db.execute(q)).scalars().all())
+    return await _subs_to_out(db, rows)
 
 
 @router.post("/subscriptions", response_model=AdminSubscriptionOut, status_code=status.HTTP_201_CREATED)
@@ -623,8 +704,8 @@ async def list_payments(
     if user_id:
         q = q.where(Payment.user_id == user_id)
     q = q.order_by(Payment.created_at.desc()).limit(500)
-    rows = (await db.execute(q)).scalars().all()
-    return [await _pay_with_email(db, p) for p in rows]
+    rows = list((await db.execute(q)).scalars().all())
+    return await _pays_to_out(db, rows)
 
 
 @router.post("/payments", response_model=AdminPaymentOut, status_code=status.HTTP_201_CREATED)
@@ -711,8 +792,8 @@ async def list_invoices(
     if user_id:
         q = q.where(Invoice.user_id == user_id)
     q = q.order_by(Invoice.created_at.desc()).limit(500)
-    rows = (await db.execute(q)).scalars().all()
-    return [await _inv_with_email(db, i) for i in rows]
+    rows = list((await db.execute(q)).scalars().all())
+    return await _invs_to_out(db, rows)
 
 
 @router.post("/invoices", response_model=AdminInvoiceOut, status_code=status.HTTP_201_CREATED)
