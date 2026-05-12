@@ -67,11 +67,11 @@ services:
       HOST_SSH_USER: ${HOST_SSH_USER:-vpsroot}
       HOST_SSH_PASSWORD: ${HOST_SSH_PASSWORD:-}
       HOST_GROKFLOW_PATH: ${HOST_GROKFLOW_PATH:-/home/vpsroot/grokflow}
-      # gatewaygrok-backend SSO proxy. Backend logs in with these creds and
-      # forwards Gateway page requests with the cached admin token.
-      GATEWAY_BACKEND_URL: ${GATEWAY_BACKEND_URL:-http://host.docker.internal:8001}
-      GATEWAY_ADMIN_USERNAME: ${GATEWAY_ADMIN_USERNAME:-admin}
-      GATEWAY_ADMIN_PASSWORD: ${GATEWAY_ADMIN_PASSWORD:-}
+      # NOTE: legacy `gatewaygrok-backend` SSO proxy env vars were removed in
+      # May 2026 — that external service was replaced by the LLM Gateway
+      # module inside this very backend (/api/v1/gateway/*). If you see
+      # GATEWAY_BACKEND_URL / GATEWAY_ADMIN_USERNAME / GATEWAY_ADMIN_PASSWORD
+      # referenced anywhere else in the repo, it's dead code — safe to drop.
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,10 +177,17 @@ services:
     restart: unless-stopped
     ports:
       - "5173:80"
-    # So nginx can reach gatewaygrok-backend running on host port 8001
-    # via the /gateway-api/* proxy location.
+    # Frontend doesn't need host.docker.internal anymore (the legacy
+    # gatewaygrok proxy is gone). Remove this block if you don't host
+    # any other side-services on the VPS that nginx needs to reach.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # The inherited HEALTHCHECK from Dockerfile.prod uses `wget` against
+    # `http://localhost/`, which fails to resolve inside busybox-alpine
+    # despite nginx actively serving real traffic. Disable — `restart:
+    # unless-stopped` plus the live traffic volume is enough liveness signal.
+    healthcheck:
+      test: ["NONE"]
     deploy:
       resources:
         limits: { memory: 128M, cpus: "0.25" }
