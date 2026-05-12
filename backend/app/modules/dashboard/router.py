@@ -176,22 +176,21 @@ async def _build(db, period: Period, scope: Literal["me", "admin"], user_id) -> 
     ]
 
     # ------------------ App groups (jobs grouped by model/provider in current period) ------------------
-    apps_q = (
-        select(Job.provider, Job.job_type, Job.model, func.count().label("count"))
-        .where(*job_filters)
-        .group_by(Job.provider, Job.job_type, Job.model)
-    )
+    # Job.model isn't a column — it's nested in input_payload JSON. Pull the
+    # rows we need and bucket in Python so we can read the model out of JSON.
+    apps_q = select(Job.provider, Job.job_type, Job.input_payload).where(*job_filters)
     rows = (await db.execute(apps_q)).all()
 
     image_apps: dict[str, int] = defaultdict(int)
     video_apps: dict[str, int] = defaultdict(int)
-    for provider, job_type, model, count in rows:
-        # Friendly label: model name if present, else provider name
-        label = model if model else f"{(provider or 'unknown').title()} {job_type or ''}".strip()
+    for provider, job_type, payload in rows:
+        # Friendly label: model from input_payload if present, else "<provider> <type>"
+        model = (payload or {}).get("model") if isinstance(payload, dict) else None
+        label = model if model else f"{(provider or 'unknown').title()} {(job_type or '').title()}".strip()
         if job_type == "image":
-            image_apps[label] += count
+            image_apps[label] += 1
         elif job_type == "video":
-            video_apps[label] += count
+            video_apps[label] += 1
 
     # Mini Apps: counts grouped per API Key (each key ≈ a customer's integration)
     miniapp_q = (
