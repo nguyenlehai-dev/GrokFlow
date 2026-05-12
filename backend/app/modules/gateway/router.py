@@ -45,7 +45,7 @@ router = APIRouter(prefix="/api/v1/gateway", tags=["gateway"])
 # ============================================================================
 
 @router.get("/vendors", response_model=list[s.VendorOut])
-async def list_vendors(admin: SuperAdminUser, db: DbSession) -> list[GwVendor]:
+async def list_vendors(admin: AdminUser, db: DbSession) -> list[GwVendor]:
     rows = (await db.execute(select(GwVendor).order_by(GwVendor.name))).scalars().all()
     return list(rows)
 
@@ -105,7 +105,7 @@ async def delete_vendor(vendor_id: uuid.UUID, admin: SuperAdminUser, db: DbSessi
 # ============================================================================
 
 @router.get("/functions", response_model=list[s.ApiFunctionOut])
-async def list_functions(admin: SuperAdminUser, db: DbSession) -> list[GwApiFunction]:
+async def list_functions(admin: AdminUser, db: DbSession) -> list[GwApiFunction]:
     rows = (await db.execute(select(GwApiFunction).order_by(GwApiFunction.name))).scalars().all()
     return list(rows)
 
@@ -186,7 +186,7 @@ async def _pool_to_out(db, pool: GwPool) -> s.PoolOut:
 
 
 @router.get("/pools", response_model=list[s.PoolOut])
-async def list_pools(admin: SuperAdminUser, db: DbSession) -> list[s.PoolOut]:
+async def list_pools(admin: AdminUser, db: DbSession) -> list[s.PoolOut]:
     rows = (await db.execute(select(GwPool).order_by(GwPool.name))).scalars().all()
     return [await _pool_to_out(db, p) for p in rows]
 
