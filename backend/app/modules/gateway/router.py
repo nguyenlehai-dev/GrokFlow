@@ -246,6 +246,78 @@ def _pool_key_to_out(k: GwPoolApiKey) -> s.PoolApiKeyOut:
     )
 
 
+@router.get("/pools/{pool_id}/models")
+async def list_vendor_models(
+    pool_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> dict:
+    """Helper: lookup the first active key in this pool and ask the vendor
+    which models are currently available. Saves admin from copy-pasting
+    model ids out of vendor dashboards.
+    """
+    pool = await db.get(GwPool, pool_id)
+    if not pool:
+        raise NotFound("pool")
+    vendor = await db.get(GwVendor, pool.vendor_id)
+    if not vendor:
+        raise NotFound("vendor")
+
+    key = (await db.execute(
+        select(GwPoolApiKey)
+        .where(GwPoolApiKey.pool_id == pool_id, GwPoolApiKey.status == "active")
+        .limit(1)
+    )).scalar_one_or_none()
+    if not key:
+        raise InvalidPayload("Pool chưa có active API key để query vendor")
+
+    try:
+        if vendor.code in ("google", "gemini"):
+            async with httpx.AsyncClient(timeout=20) as cli:
+                r = await cli.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    params={"key": key.api_key, "pageSize": 200},
+                )
+                r.raise_for_status()
+                data = r.json()
+                models = []
+                for m in data.get("models", []):
+                    name = (m.get("name") or "").replace("models/", "")
+                    methods = m.get("supportedGenerationMethods") or []
+                    if name and "generateContent" in methods:
+                        models.append({
+                            "id": name,
+                            "display_name": m.get("displayName"),
+                            "description": (m.get("description") or "")[:200],
+                        })
+                return {"vendor": "google", "models": models}
+
+        if vendor.code in ("openai", "oai"):
+            async with httpx.AsyncClient(timeout=20) as cli:
+                r = await cli.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {key.api_key}"},
+                )
+                r.raise_for_status()
+                models = [{"id": m["id"]} for m in r.json().get("data", [])]
+                return {"vendor": "openai", "models": models}
+
+        if vendor.code in ("anthropic", "claude"):
+            async with httpx.AsyncClient(timeout=20) as cli:
+                r = await cli.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={"x-api-key": key.api_key, "anthropic-version": "2023-06-01"},
+                )
+                r.raise_for_status()
+                models = [{"id": m["id"], "display_name": m.get("display_name")}
+                          for m in r.json().get("data", [])]
+                return {"vendor": "anthropic", "models": models}
+
+        return {"vendor": vendor.code, "models": [], "note": "Vendor không hỗ trợ list models tự động"}
+    except httpx.HTTPStatusError as e:
+        raise InvalidPayload(f"Vendor trả lỗi: HTTP {e.response.status_code} — {e.response.text[:200]}")
+    except Exception as e:
+        raise InvalidPayload(f"List models lỗi: {e}")
+
+
 @router.get("/pools/{pool_id}/keys", response_model=list[s.PoolApiKeyOut])
 async def list_pool_keys(
     pool_id: uuid.UUID, admin: AdminUser, db: DbSession,
