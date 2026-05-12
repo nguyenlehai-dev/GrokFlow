@@ -109,7 +109,7 @@ export function AppShell() {
   };
 
   // Filter groups + their items by visibility. Drop empty groups.
-  const visibleNav: NavEntry[] = NAV.flatMap((entry) => {
+  const visibleNav: NavEntry[] = NAV.flatMap<NavEntry>((entry) => {
     if (entry.type === "link") {
       return canSeeLeaf(entry) ? [entry] : [];
     }
