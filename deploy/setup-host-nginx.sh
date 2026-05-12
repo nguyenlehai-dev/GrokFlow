@@ -26,9 +26,10 @@ fi
 
 echo "==> [1/4] Creating vhost directory: $VHOST_DIR"
 mkdir -p "$VHOST_DIR"
-# Backend container writes here. UID 1000 = appuser inside container.
-# Use group-write + setgid so files inherit group ownership.
-chown root:1000 "$VHOST_DIR"
+# Backend container runs gunicorn as uid 10001 (the `grokflow` user defined
+# in backend/Dockerfile.prod). Match that here so write_vhost() succeeds.
+# Setgid so any files created keep group ownership for visibility from host.
+chown 10001:10001 "$VHOST_DIR"
 chmod 2775 "$VHOST_DIR"
 
 echo "==> [2/4] Installing include directive: $INCLUDE_FILE"
