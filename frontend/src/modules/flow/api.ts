@@ -8,9 +8,13 @@
  *  hosted Flow service (e.g. when the proxy moves out of this monolith).
  */
 import { createHttp } from "@/core/api/factory";
-import { moduleManifest } from ".";
 
-export const flowApi = createHttp(moduleManifest.apiBaseUrl);
+// Read env directly — importing `moduleManifest` from "." would create a
+// circular dep (index → VideoToolPage → api → index) and trigger a TDZ
+// "Cannot access X before initialization" once Vite hoists the bundle.
+const FLOW_API_BASE = (import.meta.env.VITE_MODULE_FLOW_API as string | undefined) ?? "";
+
+export const flowApi = createHttp(FLOW_API_BASE);
 
 export type FlowJobStatus =
   | "uploading"
