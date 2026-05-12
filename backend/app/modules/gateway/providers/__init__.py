@@ -48,4 +48,7 @@ def get_provider(vendor_code: str) -> "VendorProvider | None":
     if vendor_code in ("openai", "oai"):
         from .openai_provider import OpenAIProvider
         return OpenAIProvider()
+    if vendor_code in ("anthropic", "claude"):
+        from .anthropic_provider import AnthropicProvider
+        return AnthropicProvider()
     return None

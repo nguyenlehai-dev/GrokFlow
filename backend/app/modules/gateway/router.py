@@ -9,12 +9,16 @@ lives in services/gateway_router.py (Phase 2).
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, status as http_status
+import httpx
+from fastapi import APIRouter, Depends, File, UploadFile, status as http_status
+from fastapi.responses import FileResponse
 from sqlalchemy import func, or_, select
 
 from app.core.database import SessionLocal
@@ -174,6 +178,7 @@ async def _pool_to_out(db, pool: GwPool) -> s.PoolOut:
         model=pool.model,
         description=pool.description,
         status=pool.status,
+        cooldown_seconds=pool.cooldown_seconds,
         keys_total=keys_total,
         keys_active=keys_active,
         created_at=pool.created_at,
@@ -346,6 +351,24 @@ async def create_gateway_key(
     )
 
 
+@router.patch("/gateway-keys/{key_id}", response_model=s.GatewayKeyOut)
+async def update_gateway_key(
+    key_id: uuid.UUID, payload: s.GatewayKeyUpdate, admin: AdminUser, db: DbSession,
+) -> GwGatewayKey:
+    k = await db.get(GwGatewayKey, key_id)
+    if not k:
+        raise NotFound("gateway_key")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(k, field, value)
+    await audit.log_action(
+        db, user_id=admin.id, action="gw_update_gateway_key",
+        target_type="gw_gateway_key", target_id=k.id,
+    )
+    await db.commit()
+    await db.refresh(k)
+    return k
+
+
 @router.delete("/gateway-keys/{key_id}", status_code=http_status.HTTP_204_NO_CONTENT, response_model=None)
 async def revoke_gateway_key(key_id: uuid.UUID, admin: AdminUser, db: DbSession):
     k = await db.get(GwGatewayKey, key_id)
@@ -411,7 +434,12 @@ async def list_requests(
 # Execute (Playground placeholder — does not yet route to vendor)
 # ============================================================================
 
-QUOTA_COOLDOWN_SECONDS = 300  # 5 minutes — 429 keys come back automatically
+QUOTA_COOLDOWN_DEFAULT = 300  # fallback if a pool has no cooldown_seconds (legacy rows)
+
+# Where multipart uploads land. Same volume as the rest of the app storage
+# so /api/v1/gateway/uploads/{filename} can serve them straight back.
+UPLOAD_DIR = Path(os.environ.get("LOCAL_STORAGE_PATH", "/app/storage")) / "gateway-uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 async def _resolve_pool(
@@ -512,7 +540,8 @@ async def _do_execute(
             break
         except ProviderQuotaExhausted as e:
             last_err = f"[quota] {e}"
-            key.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=QUOTA_COOLDOWN_SECONDS)
+            cd_secs = pool.cooldown_seconds or QUOTA_COOLDOWN_DEFAULT
+            key.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=cd_secs)
             key.last_used_at = datetime.now(timezone.utc)
             await db.flush()
             continue
@@ -643,7 +672,6 @@ async def submit_function(
                     function_code, payload, gateway_key_id,
                 )
             except Exception as e:  # noqa: BLE001 — last-resort logging
-                # Try to mark the row failed even if _do_execute exploded
                 try:
                     r = (await bg_db.execute(
                         select(GwRequest).where(GwRequest.gw_id == gw_id)
@@ -654,6 +682,26 @@ async def submit_function(
                         await bg_db.commit()
                 except Exception:  # noqa: BLE001
                     pass
+            # Webhook delivery — fire only after the row has settled.
+            if gateway_key_id:
+                gk = await bg_db.get(GwGatewayKey, gateway_key_id)
+                if gk and gk.webhook_url:
+                    r = (await bg_db.execute(
+                        select(GwRequest).where(GwRequest.gw_id == gw_id)
+                    )).scalar_one_or_none()
+                    if r:
+                        try:
+                            async with httpx.AsyncClient(timeout=10) as cli:
+                                await cli.post(gk.webhook_url, json={
+                                    "gw_id": r.gw_id,
+                                    "status": r.status,
+                                    "function_code": r.function_code,
+                                    "model": r.model,
+                                    "error_message": r.error_message,
+                                    "latency_ms": r.latency_ms,
+                                })
+                        except Exception:  # noqa: BLE001 — webhook is best-effort
+                            pass
 
     asyncio.create_task(_runner())
 
@@ -661,6 +709,67 @@ async def submit_function(
         request_id=req.id, gw_id=gw_id, status="pending",
         pool_key_name=None, response=None, error_message=None,
     )
+
+
+# ============================================================================
+# File uploads — multipart reference images for Playground / clients
+# ============================================================================
+
+ALLOWED_UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mov"}
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB
+
+
+@router.post("/uploads")
+async def upload_reference(
+    db: DbSession,
+    file: UploadFile = File(...),
+    caller: GatewayCaller = Depends(require_caller),
+):
+    """Accept a multipart file, store under storage/gateway-uploads, return
+    a stable URL the playground (or client) can paste into reference_*_urls.
+    """
+    ext = ""
+    if file.filename and "." in file.filename:
+        ext = "." + file.filename.rsplit(".", 1)[-1].lower()
+    if ext and ext not in ALLOWED_UPLOAD_EXTS:
+        raise InvalidPayload(f"Extension {ext} không được phép. Cho phép: {sorted(ALLOWED_UPLOAD_EXTS)}")
+
+    file_id = secrets.token_urlsafe(16).replace("-", "").replace("_", "")[:24]
+    safe_name = f"{file_id}{ext}"
+    path = UPLOAD_DIR / safe_name
+
+    total = 0
+    with path.open("wb") as f:
+        while True:
+            chunk = await file.read(1024 * 64)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                f.close()
+                path.unlink(missing_ok=True)
+                raise InvalidPayload(f"File quá lớn (>{MAX_UPLOAD_BYTES // (1024 * 1024)}MB)")
+            f.write(chunk)
+
+    return {
+        "filename": safe_name,
+        "size": total,
+        "url": f"/api/v1/gateway/uploads/{safe_name}",
+    }
+
+
+@router.get("/uploads/{filename}", response_model=None)
+async def serve_upload(filename: str):
+    """Serve a previously-uploaded reference back. Public — uploads have
+    unguessable filenames already.
+    """
+    # Defence in depth — refuse anything with path separators.
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise NotFound("file")
+    path = UPLOAD_DIR / filename
+    if not path.exists() or not path.is_file():
+        raise NotFound("file")
+    return FileResponse(path)
 
 
 @router.get("/requests/{gw_id}/status", response_model=s.RequestOut)

@@ -394,6 +394,12 @@ class GwPool(Base, TimestampMixin):
     model: Mapped[str | None] = mapped_column(String(120))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # Seconds a key sits on cooldown after a 429 from this pool's vendor.
+    # Defaults to 5 min — tune per-pool depending on the vendor's quota
+    # window (Google's per-minute vs OpenAI's per-hour, etc).
+    cooldown_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=300, server_default="300",
+    )
 
     vendor: Mapped["GwVendor"] = relationship()
     function: Mapped["GwApiFunction | None"] = relationship()
@@ -442,6 +448,10 @@ class GwGatewayKey(Base, TimestampMixin):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("users.id", ondelete="SET NULL"),
     )
+    # When set, async /submit results POST to this URL once status moves
+    # to succeeded/failed. Best-effort — failure to deliver doesn't fail
+    # the original job.
+    webhook_url: Mapped[str | None] = mapped_column(Text)
 
 
 class GwRequest(Base, TimestampMixin):

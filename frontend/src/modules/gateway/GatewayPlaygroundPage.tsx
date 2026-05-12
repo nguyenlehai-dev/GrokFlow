@@ -17,6 +17,7 @@ interface ExecuteResp {
   error_message: string | null;
 }
 
+
 export function GatewayPlaygroundPage() {
   const [verifyingKey, setVerifyingKey] = useState("");
   const [verifiedKey, setVerifiedKey] = useState<{ label: string; functions: string[] } | null>(null);
@@ -241,10 +242,54 @@ export function GatewayPlaygroundPage() {
           </div>
 
           <div>
+            <label className="text-xs font-medium">Reference Images — Upload</label>
+            <input
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              onChange={async (e) => {
+                const files = Array.from(e.target.files ?? []);
+                if (!files.length) return;
+                const urls: string[] = [];
+                for (const f of files) {
+                  try {
+                    const fd = new FormData();
+                    fd.append("file", f);
+                    const r = await gwApi.post<{ url: string }>(
+                      "/api/v1/gateway/uploads", fd,
+                      { headers: { "Content-Type": "multipart/form-data" } },
+                    );
+                    urls.push(r.data.url);
+                  } catch (err: any) {
+                    toast(extractError(err), "error");
+                  }
+                }
+                // Append to existing textarea content
+                const ta = document.querySelector<HTMLTextAreaElement>("#refImgUrls");
+                if (ta && urls.length) {
+                  const existing = ta.value.trim();
+                  ta.value = existing ? existing + "\n" + urls.join("\n") : urls.join("\n");
+                  ta.dispatchEvent(new Event("input", { bubbles: true }));
+                  toast(`Đã upload ${urls.length} file`, "success");
+                }
+                e.target.value = "";
+              }}
+              className="block w-full text-xs file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-brand-50 file:text-brand-700 file:cursor-pointer"
+            />
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Tự upload + paste URL vào ô bên dưới.
+            </p>
+          </div>
+
+          <div>
             <label className="text-xs font-medium">Reference Image URLs</label>
-            <textarea className="input text-sm font-mono" rows={2}
+            <textarea
+              id="refImgUrls"
+              className="input text-sm font-mono"
+              rows={2}
               placeholder="https://.../ref-1.png&#10;https://.../ref-2.png"
-              {...register("reference_image_urls")} />
+              {...register("reference_image_urls")}
+            />
             <p className="text-[10px] text-slate-500 mt-0.5">
               Mỗi URL một dòng. Để trống = text-to-image.
             </p>

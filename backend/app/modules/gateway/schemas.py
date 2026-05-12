@@ -84,6 +84,7 @@ class PoolIn(BaseModel):
     model: str | None = Field(default=None, max_length=120)
     description: str | None = None
     status: str = Field(default="active", pattern="^(active|inactive)$")
+    cooldown_seconds: int = Field(default=300, ge=10, le=86400)
 
 
 class PoolUpdate(BaseModel):
@@ -93,6 +94,7 @@ class PoolUpdate(BaseModel):
     model: str | None = None
     description: str | None = None
     status: str | None = Field(default=None, pattern="^(active|inactive)$")
+    cooldown_seconds: int | None = Field(default=None, ge=10, le=86400)
 
 
 class PoolOut(BaseModel):
@@ -106,6 +108,7 @@ class PoolOut(BaseModel):
     model: str | None
     description: str | None
     status: str
+    cooldown_seconds: int = 300
     keys_total: int = 0
     keys_active: int = 0
     created_at: datetime
@@ -149,6 +152,14 @@ class PoolApiKeyOut(BaseModel):
 class GatewayKeyIn(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     allowed_functions: list[str] = Field(default_factory=list)
+    webhook_url: str | None = None
+
+
+class GatewayKeyUpdate(BaseModel):
+    label: str | None = None
+    allowed_functions: list[str] | None = None
+    webhook_url: str | None = None
+    status: str | None = Field(default=None, pattern="^(active|inactive)$")
 
 
 class GatewayKeyOut(BaseModel):
@@ -157,6 +168,7 @@ class GatewayKeyOut(BaseModel):
     prefix: str
     allowed_functions: list[str]
     status: str
+    webhook_url: str | None
     created_at: datetime
 
     class Config:

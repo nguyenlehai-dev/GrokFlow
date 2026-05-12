@@ -282,11 +282,16 @@ function PoolEditorModal({
       model: pool?.model ?? "",
       description: pool?.description ?? "",
       status: pool?.status ?? "active",
+      cooldown_seconds: (pool as any)?.cooldown_seconds ?? 300,
     },
   });
   const save = useMutation({
     mutationFn: (v: any) => {
-      const payload = { ...v, function_id: v.function_id || null };
+      const payload = {
+        ...v,
+        function_id: v.function_id || null,
+        cooldown_seconds: Number(v.cooldown_seconds),
+      };
       return isCreate
         ? gwApi.post("/api/v1/gateway/pools", payload)
         : gwApi.patch(`/api/v1/gateway/pools/${pool!.id}`, payload);
@@ -334,12 +339,22 @@ function PoolEditorModal({
           <label className="text-sm font-medium">Description</label>
           <textarea className="input" rows={2} {...register("description")} />
         </div>
-        <div>
-          <label className="text-sm font-medium">Status</label>
-          <select className="input" {...register("status")}>
-            <option value="active">active</option>
-            <option value="inactive">inactive</option>
-          </select>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-sm font-medium">Status</label>
+            <select className="input" {...register("status")}>
+              <option value="active">active</option>
+              <option value="inactive">inactive</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Cooldown (s)</label>
+            <input className="input" type="number" min={10} max={86400}
+              {...register("cooldown_seconds", { valueAsNumber: true })} />
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Khi key 429, ngừng dùng trong N giây rồi tự thử lại.
+            </p>
+          </div>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="btn-ghost">Hủy</button>
