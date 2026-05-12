@@ -24,6 +24,11 @@ import { AdminGitPage } from "@/modules/admin/AdminGitPage";
 import { AuditLogPage } from "@/modules/audit/AuditLogPage";
 import { GatewayProfilesPage } from "@/modules/gateway/GatewayProfilesPage";
 import { GatewayProxiesPage } from "@/modules/gateway/GatewayProxiesPage";
+import { GatewayApiKeysPage } from "@/modules/gateway/GatewayApiKeysPage";
+import { GatewayJobsPage } from "@/modules/gateway/GatewayJobsPage";
+import { GatewaySettingsPage } from "@/modules/gateway/GatewaySettingsPage";
+import { GatewayPlaygroundPage } from "@/modules/gateway/GatewayPlaygroundPage";
+import { GatewayDocsPage } from "@/modules/gateway/GatewayDocsPage";
 
 // Quản lý Flow — sub-pages, placeholders for now
 const flowRoutes = [
@@ -38,15 +43,8 @@ const flowRoutes = [
   ["docs",            "Flow API Docs"],
 ] as const;
 
-// Gateway Management — wired to gatewaygrok-backend via /api/gateway/* proxy.
-// Profiles + Proxies are real pages; the rest are placeholders for now.
-const gatewayRoutes = [
-  ["api-keys",    "API Keys"],
-  ["jobs",        "Jobs"],
-  ["settings",   "Settings"],
-  ["playground",  "Playground"],
-  ["docs",        "Gateway API Docs"],
-] as const;
+// Gateway Management — all 7 pages wired to gatewaygrok-backend
+// via the /gateway-api/* nginx proxy. No more placeholders.
 
 export const router = createBrowserRouter([
   {
@@ -98,15 +96,15 @@ export const router = createBrowserRouter([
         element: <ComingSoonPage title={`Flow — ${label}`} />,
       })),
 
-      // Gateway Management — Profiles + Proxies wired to gatewaygrok-backend,
-      // the rest are placeholders for now.
+      // Gateway Management — all 7 sub-routes wired to gatewaygrok-backend
       { path: "gateway", element: <Navigate to="/gateway/profiles" replace /> },
-      { path: "gateway/profiles", element: <GatewayProfilesPage /> },
-      { path: "gateway/proxies",  element: <GatewayProxiesPage /> },
-      ...gatewayRoutes.map(([slug, label]) => ({
-        path: `gateway/${slug}`,
-        element: <ComingSoonPage title={`Gateway — ${label}`} />,
-      })),
+      { path: "gateway/profiles",   element: <GatewayProfilesPage /> },
+      { path: "gateway/proxies",    element: <GatewayProxiesPage /> },
+      { path: "gateway/api-keys",   element: <GatewayApiKeysPage /> },
+      { path: "gateway/jobs",       element: <GatewayJobsPage /> },
+      { path: "gateway/settings",   element: <GatewaySettingsPage /> },
+      { path: "gateway/playground", element: <GatewayPlaygroundPage /> },
+      { path: "gateway/docs",       element: <GatewayDocsPage /> },
     ],
   },
 ]);
