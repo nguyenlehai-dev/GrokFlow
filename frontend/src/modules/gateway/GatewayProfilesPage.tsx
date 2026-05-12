@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import {
-  Layers, Plus, Pencil, Trash2, AlertCircle, Upload, Activity, LogIn,
+  Layers, Plus, Pencil, Trash2, AlertCircle, Activity, LogIn,
   Loader2, Image as ImageIcon,
 } from "lucide-react";
 import { gatewayApi } from "@/core/api/gateway";
