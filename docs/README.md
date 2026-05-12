@@ -31,6 +31,7 @@ git push origin prod              # ← live trong ~30s
 - [**MULTI-TENANT.md**](./MULTI-TENANT.md) — role tiers, domain scoping, role-based permission rules
 - [**PERFORMANCE.md**](./PERFORMANCE.md) — cache / pool / indexes / bundle tuning + monitoring playbook
 - [**CORE-REFERENCE.md**](./CORE-REFERENCE.md) — cheatsheet mọi helper trong `app/core/` (BE) và `src/core/` (FE)
+- [**SERVER-MIGRATION.md**](./SERVER-MIGRATION.md) — chuyển toàn bộ stack sang VPS khác (DB dump + storage + profiles + nginx + DNS)
 
 ### Vận hành (deploy / branching)
 
