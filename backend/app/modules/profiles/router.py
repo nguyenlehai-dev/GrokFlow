@@ -21,8 +21,26 @@ from app.core.config import settings
 from app.core.deps import AdminUser, CurrentUser, DbSession
 from app.core.exceptions import InvalidCredentials, InvalidPayload, NotFound, PermissionDenied
 from app.core.security import create_short_token, decode_access_token
+from app.core.tenant import scope_by_user_domain
 from app.models import Profile, User
 from app.modules.audit import service as audit
+
+
+async def _assert_profile_accessible(
+    db, admin: User, profile: Profile,
+) -> None:
+    """Tenant guard for any single-row Profile op done by an admin.
+
+    super_admin: passes.
+    admin: passes only if the profile's owner lives in the same domain.
+    Anyone else: caller shouldn't have hit this — endpoints gate with
+    AdminUser dep first.
+    """
+    if admin.role == "super_admin":
+        return
+    owner = await db.get(User, profile.user_id)
+    if not owner or owner.domain_id != admin.domain_id:
+        raise PermissionDenied("Profile không thuộc domain bạn quản lý")
 
 from .schemas import (
     OpenBrowserResponse,
@@ -69,22 +87,32 @@ def _profile_dir(user_id: uuid.UUID, profile_id: uuid.UUID) -> Path:
 
 @router.get("", response_model=list[ProfileOut])
 async def list_profiles(user: CurrentUser, db: DbSession) -> list[Profile]:
-    """Admin sees everything; customer sees only logged_in profiles owned by admins.
-
-    Customers pick from this pool when creating jobs.
+    """super_admin sees all profiles; per-domain admin sees only the
+    profiles owned by users in their own domain; customers see only
+    `logged_in` profiles owned by admins in their domain (the pool).
     """
-    if user.role == "admin":
-        result = await db.execute(
-            select(Profile).where(Profile.status != "deleted").order_by(Profile.created_at.desc())
+    base = select(Profile).where(Profile.status != "deleted")
+
+    if user.role == "super_admin":
+        q = base.order_by(Profile.created_at.desc())
+    elif user.role == "admin":
+        # Tenant-scope: only profiles owned by users in the admin's domain.
+        q = scope_by_user_domain(base, Profile.user_id, user).order_by(
+            Profile.created_at.desc()
         )
     else:
-        # Profiles owned by any admin user, status logged_in (ready to use).
-        result = await db.execute(
+        # Customer pool: admin-owned, logged_in, same domain.
+        q = (
             select(Profile)
             .join(User, User.id == Profile.user_id)
-            .where(User.role == "admin", Profile.status == "logged_in")
+            .where(
+                User.role.in_(("admin", "super_admin")),
+                Profile.status == "logged_in",
+                User.domain_id == user.domain_id,
+            )
             .order_by(Profile.created_at.desc())
         )
+    result = await db.execute(q)
     return list(result.scalars().all())
 
 
@@ -117,25 +145,49 @@ async def get_profile(profile_id: uuid.UUID, user: CurrentUser, db: DbSession) -
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
-    if user.role != "admin":
-        # Customer can only see admin's logged_in profiles.
-        owner = await db.get(User, profile.user_id)
-        if not owner or owner.role != "admin" or profile.status != "logged_in":
-            raise PermissionDenied()
+    # get_profile takes CurrentUser (not AdminUser) since customers also
+    # need to read profiles from the pool — inline the check instead of
+    # using _assert_profile_accessible which is for admin-only callers.
+    owner = await db.get(User, profile.user_id)
+    if not owner:
+        raise NotFound("profile")
+    if user.role == "super_admin":
+        return profile
+    if user.role == "admin":
+        if owner.domain_id != user.domain_id:
+            raise PermissionDenied("Profile không thuộc domain bạn quản lý")
+        return profile
+    # Customer can only see admin-owned, logged_in profiles in their own domain.
+    if (
+        owner.role not in ("admin", "super_admin")
+        or profile.status != "logged_in"
+        or owner.domain_id != user.domain_id
+    ):
+        raise PermissionDenied()
     return profile
 
 
 @router.patch("/{profile_id}", response_model=ProfileOut)
-async def update_profile(profile_id: uuid.UUID, payload: ProfileUpdate, _admin: AdminUser, db: DbSession) -> Profile:
+async def update_profile(
+    profile_id: uuid.UUID, payload: ProfileUpdate, admin: AdminUser, db: DbSession,
+) -> Profile:
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
+    changes: dict = {}
     if payload.name is not None:
-        profile.name = payload.name
+        profile.name = payload.name; changes["name"] = payload.name
     if payload.status is not None:
-        profile.status = payload.status
+        profile.status = payload.status; changes["status"] = payload.status
     if payload.max_concurrent_jobs is not None:
         profile.max_concurrent_jobs = payload.max_concurrent_jobs
+        changes["max_concurrent_jobs"] = payload.max_concurrent_jobs
+    # Audit so changes to status (esp. "deleted" / "logged_in") are traceable.
+    await audit.log_action(
+        db, user_id=admin.id, action="update_profile",
+        target_type="profile", target_id=profile.id, metadata=changes,
+    )
     await db.commit()
     await db.refresh(profile)
     return profile
@@ -146,6 +198,7 @@ async def delete_profile(profile_id: uuid.UUID, admin: AdminUser, db: DbSession)
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     profile_manager.remove_profile_dir(profile.profile_path)
     await audit.log_action(db, user_id=admin.id, action="delete_profile",
                            target_type="profile", target_id=profile.id,
@@ -164,6 +217,7 @@ async def upload_cookies(
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     if profile.status == "running_job":
         raise InvalidPayload("Profile is busy running a job")
 
@@ -194,10 +248,11 @@ async def upload_cookies(
 
 
 @router.post("/{profile_id}/open-browser", response_model=OpenBrowserResponse)
-async def open_browser(profile_id: uuid.UUID, _admin: AdminUser, db: DbSession) -> OpenBrowserResponse:
+async def open_browser(profile_id: uuid.UUID, admin: AdminUser, db: DbSession) -> OpenBrowserResponse:
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     profile.status = "opening"
     await db.commit()
     return OpenBrowserResponse(
@@ -212,6 +267,7 @@ async def issue_helper_token(profile_id: uuid.UUID, admin: AdminUser, db: DbSess
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     minutes = 30
     token = create_short_token(
         subject=str(admin.id),
@@ -248,6 +304,7 @@ async def upload_cookies_via_helper(
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     # Token's `sub` is the admin who issued it; verify still admin.
     issuer = await db.get(User, uuid.UUID(decoded["sub"]))
     if not issuer or issuer.role != "admin":
@@ -278,6 +335,7 @@ async def check_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSession) 
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     if profile.status == "running_job":
         raise InvalidPayload("Profile is busy running a job")
 
@@ -306,6 +364,7 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     if profile.status == "running_job":
         raise InvalidPayload("Profile is busy running a job")
 
@@ -351,6 +410,7 @@ async def finish_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSess
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
 
     # Quick session check via the running CDP browser (lighter than spawning new headless).
     info = vnc_manager.get_for_profile(str(profile.id))
@@ -379,6 +439,7 @@ async def stop_vnc(profile_id: uuid.UUID, admin: AdminUser, db: DbSession) -> Pr
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     try:
         vnc_manager.stop_for_profile(str(profile.id))
     except Exception:  # noqa: BLE001
@@ -402,6 +463,7 @@ async def disable_profile(profile_id: uuid.UUID, _admin: AdminUser, db: DbSessio
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
     profile.status = "disabled"
     await db.commit()
     await db.refresh(profile)

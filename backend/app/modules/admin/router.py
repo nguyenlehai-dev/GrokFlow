@@ -91,18 +91,51 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 @router.get("/stats", response_model=AdminStats)
-async def stats(_admin: AdminUser, db: DbSession) -> AdminStats:
-    total_users = (await db.execute(select(func.count(User.id)))).scalar_one()
-    total_keys = (await db.execute(select(func.count(ApiKey.id)))).scalar_one()
-    total_profiles = (await db.execute(select(func.count(Profile.id)))).scalar_one()
-    total_jobs = (await db.execute(select(func.count(Job.id)))).scalar_one()
+async def stats(admin: AdminUser, db: DbSession) -> AdminStats:
+    """Counters for the admin dashboard. super_admin sees system-wide
+    numbers; per-domain admin sees only their tenant's slice.
+    """
+    is_super = admin.role == "super_admin"
+    # Subquery of user ids in the admin's domain — used to filter every
+    # per-tenant count (api_keys/profiles/jobs all FK back to users.user_id).
+    domain_user_ids = (
+        select(User.id).where(User.domain_id == admin.domain_id)
+        if not is_super else None
+    )
+
+    def maybe_scope(q, fk_col):
+        return q if is_super else q.where(fk_col.in_(domain_user_ids))
+
+    total_users = (await db.execute(
+        select(func.count(User.id)) if is_super
+        else select(func.count(User.id)).where(User.domain_id == admin.domain_id)
+    )).scalar_one()
+    total_keys = (await db.execute(
+        maybe_scope(select(func.count(ApiKey.id)), ApiKey.user_id)
+    )).scalar_one()
+    total_profiles = (await db.execute(
+        maybe_scope(select(func.count(Profile.id)), Profile.user_id)
+    )).scalar_one()
+    total_jobs = (await db.execute(
+        maybe_scope(select(func.count(Job.id)), Job.user_id)
+    )).scalar_one()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    succ = (
-        await db.execute(select(func.count(Job.id)).where(Job.status == "success", Job.completed_at >= cutoff))
-    ).scalar_one()
-    fail = (
-        await db.execute(select(func.count(Job.id)).where(Job.status == "failed", Job.completed_at >= cutoff))
-    ).scalar_one()
+    succ = (await db.execute(
+        maybe_scope(
+            select(func.count(Job.id)).where(
+                Job.status == "success", Job.completed_at >= cutoff,
+            ),
+            Job.user_id,
+        )
+    )).scalar_one()
+    fail = (await db.execute(
+        maybe_scope(
+            select(func.count(Job.id)).where(
+                Job.status == "failed", Job.completed_at >= cutoff,
+            ),
+            Job.user_id,
+        )
+    )).scalar_one()
     return AdminStats(
         total_users=total_users,
         total_api_keys=total_keys,
