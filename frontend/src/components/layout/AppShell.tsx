@@ -4,7 +4,7 @@ import {
   Key, Layers, FileText, Settings, LayoutDashboard, Workflow, LogOut, Shield,
   ScrollText, CreditCard, ChevronDown, Globe, Video, GitBranch, Scissors,
   Combine, AudioLines, Replace, Gauge, Maximize2, Crop, Film, Network,
-  Boxes, Code2, Activity, Terminal, BookOpen, UserCog, Wrench, Sparkles,
+  Code2, Activity, Terminal, BookOpen, UserCog, Wrench, Sparkles,
   Rocket,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
