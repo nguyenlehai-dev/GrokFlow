@@ -14,6 +14,7 @@ from app.modules.billing.router import router as billing_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.domains.router import router as domains_router
 from app.modules.files.router import router as files_router
+from app.modules.gateway_proxy.router import router as gateway_proxy_router
 from app.modules.git_admin.router import router as git_admin_router
 from app.modules.jobs.router import router as jobs_router
 from app.modules.plans_public.router import router as plans_public_router
@@ -64,6 +65,7 @@ app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(dashboard_router)
 app.include_router(domains_router)
+app.include_router(gateway_proxy_router)
 app.include_router(git_admin_router)
 app.include_router(settings_router)
 app.include_router(plans_public_router)

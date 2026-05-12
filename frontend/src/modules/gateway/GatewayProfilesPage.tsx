@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { Layers, Plus, Pencil, Trash2, AlertCircle, LogOut } from "lucide-react";
+import { Layers, Plus, Pencil, Trash2, AlertCircle } from "lucide-react";
 import { gatewayApi } from "@/core/api/gateway";
-import { useGatewayAuthStore } from "@/core/auth/gateway-store";
 import { toast } from "@/components/ui/Toast";
 import { GatewayAuthGuard } from "./GatewayAuthGuard";
 
@@ -45,8 +44,6 @@ export function GatewayProfilesPage() {
 
 function Inner() {
   const qc = useQueryClient();
-  const username = useGatewayAuthStore((s) => s.username);
-  const logout = useGatewayAuthStore((s) => s.clear);
   const [editing, setEditing] = useState<Profile | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -68,25 +65,15 @@ function Inner() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Layers size={22} /> Gateway — Profiles
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Đang đăng nhập gateway: <strong>{username}</strong>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={logout} className="btn-ghost inline-flex items-center gap-1.5 text-xs">
-            <LogOut size={12} /> Logout gateway
-          </button>
-          <button
-            onClick={() => setCreating(true)}
-            className="btn-primary inline-flex items-center gap-1.5"
-          >
-            <Plus size={14} /> Tạo profile
-          </button>
-        </div>
+        <h1 className="text-2xl font-semibold flex items-center gap-2">
+          <Layers size={22} /> Gateway — Profiles
+        </h1>
+        <button
+          onClick={() => setCreating(true)}
+          className="btn-primary inline-flex items-center gap-1.5"
+        >
+          <Plus size={14} /> Tạo profile
+        </button>
       </div>
 
       {isLoading ? (

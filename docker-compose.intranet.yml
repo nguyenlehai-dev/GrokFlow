@@ -67,6 +67,11 @@ services:
       HOST_SSH_USER: ${HOST_SSH_USER:-vpsroot}
       HOST_SSH_PASSWORD: ${HOST_SSH_PASSWORD:-}
       HOST_GROKFLOW_PATH: ${HOST_GROKFLOW_PATH:-/home/vpsroot/grokflow}
+      # gatewaygrok-backend SSO proxy. Backend logs in with these creds and
+      # forwards Gateway page requests with the cached admin token.
+      GATEWAY_BACKEND_URL: ${GATEWAY_BACKEND_URL:-http://host.docker.internal:8001}
+      GATEWAY_ADMIN_USERNAME: ${GATEWAY_ADMIN_USERNAME:-admin}
+      GATEWAY_ADMIN_PASSWORD: ${GATEWAY_ADMIN_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

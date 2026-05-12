@@ -1,11 +1,16 @@
 import axios from "axios";
+import { useAuthStore } from "@/core/auth/store";
 
-/** Axios instance for gatewaygrok-backend.
+/** Gateway API client.
  *
- *  Same-origin in prod (frontend nginx proxies /gateway-api/* to host:8001),
- *  localhost:8001 in dev. Auth uses the gatewaygrok admin token from the
- *  separate gateway-auth store — NOT the GrokFlow JWT, since gatewaygrok
- *  has its own admin auth flow.
+ *  Same-origin in production. Hits /api/gateway-proxy/* on the GrokFlow
+ *  backend, which validates the GrokFlow JWT (admin role) and forwards
+ *  the request to gatewaygrok-backend with a cached admin token. The
+ *  user never sees a second login.
+ *
+ *  Dev fallback (localhost): default to localhost:8000 (GrokFlow backend),
+ *  same proxy path. Set VITE_GATEWAY_API_BASE_URL to override if your dev
+ *  topology is different.
  */
 const onLocalhost =
   typeof window !== "undefined" &&
@@ -13,24 +18,15 @@ const onLocalhost =
     window.location.hostname === "127.0.0.1");
 
 const baseURL = onLocalhost
-  ? (import.meta.env.VITE_GATEWAY_API_BASE_URL || "http://localhost:8001")
-  : "/gateway-api";
+  ? (import.meta.env.VITE_GATEWAY_API_BASE_URL || "http://localhost:8000/api/gateway-proxy")
+  : "/api/gateway-proxy";
 
 export const gatewayApi = axios.create({ baseURL });
 
 gatewayApi.interceptors.request.use((config) => {
-  // Read token lazily to avoid the circular import with the auth store.
-  if (typeof window !== "undefined") {
-    try {
-      const persisted = window.localStorage.getItem("gateway-auth");
-      if (persisted) {
-        const parsed = JSON.parse(persisted);
-        const token = parsed?.state?.token;
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-      }
-    } catch { /* ignore */ }
+  const token = useAuthStore.getState().token;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   if (
     config.data &&
