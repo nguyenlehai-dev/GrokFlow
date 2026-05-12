@@ -609,7 +609,12 @@ function EndpointCard({ ep, apiBase }: { ep: Endpoint; apiBase: string }) {
 }
 
 export function ApiDocsPage() {
-  const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  // Show curl examples against the same origin the docs are served from
+  // so multi-domain users see their own host in the examples.
+  const apiBase =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000");
 
   return (
     <div className="space-y-6 max-w-5xl">

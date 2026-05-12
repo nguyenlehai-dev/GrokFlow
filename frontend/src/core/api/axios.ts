@@ -6,8 +6,25 @@ import { toast } from "@/components/ui/Toast";
 // request based on the data type (JSON, FormData, URLSearchParams, etc.).
 // A pinned Content-Type would override the multipart boundary axios needs
 // to add for FormData uploads, breaking image upload with HTTP 422.
+
+// baseURL resolution:
+//   - Same-origin (empty string) when running in a browser on anything
+//     other than localhost — each domain's host-nginx vhost proxies /api/*
+//     to the backend container, so no CORS and no hardcoded host is needed.
+//     This is what makes multi-domain per-user-domain access control work.
+//   - Falls back to VITE_API_BASE_URL (or localhost:8000) when on localhost
+//     so `npm run dev` against a local backend keeps working.
+const onLocalhost =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1");
+
+const baseURL = onLocalhost
+  ? (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000")
+  : "";
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8000",
+  baseURL,
 });
 
 api.interceptors.request.use((config) => {
