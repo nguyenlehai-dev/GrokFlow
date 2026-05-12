@@ -61,3 +61,10 @@ deploy_fe.py
 # Backup credentials — DO NOT commit
 .backup-env
 
+# VPS-only convenience symlinks (created by docs/VPS-LAYOUT.md "single-tree"
+# setup). They point at absolute system paths (/var/log, /etc/nginx, …)
+# so they'd be broken symlinks anywhere except production.
+/logs
+/nginx-vhosts
+/docker-volumes
+
