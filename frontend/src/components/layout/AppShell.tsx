@@ -6,14 +6,14 @@ import {
   Combine, AudioLines, Replace, Gauge, Maximize2, Crop, Film, Network,
   Boxes, Code2, Activity, Terminal, BookOpen, UserCog, Wrench, Sparkles,
 } from "lucide-react";
-import type { ComponentType } from "react";
+import type { LucideIcon } from "lucide-react";
 import { useAuthStore } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 
 // `feature` — gate by user entitlement (admins bypass).
 // `adminOnly` — only admins see it.
-type IconType = ComponentType<{ size?: number; className?: string }>;
+type IconType = LucideIcon;
 
 interface NavLeaf {
   type: "link";
