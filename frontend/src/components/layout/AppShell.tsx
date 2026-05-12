@@ -67,6 +67,7 @@ const NAV: NavEntry[] = [
   {
     type: "group", key: "gateway", label: "Gateway (gatewaygrok-be)", icon: Network,
     items: [
+      { type: "link", to: "/gateway/overview",   label: "Overview",      icon: LayoutDashboard },
       { type: "link", to: "/gateway/profiles",   label: "Profiles",      icon: Layers },
       { type: "link", to: "/gateway/proxies",    label: "Proxies",       icon: GitBranch },
       { type: "link", to: "/gateway/api-keys",   label: "API Keys",      icon: Code2 },

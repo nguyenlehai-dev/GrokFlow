@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { Activity, Plus, RefreshCw } from "lucide-react";
+import { Activity, Plus, RefreshCw, RotateCw } from "lucide-react";
 import { gatewayApi } from "@/core/api/gateway";
 import { toast } from "@/components/ui/Toast";
 import { GatewayAuthGuard } from "./GatewayAuthGuard";
@@ -47,6 +47,15 @@ function Inner() {
     refetchInterval: 5000,
   });
 
+  const retry = useMutation({
+    mutationFn: (id: string) => gatewayApi.post(`/api/jobs/${id}/retry`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["gw-jobs"] });
+      toast("Đã queue retry", "success");
+    },
+    onError: (e: any) => toast(extractError(e), "error"),
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -79,6 +88,7 @@ function Inner() {
                 <th className="px-3 py-2">Count</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Created</th>
+                <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -102,11 +112,22 @@ function Inner() {
                   <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">
                     {new Date(j.created_at).toLocaleString("vi-VN")}
                   </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {(j.status === "failed" || j.status === "succeeded") && (
+                      <button
+                        onClick={() => retry.mutate(j.id)}
+                        className="btn-ghost text-xs"
+                        title="Re-queue job"
+                      >
+                        <RotateCw size={12} className="inline mr-1" /> Retry
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {(jobs ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
                     Chưa có job nào.
                   </td>
                 </tr>
@@ -145,7 +166,7 @@ function CreateJobModal({
   const { register, handleSubmit, watch } = useForm({
     defaultValues: {
       profile_id: "",
-      target: "grok_image",
+      target: "image",
       prompt: "",
       negative_prompt: "",
       count: 1,
@@ -194,11 +215,8 @@ function CreateJobModal({
           <div>
             <label className="text-sm font-medium">Target</label>
             <select className="input" {...register("target")}>
-              <option value="grok_image">grok_image</option>
-              <option value="grok_video">grok_video</option>
-              <option value="flow_image">flow_image</option>
-              <option value="flow_video">flow_video</option>
-              <option value="dreamina_image">dreamina_image</option>
+              <option value="image">image</option>
+              <option value="video">video</option>
             </select>
             {selectedProfile && (
               <p className="text-xs text-slate-500 mt-1">

@@ -22,6 +22,7 @@ import { AdminBillingPage } from "@/modules/admin/AdminBillingPage";
 import { AdminDomainsPage } from "@/modules/admin/AdminDomainsPage";
 import { AdminGitPage } from "@/modules/admin/AdminGitPage";
 import { AuditLogPage } from "@/modules/audit/AuditLogPage";
+import { GatewayOverviewPage } from "@/modules/gateway/GatewayOverviewPage";
 import { GatewayProfilesPage } from "@/modules/gateway/GatewayProfilesPage";
 import { GatewayProxiesPage } from "@/modules/gateway/GatewayProxiesPage";
 import { GatewayApiKeysPage } from "@/modules/gateway/GatewayApiKeysPage";
@@ -97,7 +98,8 @@ export const router = createBrowserRouter([
       })),
 
       // Gateway Management — all 7 sub-routes wired to gatewaygrok-backend
-      { path: "gateway", element: <Navigate to="/gateway/profiles" replace /> },
+      { path: "gateway", element: <Navigate to="/gateway/overview" replace /> },
+      { path: "gateway/overview",   element: <GatewayOverviewPage /> },
       { path: "gateway/profiles",   element: <GatewayProfilesPage /> },
       { path: "gateway/proxies",    element: <GatewayProxiesPage /> },
       { path: "gateway/api-keys",   element: <GatewayApiKeysPage /> },
