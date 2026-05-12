@@ -1,33 +1,35 @@
-"""Admin git / deploy controls.
+"""Admin git / deploy controls — multi-repo.
 
-The backend container can't run shell commands on the host directly (no
-shared filesystem for the .git dir, no host binaries). So both status and
-deploy work by SSHing to the host as the admin's chosen user.
+Each row in `git_repos` is a tab in the /admin/git UI. The backend SSHs to
+the host (paramiko, password from .env.prod) and runs `git` + `docker
+compose` inside the repo's local_path. GitHub state comes from the public
+REST API.
 
-SSH config comes from env vars (set in .env.prod):
-    HOST_SSH_HOST       — defaults to "host.docker.internal" (Linux: routed
-                          via the extra_hosts entry in docker-compose).
-    HOST_SSH_PORT       — defaults 22.
-    HOST_SSH_USER       — defaults "vpsroot".
-    HOST_SSH_PASSWORD   — required for password auth.
-    HOST_GROKFLOW_PATH  — defaults "/home/vpsroot/grokflow".
+CRUD: GET/POST/PATCH/DELETE /api/admin/git/repos
+Per-repo status:  GET  /api/admin/git/repos/{id}/status
+Per-repo deploy:  POST /api/admin/git/repos/{id}/deploy
 
-GitHub remote-state lookup uses the unauthenticated GitHub API (the repo
-is public). If rate-limited, the "behind" indicator just falls back to
-unknown — the local view still works.
+The legacy single-repo endpoints (/api/admin/git/status, /api/admin/git/deploy)
+remain and target the first repo by sort_order, so frontends that don't
+know about repos keep working.
 """
 from __future__ import annotations
 
 import os
+import time
+import uuid
 from typing import Literal
 
 import httpx
 import paramiko
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, status as http_status
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 
-from app.core.deps import AdminUser, DbSession  # noqa: F401  (DbSession unused; future audit)
-from app.core.exceptions import AppError
+from app.core.deps import AdminUser, DbSession
+from app.core.exceptions import AppError, InvalidPayload, NotFound
+from app.models import GitRepo
+from app.modules.audit import service as audit
 
 router = APIRouter(prefix="/api/admin/git", tags=["admin-git"])
 
@@ -36,10 +38,6 @@ SSH_HOST = os.environ.get("HOST_SSH_HOST", "host.docker.internal")
 SSH_PORT = int(os.environ.get("HOST_SSH_PORT", "22"))
 SSH_USER = os.environ.get("HOST_SSH_USER", "vpsroot")
 SSH_PASSWORD = os.environ.get("HOST_SSH_PASSWORD", "")
-GROKFLOW_PATH = os.environ.get("HOST_GROKFLOW_PATH", "/home/vpsroot/grokflow")
-
-GITHUB_REPO = os.environ.get("GITHUB_REPO", "nguyenlehai-dev/GrokFlow")
-GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "prod")
 
 
 class SshConfigError(AppError):
@@ -55,25 +53,20 @@ def _client() -> paramiko.SSHClient:
     c = paramiko.SSHClient()
     c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     c.connect(
-        hostname=SSH_HOST,
-        port=SSH_PORT,
-        username=SSH_USER,
-        password=SSH_PASSWORD,
-        timeout=10,
-        banner_timeout=10,
+        hostname=SSH_HOST, port=SSH_PORT, username=SSH_USER, password=SSH_PASSWORD,
+        timeout=10, banner_timeout=10,
     )
     return c
 
 
 def _run(cmd: str, timeout: int = 30) -> tuple[int, str, str]:
-    """Run a shell command on the host via SSH. Returns (exit_code, stdout, stderr)."""
     c = _client()
     try:
-        stdin, stdout, stderr = c.exec_command(cmd, timeout=timeout)
-        exit_code = stdout.channel.recv_exit_status()
+        _, stdout, stderr = c.exec_command(cmd, timeout=timeout)
+        code = stdout.channel.recv_exit_status()
         out = stdout.read().decode("utf-8", errors="replace")
         err = stderr.read().decode("utf-8", errors="replace")
-        return exit_code, out, err
+        return code, out, err
     finally:
         c.close()
 
@@ -96,7 +89,45 @@ class ContainerStatus(BaseModel):
     started_at: str | None = None
 
 
+class GitRepoOut(BaseModel):
+    id: uuid.UUID
+    label: str
+    github_repo: str
+    branch: str
+    local_path: str
+    compose_file: str | None
+    env_file: str | None
+    services: list[str]
+    sort_order: int
+
+    class Config:
+        from_attributes = True
+
+
+class GitRepoCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=100)
+    github_repo: str = Field(min_length=3, max_length=255)
+    branch: str = Field(default="main", min_length=1, max_length=100)
+    local_path: str = Field(min_length=1)
+    compose_file: str | None = None
+    env_file: str | None = None
+    services: list[str] = Field(default_factory=list)
+    sort_order: int = 0
+
+
+class GitRepoUpdate(BaseModel):
+    label: str | None = None
+    github_repo: str | None = None
+    branch: str | None = None
+    local_path: str | None = None
+    compose_file: str | None = None
+    env_file: str | None = None
+    services: list[str] | None = None
+    sort_order: int | None = None
+
+
 class GitStatus(BaseModel):
+    repo: GitRepoOut
     branch: str
     current_commit: GitCommit | None
     recent_commits: list[GitCommit]
@@ -107,7 +138,7 @@ class GitStatus(BaseModel):
 
 
 class DeployRequest(BaseModel):
-    services: list[Literal["backend", "frontend", "worker", "idle-cleanup", "all"]] = ["backend", "frontend"]
+    services: list[str] | None = None  # None = use repo's default
     pull: bool = True
     rebuild: bool = True
 
@@ -122,11 +153,6 @@ class DeployResult(BaseModel):
 
 
 def _parse_log(text: str) -> list[GitCommit]:
-    """Parse `git log` output with a record separator we control (NUL byte).
-
-    Each record is 4 tab-separated fields: hash, author, date, subject.
-    Using tab + null avoids any clash with commit body whitespace.
-    """
     commits: list[GitCommit] = []
     for record in text.split("\x1e"):
         record = record.strip()
@@ -135,48 +161,49 @@ def _parse_log(text: str) -> list[GitCommit]:
         parts = record.split("\x1f")
         if len(parts) < 4:
             continue
-        full_hash, author, date, subject = parts[0], parts[1], parts[2], parts[3]
+        full_hash, author, date, subject = parts
         commits.append(GitCommit(
-            hash=full_hash,
-            short=full_hash[:7],
-            author=author,
-            date=date,
-            message=subject,
+            hash=full_hash, short=full_hash[:7],
+            author=author, date=date, message=subject,
         ))
     return commits
 
 
-def _git_log_cmd(n: int) -> str:
-    # Record-sep \x1e between commits, field-sep \x1f between fields.
-    # %s = subject only (no body), so multi-line bodies don't trip the parser.
+def _log_cmd(local_path: str, n: int) -> str:
     fmt = "%H%x1f%an <%ae>%x1f%cI%x1f%s%x1e"
-    return f"cd {GROKFLOW_PATH} && git log -n {n} --pretty=format:'{fmt}' --no-merges"
+    return f"cd {local_path} && git log -n {n} --pretty=format:'{fmt}' --no-merges"
 
 
-# ---------------- Endpoints ----------------
+def _compose_prefix(repo: GitRepo) -> str:
+    parts = [f"cd {repo.local_path}", "docker compose"]
+    if repo.env_file:
+        parts.append(f"--env-file {repo.env_file}")
+    if repo.compose_file:
+        parts.append(f"-f {repo.compose_file}")
+    return " && ".join(parts[:1]) + " && " + " ".join(parts[1:])
 
 
-@router.get("/status", response_model=GitStatus)
-async def git_status(admin: AdminUser) -> GitStatus:
-    # 1) Branch + recent commits
-    code, out, err = _run(f"cd {GROKFLOW_PATH} && git rev-parse --abbrev-ref HEAD")
-    branch = (out or err).strip() or "unknown"
+async def _build_status(repo: GitRepo) -> GitStatus:
+    """Pull all status info for one repo."""
+    # 1) Branch + commits
+    code, out, err = _run(f"cd {repo.local_path} && git rev-parse --abbrev-ref HEAD")
+    branch = (out or err).strip() or repo.branch
 
-    code, out, _ = _run(_git_log_cmd(10))
+    code, out, _ = _run(_log_cmd(repo.local_path, 10))
     recent = _parse_log(out) if code == 0 else []
     current = recent[0] if recent else None
 
     # 2) Dirty?
-    code, out, _ = _run(f"cd {GROKFLOW_PATH} && git status --porcelain")
+    code, out, _ = _run(f"cd {repo.local_path} && git status --porcelain")
     is_dirty = bool(out.strip())
 
-    # 3) Remote latest commit on the tracked branch via GitHub API.
+    # 3) Remote latest commit via GitHub API
     remote_latest: GitCommit | None = None
     commits_behind: int | None = None
     try:
         async with httpx.AsyncClient(timeout=8) as cli:
             r = await cli.get(
-                f"https://api.github.com/repos/{GITHUB_REPO}/commits",
+                f"https://api.github.com/repos/{repo.github_repo}/commits",
                 params={"sha": branch, "per_page": 1},
                 headers={"Accept": "application/vnd.github+json"},
             )
@@ -185,21 +212,19 @@ async def git_status(admin: AdminUser) -> GitStatus:
                 if arr:
                     item = arr[0]
                     remote_latest = GitCommit(
-                        hash=item["sha"],
-                        short=item["sha"][:7],
+                        hash=item["sha"], short=item["sha"][:7],
                         author=item["commit"]["author"]["name"],
                         date=item["commit"]["author"]["date"],
-                        message=item["commit"]["message"].splitlines()[0] if item["commit"]["message"] else "",
+                        message=(item["commit"]["message"] or "").splitlines()[0],
                     )
     except Exception:  # noqa: BLE001
         pass
 
     if remote_latest and current:
-        # Count how many remote commits are ahead of local using GitHub compare API.
         try:
             async with httpx.AsyncClient(timeout=8) as cli:
                 r = await cli.get(
-                    f"https://api.github.com/repos/{GITHUB_REPO}/compare/{current.hash}...{remote_latest.hash}",
+                    f"https://api.github.com/repos/{repo.github_repo}/compare/{current.hash}...{remote_latest.hash}",
                     headers={"Accept": "application/vnd.github+json"},
                 )
                 if r.status_code == 200:
@@ -207,67 +232,172 @@ async def git_status(admin: AdminUser) -> GitStatus:
         except Exception:  # noqa: BLE001
             pass
 
-    # 4) Container statuses (via docker ps on host)
+    # 4) Containers — match by label prefix derived from repo label.
+    # Heuristic: lowercased label is the docker-compose project name. Falls
+    # back to the directory basename when label doesn't match anything.
+    project = repo.label.lower().replace(" ", "-")
     code, out, _ = _run(
-        "docker ps -a --format '{{.Names}}|{{.Status}}|{{.Image}}|{{.RunningFor}}' | grep grokflow"
+        f"docker ps -a --format '{{{{.Names}}}}|{{{{.Status}}}}|{{{{.Image}}}}|{{{{.RunningFor}}}}' "
+        f"| grep -E '^{project}-|^{os.path.basename(repo.local_path)}-' "
+        f"|| true"
     )
     containers: list[ContainerStatus] = []
     for line in out.strip().splitlines():
         parts = line.split("|")
         if len(parts) >= 2:
             containers.append(ContainerStatus(
-                name=parts[0],
-                status=parts[1],
+                name=parts[0], status=parts[1],
                 image_id=parts[2] if len(parts) > 2 else None,
                 started_at=parts[3] if len(parts) > 3 else None,
             ))
 
     return GitStatus(
-        branch=branch,
-        current_commit=current,
-        recent_commits=recent,
-        remote_latest=remote_latest,
-        commits_behind=commits_behind,
-        is_dirty=is_dirty,
-        containers=containers,
+        repo=GitRepoOut.model_validate(repo),
+        branch=branch, current_commit=current, recent_commits=recent,
+        remote_latest=remote_latest, commits_behind=commits_behind,
+        is_dirty=is_dirty, containers=containers,
     )
 
 
-@router.post("/deploy", response_model=DeployResult)
-async def deploy(payload: DeployRequest, admin: AdminUser) -> DeployResult:
-    """Pull latest + rebuild selected services on host.
+async def _do_deploy(repo: GitRepo, payload: DeployRequest) -> DeployResult:
+    services = payload.services if payload.services is not None else repo.services
+    services = [s for s in services if s]
 
-    The whole flow runs in a single SSH session: git pull, then a
-    `docker compose up -d --build <services>` for each service requested.
-    Output from each step is concatenated into `log`.
-    """
-    import time
-
-    services = payload.services
-    if "all" in services:
-        services = ["backend", "frontend", "worker", "idle-cleanup"]
-
-    compose_prefix = (
-        f"cd {GROKFLOW_PATH} && "
-        f"docker compose --env-file .env.prod -f docker-compose.intranet.yml"
-    )
-
+    compose = _compose_prefix(repo)
     steps: list[str] = []
     if payload.pull:
-        steps.append(f"cd {GROKFLOW_PATH} && git pull --ff-only")
+        steps.append(f"cd {repo.local_path} && git pull --ff-only")
+    svcs_str = " ".join(services) if services else ""
     if payload.rebuild:
-        steps.append(f"{compose_prefix} build --build-arg VITE_API_BASE_URL= {' '.join(services)}")
-    steps.append(f"{compose_prefix} up -d --force-recreate {' '.join(services)}")
+        # --build-arg only applies if the project uses VITE_API_BASE_URL; harmless otherwise.
+        steps.append(f"{compose} build --build-arg VITE_API_BASE_URL= {svcs_str}".rstrip())
+    steps.append(f"{compose} up -d --force-recreate {svcs_str}".rstrip())
 
     start = time.monotonic()
     log_chunks: list[str] = []
     ok = True
     for step in steps:
-        code, out, err = _run(step, timeout=600)
+        code, out, err = _run(step, timeout=900)
         log_chunks.append(f"$ {step}\n{out}{err}\n[exit={code}]\n")
         if code != 0:
             ok = False
             break
 
-    duration = time.monotonic() - start
-    return DeployResult(ok=ok, duration_seconds=round(duration, 1), log="\n".join(log_chunks))
+    return DeployResult(
+        ok=ok,
+        duration_seconds=round(time.monotonic() - start, 1),
+        log="\n".join(log_chunks),
+    )
+
+
+# ---------------- Repo CRUD ----------------
+
+
+@router.get("/repos", response_model=list[GitRepoOut])
+async def list_repos(admin: AdminUser, db: DbSession) -> list[GitRepo]:
+    rows = (await db.execute(
+        select(GitRepo).order_by(GitRepo.sort_order, GitRepo.label)
+    )).scalars().all()
+    return list(rows)
+
+
+@router.post("/repos", response_model=GitRepoOut, status_code=http_status.HTTP_201_CREATED)
+async def create_repo(payload: GitRepoCreate, admin: AdminUser, db: DbSession) -> GitRepo:
+    repo = GitRepo(
+        label=payload.label,
+        github_repo=payload.github_repo,
+        branch=payload.branch,
+        local_path=payload.local_path,
+        compose_file=payload.compose_file,
+        env_file=payload.env_file,
+        services=payload.services,
+        sort_order=payload.sort_order,
+    )
+    db.add(repo)
+    await db.flush()
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_create_git_repo",
+        target_type="git_repo", target_id=repo.id, metadata={"label": repo.label},
+    )
+    await db.commit()
+    await db.refresh(repo)
+    return repo
+
+
+@router.patch("/repos/{repo_id}", response_model=GitRepoOut)
+async def update_repo(
+    repo_id: uuid.UUID, payload: GitRepoUpdate, admin: AdminUser, db: DbSession,
+) -> GitRepo:
+    repo = await db.get(GitRepo, repo_id)
+    if not repo:
+        raise NotFound("git_repo")
+    changes: dict = {}
+    for field in ("label", "github_repo", "branch", "local_path", "compose_file",
+                  "env_file", "services", "sort_order"):
+        v = getattr(payload, field)
+        if v is not None:
+            setattr(repo, field, v)
+            changes[field] = v if not isinstance(v, list) else "updated"
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_update_git_repo",
+        target_type="git_repo", target_id=repo.id, metadata=changes,
+    )
+    await db.commit()
+    await db.refresh(repo)
+    return repo
+
+
+@router.delete("/repos/{repo_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+async def delete_repo(repo_id: uuid.UUID, admin: AdminUser, db: DbSession) -> None:
+    repo = await db.get(GitRepo, repo_id)
+    if not repo:
+        raise NotFound("git_repo")
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_delete_git_repo",
+        target_type="git_repo", target_id=repo.id, metadata={"label": repo.label},
+    )
+    await db.delete(repo)
+    await db.commit()
+
+
+# ---------------- Per-repo status/deploy ----------------
+
+
+@router.get("/repos/{repo_id}/status", response_model=GitStatus)
+async def repo_status(repo_id: uuid.UUID, admin: AdminUser, db: DbSession) -> GitStatus:
+    repo = await db.get(GitRepo, repo_id)
+    if not repo:
+        raise NotFound("git_repo")
+    return await _build_status(repo)
+
+
+@router.post("/repos/{repo_id}/deploy", response_model=DeployResult)
+async def repo_deploy(
+    repo_id: uuid.UUID, payload: DeployRequest, admin: AdminUser, db: DbSession,
+) -> DeployResult:
+    repo = await db.get(GitRepo, repo_id)
+    if not repo:
+        raise NotFound("git_repo")
+    return await _do_deploy(repo, payload)
+
+
+# ---------------- Legacy single-repo endpoints (resolve to first repo) ----------------
+
+
+async def _first_repo(db) -> GitRepo:
+    repo = (await db.execute(
+        select(GitRepo).order_by(GitRepo.sort_order, GitRepo.label).limit(1)
+    )).scalar_one_or_none()
+    if not repo:
+        raise InvalidPayload("Chưa có git repo nào được cấu hình. Tạo qua /admin/git → Tạo repo.")
+    return repo
+
+
+@router.get("/status", response_model=GitStatus)
+async def legacy_status(admin: AdminUser, db: DbSession) -> GitStatus:
+    return await _build_status(await _first_repo(db))
+
+
+@router.post("/deploy", response_model=DeployResult)
+async def legacy_deploy(payload: DeployRequest, admin: AdminUser, db: DbSession) -> DeployResult:
+    return await _do_deploy(await _first_repo(db), payload)

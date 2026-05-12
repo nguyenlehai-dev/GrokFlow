@@ -285,6 +285,30 @@ class Invoice(Base, TimestampMixin):
     pdf_url: Mapped[str | None] = mapped_column(Text)
 
 
+class GitRepo(Base, TimestampMixin):
+    """A git repo deployed to this host that admin can monitor + redeploy.
+
+    Each repo gets its own tab in /admin/git. Self-deployments work because
+    backend SSHs to the host as a privileged user and runs git + docker
+    compose commands inside the repo's local_path.
+
+    `services` is the list of compose service names to rebuild on Deploy.
+    Empty list means "rebuild whatever docker compose up touches" — no -f
+    filter applied.
+    """
+    __tablename__ = "git_repos"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    github_repo: Mapped[str] = mapped_column(String(255), nullable=False)  # "owner/repo"
+    branch: Mapped[str] = mapped_column(String(100), nullable=False, default="main")
+    local_path: Mapped[str] = mapped_column(Text, nullable=False)
+    compose_file: Mapped[str | None] = mapped_column(String(255))
+    env_file: Mapped[str | None] = mapped_column(String(255))
+    services: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
 class Domain(Base, TimestampMixin):
     """Per-domain access control config.
 
@@ -326,4 +350,5 @@ __all__ = [
     "Payment",
     "Invoice",
     "Domain",
+    "GitRepo",
 ]
