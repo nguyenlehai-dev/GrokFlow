@@ -9,7 +9,17 @@ import { useDomainStore } from "@/core/domain/store";
 import "@/index.css";
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      // Treat data as fresh for 10s by default so the many list pages that
+      // poll with refetchInterval don't ALSO re-fetch on every component
+      // remount or focus change. Pages that need real-time data (Playground
+      // execute results, Jobs in flight) opt back in with staleTime: 0.
+      staleTime: 10_000,
+    },
+  },
 });
 
 // Fire-and-forget on boot — the route guards read from the store; null config
