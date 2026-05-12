@@ -33,6 +33,7 @@ git push origin prod              # ← live trong ~30s
 - [**CORE-REFERENCE.md**](./CORE-REFERENCE.md) — cheatsheet mọi helper trong `app/core/` (BE) và `src/core/` (FE)
 - [**SERVER-MIGRATION.md**](./SERVER-MIGRATION.md) — chuyển toàn bộ stack sang VPS khác (DB dump + storage + profiles + nginx + DNS)
 - [**HIGH-AVAILABILITY.md**](./HIGH-AVAILABILITY.md) — 3 mức dự phòng khi server sập: backup off-site / standby ấm / Cloudflare auto-failover
+- [**SERVER-SPECS.md**](./SERVER-SPECS.md) — cấu hình VPS nên mua (RAM/CPU/disk theo tiers + so sánh Hetzner / Vultr / DO / VN providers)
 
 ### Vận hành (deploy / branching)
 
