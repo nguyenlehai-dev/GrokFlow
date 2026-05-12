@@ -19,14 +19,28 @@ interface Domain {
 }
 
 // All known frontend routes. Keep in sync with router.tsx.
+// Granular sub-pages first so admin can grant just one Gateway tab without
+// the rest; the parent path (eg "/gateway") still matches all if used.
 const ALL_PAGES = [
   { path: "/dashboard", label: "Dashboard" },
   { path: "/api-keys", label: "API Keys" },
+  // Grok management
   { path: "/profiles", label: "Profiles" },
   { path: "/jobs", label: "Jobs" },
-  { path: "/api-docs", label: "API Docs" },
+  { path: "/api-docs", label: "API Docs (Grok)" },
+  // Flow tools
   { path: "/flow", label: "Flow (toàn nhóm)" },
-  { path: "/gateway", label: "Gateway Management (toàn nhóm)" },
+  // Gateway sub-pages
+  { path: "/gateway", label: "Gateway (toàn nhóm)" },
+  { path: "/gateway/dashboard", label: "Gateway · Dashboard" },
+  { path: "/gateway/vendors", label: "Gateway · Vendors" },
+  { path: "/gateway/pools", label: "Gateway · Pools" },
+  { path: "/gateway/functions", label: "Gateway · API Functions" },
+  { path: "/gateway/gateway-keys", label: "Gateway · Gateway Keys" },
+  { path: "/gateway/requests", label: "Gateway · Requests" },
+  { path: "/gateway/playground", label: "Gateway · Playground" },
+  { path: "/gateway/docs", label: "Gateway · API Docs" },
+  // Billing / settings
   { path: "/billing", label: "Billing (user)" },
   { path: "/pricing", label: "Pricing" },
   { path: "/checkout", label: "Checkout" },
