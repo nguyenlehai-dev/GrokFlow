@@ -121,10 +121,12 @@ export function AppShell() {
     if (n.superOnly && !isSuper) return false;
     if (n.adminOnly && !isAdmin) return false;
     if (n.feature && !isAdmin && !features[n.feature]) return false;
-    // Use the user's effective allowed_pages (role ∩ domain) when present;
-    // otherwise fall back to the domain-level check. Admins bypass both.
-    if (!isAdmin && !userCanSeePath(user ?? null, n.to, isPageAllowed)) return false;
-    return true;
+    // Path-level check. userCanSeePath understands tier rules:
+    //   super_admin  → always true
+    //   admin        → /admin/{users,roles} always; otherwise must be in
+    //                  the domain's allowed pages
+    //   user/support → must be in role ∩ domain
+    return userCanSeePath(user ?? null, n.to, isPageAllowed);
   };
 
   // Filter groups + their items by visibility. Drop empty groups.

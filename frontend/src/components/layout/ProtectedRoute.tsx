@@ -37,12 +37,11 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/landing" replace />;
   }
 
-  // Per-user (role) allowlist takes priority; falls back to domain config.
-  // Admins bypass everything.
-  if (
-    (user?.role !== "admin" && user?.role !== "super_admin") &&
-    !userCanSeePath(user ?? null, location.pathname, isPageAllowed)
-  ) {
+  // userCanSeePath knows the tier rules:
+  //   super_admin  → always true
+  //   admin        → /admin/{users,roles} always; rest scoped to domain
+  //   user/support → role ∩ domain
+  if (!userCanSeePath(user ?? null, location.pathname, isPageAllowed)) {
     const target = firstAllowedPath();
     // Avoid an infinite redirect if even the fallback target isn't allowed —
     // render the block panel so the user sees what's going on.
