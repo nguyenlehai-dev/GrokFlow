@@ -23,9 +23,16 @@ interface ExecuteResp {
 
 export function GatewayPlaygroundPage() {
   const me = useAuthStore((s) => s.user);
-  const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
+  // Only super_admin bypasses the Gateway-API-Key gate. Per-domain admin
+  // still needs to verify a gwk_live_* key — they're managing a tenant,
+  // not the global gateway, so they go through the same client auth path
+  // as any external caller. Matches the plxeditor design.
+  const isSuper = me?.role === "super_admin";
   const verified = usePlaygroundKey((s) => s.current);
-  const unlocked = isAdmin || !!verified;
+  const unlocked = isSuper || !!verified;
+  // `isAdmin` here means "JWT-routed admin path inside the playground form",
+  // which is super_admin only now.
+  const isAdmin = isSuper;
 
   return (
     <div className="space-y-4 relative">
