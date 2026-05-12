@@ -24,6 +24,14 @@ git push origin prod              # ← live trong ~30s
 
 ## Index
 
+### Kiến trúc & Extension
+
+- ⭐ [**ARCHITECTURE.md**](./ARCHITECTURE.md) — bức tranh tổng thể: layout repo, layered design, request lifecycle, optimizations
+- [**MODULES.md**](./MODULES.md) — module system FE: cách thêm 1 menu group mới (3 bước)
+- [**MULTI-TENANT.md**](./MULTI-TENANT.md) — role tiers, domain scoping, role-based permission rules
+- [**PERFORMANCE.md**](./PERFORMANCE.md) — cache / pool / indexes / bundle tuning + monitoring playbook
+- [**CORE-REFERENCE.md**](./CORE-REFERENCE.md) — cheatsheet mọi helper trong `app/core/` (BE) và `src/core/` (FE)
+
 ### Vận hành (deploy / branching)
 
 - ⭐ [Quy trình deploy (tiếng Việt)](./QUY-TRINH-DEPLOY.md)
