@@ -347,8 +347,8 @@ async def update_repo(
     return repo
 
 
-@router.delete("/repos/{repo_id}", status_code=http_status.HTTP_204_NO_CONTENT)
-async def delete_repo(repo_id: uuid.UUID, admin: AdminUser, db: DbSession) -> None:
+@router.delete("/repos/{repo_id}", status_code=http_status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_repo(repo_id: uuid.UUID, admin: AdminUser, db: DbSession):
     repo = await db.get(GitRepo, repo_id)
     if not repo:
         raise NotFound("git_repo")
