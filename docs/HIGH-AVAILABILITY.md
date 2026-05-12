@@ -18,6 +18,32 @@ priciest. Pick the one that matches your downtime budget.
 
 ---
 
+## Current production setup (Tier 1, live)
+
+This project ships configured for Tier 1 against the owner's Google Drive
+(`nguyenlehai2000@gmail.com`, folder
+`1Ypxf2J6g4gDix2Igo2iapqY_wcqfJbkK`). Confirmed working as of May 2026
+with these stats from the very first run:
+
+- Source size: 359 MiB browser_profiles + 53 MiB storage volume + ~5 MiB
+  Postgres dump + a few KB of nginx vhosts.
+- After restic compression + dedupe: **329 MiB stored on Drive**.
+- First upload: 13 min (Drive throttles a fresh repo). Subsequent
+  hourly runs: ~30s–2min depending on how much actually changed.
+- Drive quota burn rate at current data size: roughly **5 GiB/month**
+  with the 48h × 30d × 12w × 24m × 5y retention. Well within 5 TB.
+
+Hourly cron is already installed:
+
+```cron
+5 * * * * /home/vpsroot/grokflow/scripts/backup.sh \
+    >> /var/log/grokflow-backup.log 2>&1
+```
+
+If you bring up a NEW VPS following [SERVER-MIGRATION.md](./SERVER-MIGRATION.md),
+the setup section below is what you need to redo. Otherwise it's
+already done — skip to "Verify the restore path" further down.
+
 ## Tier 1 — Off-site backup (DO THIS FIRST)
 
 Nightly dump of everything that matters to a cloud bucket. If the VPS
