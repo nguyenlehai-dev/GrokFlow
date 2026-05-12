@@ -453,6 +453,7 @@ function UserPermissionsModal({
   const [planId, setPlanId] = useState<string>(user.plan_id ?? "");
   const [domainId, setDomainId] = useState<string>(user.domain_id ?? "");
   const [roleId, setRoleId] = useState<string>(user.role_id ?? "");
+  const [roleTier, setRoleTier] = useState<string>(user.role ?? "user");
   const [featOverride, setFeatOverride] = useState<Record<string, boolean>>(
     () => (user.entitlement_overrides as any)?.features ?? {},
   );
@@ -493,6 +494,7 @@ function UserPermissionsModal({
         entitlement_overrides: overrides,
         // Zero-uuid sentinel clears the field (backend understands this).
         role_id: roleId || NULL_PLAN_ID,
+        role: roleTier,
       };
       if (isSuper) {
         body.domain_id = domainId || NULL_PLAN_ID;
@@ -558,23 +560,38 @@ function UserPermissionsModal({
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
 
-        <section className="border-b pb-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-          {isSuper && (
+        <section className="border-b pb-3 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="text-sm font-medium">Domain</label>
-              <select className="input" value={domainId} onChange={(e) => onDomainChange(e.target.value)}>
-                <option value="">— Global (super_admin) —</option>
-                {(domains ?? []).filter((d) => d.hostname !== "*").map((d) => (
-                  <option key={d.id} value={d.id}>{d.hostname} — {d.label}</option>
-                ))}
+              <label className="text-sm font-medium">Role tier (hệ thống)</label>
+              <select className="input" value={roleTier} onChange={(e) => setRoleTier(e.target.value)}>
+                <option value="user">user (khách thường)</option>
+                <option value="admin">admin (per-domain)</option>
+                {isSuper && <option value="super_admin">super_admin (global)</option>}
+                <option value="support">support</option>
               </select>
               <p className="text-xs text-slate-500 mt-1">
-                Đổi domain sẽ tự reset role (role không cross-domain).
+                Tier quyết định bypass: <code>admin/super_admin</code> luôn thấy mọi menu của domain;
+                <code>user</code> bị giới hạn bởi role bên dưới.
               </p>
             </div>
-          )}
+            {isSuper && (
+              <div>
+                <label className="text-sm font-medium">Domain</label>
+                <select className="input" value={domainId} onChange={(e) => onDomainChange(e.target.value)}>
+                  <option value="">— Global (super_admin) —</option>
+                  {(domains ?? []).filter((d) => d.hostname !== "*").map((d) => (
+                    <option key={d.id} value={d.id}>{d.hostname} — {d.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Đổi domain sẽ tự reset role (role không cross-domain).
+                </p>
+              </div>
+            )}
+          </div>
           <div>
-            <label className="text-sm font-medium">Role (per-domain)</label>
+            <label className="text-sm font-medium">Role (per-domain — named permission set)</label>
             <select className="input" value={roleId} onChange={(e) => setRoleId(e.target.value)} disabled={!domainId}>
               <option value="">— Inherit domain pages —</option>
               {(roles ?? []).filter((r) => r.status === "active").map((r) => (
@@ -582,7 +599,8 @@ function UserPermissionsModal({
               ))}
             </select>
             <p className="text-xs text-slate-500 mt-1">
-              Khi có role: user chỉ thấy menu trong role (giao với domain). Inherit = full menu của domain.
+              Chỉ áp dụng cho tier <code>user</code>: thu hẹp menu xuống các trang trong role.
+              Admin/super_admin bỏ qua role này (luôn thấy đủ).
             </p>
           </div>
         </section>
