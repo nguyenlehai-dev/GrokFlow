@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ChevronDown, LogOut } from "lucide-react";
+import { ChevronDown, LogOut, Menu, X } from "lucide-react";
 
 import { useAuthStore, userCanSeePath } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
@@ -47,6 +47,14 @@ export function AppShell() {
     return [{ ...entry, items }];
   });
 
+  // Mobile sidebar: hidden by default, slides in over the page when the
+  // header hamburger is tapped. Auto-close on route change so the user
+  // doesn't have to dismiss it after every nav.
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
   const onLogout = () => {
     clear();
     navigate("/login");
@@ -54,11 +62,38 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen">
-      <aside className="w-60 border-r border-slate-200 bg-white flex flex-col">
-        <div className="px-5 py-4 border-b border-slate-200">
-          <Link to="/dashboard" className="text-lg font-semibold text-brand-600">
+      {/* Mobile backdrop — tap to dismiss. md+ never renders this. */}
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          className="fixed inset-0 z-30 bg-slate-900/40 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <aside
+        className={
+          // Mobile: fixed off-canvas drawer toggled by `mobileOpen`.
+          // md+: in-flow column with fixed width like before.
+          "fixed inset-y-0 left-0 z-40 w-64 border-r border-slate-200 bg-white flex flex-col " +
+          "transform transition-transform duration-200 md:static md:transform-none md:w-60 " +
+          (mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0")
+        }
+      >
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <Link to="/dashboard" className="text-lg font-semibold text-brand-600 truncate">
             {brandName}
           </Link>
+          {/* Close button visible only on mobile when drawer is open */}
+          <button
+            type="button"
+            onClick={() => setMobileOpen(false)}
+            className="md:hidden -mr-1 p-1 text-slate-500 hover:text-slate-800"
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
         </div>
         <nav className="p-2 flex-1 overflow-y-auto">
           {visibleNav.map((entry) =>
@@ -74,24 +109,42 @@ export function AppShell() {
           )}
         </nav>
       </aside>
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-          <div className="text-sm text-slate-500">
-            Logged in as <span className="font-medium text-slate-800">{user?.email}</span> ({user?.role})
-            {planName && (
-              <span className="ml-2 inline-block rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
-                {planName}
-              </span>
-            )}
-            {!isSuper && domainConfig?.hostname && (
-              <span className="ml-2 inline-block rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                @{domainConfig.hostname}
-              </span>
-            )}
+
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:px-4 md:px-6 py-3">
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Hamburger — only on mobile (md hides). */}
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              className="md:hidden p-1.5 text-slate-600 hover:text-slate-900 rounded hover:bg-slate-100"
+              aria-label="Open menu"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="text-xs sm:text-sm text-slate-500 min-w-0 truncate">
+              {/* Hide the "Logged in as" prefix on the smallest screens to save space */}
+              <span className="hidden sm:inline">Logged in as </span>
+              <span className="font-medium text-slate-800">{user?.email}</span>
+              <span className="hidden sm:inline"> ({user?.role})</span>
+              {planName && (
+                <span className="ml-2 hidden md:inline-block rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                  {planName}
+                </span>
+              )}
+              {!isSuper && domainConfig?.hostname && (
+                <span className="ml-2 hidden lg:inline-block rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                  @{domainConfig.hostname}
+                </span>
+              )}
+            </div>
           </div>
-          <button onClick={onLogout} className="btn-ghost"><LogOut size={16} className="mr-2" />Logout</button>
+          <button onClick={onLogout} className="btn-ghost shrink-0">
+            <LogOut size={16} className="sm:mr-2" />
+            <span className="hidden sm:inline">Logout</span>
+          </button>
         </header>
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
           <Outlet />
         </main>
       </div>

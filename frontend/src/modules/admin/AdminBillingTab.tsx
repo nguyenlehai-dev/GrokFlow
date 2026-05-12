@@ -75,7 +75,7 @@ export function AdminBillingTab() {
   const [sub, setSub] = useState<SubTab>("subscriptions");
   return (
     <div className="space-y-3">
-      <div className="flex gap-1 border-b">
+      <div className="tabs-scroll">
         <SubTabBtn active={sub === "subscriptions"} onClick={() => setSub("subscriptions")} icon={CreditCard}>
           Subscriptions
         </SubTabBtn>
@@ -173,7 +173,7 @@ function SubscriptionsPanel() {
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
       ) : (
-        <div className="card overflow-hidden p-0">
+        <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>
@@ -424,7 +424,7 @@ function PaymentsPanel() {
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
       ) : (
-        <div className="card overflow-hidden p-0">
+        <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>
@@ -653,7 +653,7 @@ function InvoicesPanel() {
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
       ) : (
-        <div className="card overflow-hidden p-0">
+        <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>

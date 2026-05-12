@@ -19,9 +19,28 @@
     @apply w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500;
   }
   .card {
-    @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+    @apply rounded-lg border border-slate-200 bg-white p-3 sm:p-4 shadow-sm;
   }
   .badge {
     @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
   }
+  /* Apply to a wrapper around any wide <table> so it scrolls horizontally
+     on narrow viewports instead of overflowing the page width. Usage:
+     <div className="table-scroll"><table>…</table></div> */
+  .table-scroll {
+    @apply -mx-3 sm:mx-0 overflow-x-auto;
+  }
+  .table-scroll > table {
+    @apply min-w-[640px];
+  }
+}
+
+@layer utilities {
+  /* Horizontal-scroll tab bar that snaps to each tab on mobile.
+     Drop on a <div> that wraps tab buttons. */
+  .tabs-scroll {
+    @apply flex gap-1 border-b overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0;
+    scroll-snap-type: x proximity;
+  }
+  .tabs-scroll > * { scroll-snap-align: start; }
 }

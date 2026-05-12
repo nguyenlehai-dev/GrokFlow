@@ -189,7 +189,7 @@ function ProfileCard({
       : "bg-slate-100 text-slate-600";
 
   return (
-    <div className="card overflow-hidden p-0">
+    <div className="card overflow-x-auto p-0">
       <div className="flex items-start gap-3 p-4 border-l-4" style={{ borderLeftColor: v.accent }}>
         <img src={v.image} alt={v.label} className="w-10 h-10 rounded flex-shrink-0" />
         <div className="flex-1 min-w-0">

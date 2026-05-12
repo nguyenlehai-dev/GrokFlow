@@ -102,7 +102,7 @@ export function AdminPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Admin</h1>
       <StatsBlock />
-      <div className="flex gap-1 border-b">
+      <div className="tabs-scroll">
         <TabButton active={tab === "users"} onClick={() => setTab("users")}>Users</TabButton>
         {isSuper && <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>Plans / Gói</TabButton>}
         {isSuper && <TabButton active={tab === "billing"} onClick={() => setTab("billing")}>Billing</TabButton>}
@@ -190,7 +190,7 @@ export function UsersTab({ meId }: { meId: string }) {
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
       ) : (
-        <div className="card overflow-hidden p-0">
+        <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>
@@ -740,7 +740,7 @@ export function PlansTab() {
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
       ) : (
-        <div className="card overflow-hidden p-0">
+        <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>

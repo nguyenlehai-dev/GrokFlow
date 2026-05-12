@@ -71,7 +71,7 @@ function Inner() {
       ) : error ? (
         <ErrorPanel error={error} />
       ) : (
-        <div className="card overflow-hidden p-0">
+        <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>
