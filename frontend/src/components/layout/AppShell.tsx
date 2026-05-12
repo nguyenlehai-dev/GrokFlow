@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Key, Layers, FileText, Settings, LayoutDashboard, Workflow, LogOut, Shield, ScrollText, CreditCard } from "lucide-react";
 import { useAuthStore } from "@/core/auth/store";
+import { useDomainStore } from "@/core/domain/store";
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 
 // `feature` (optional) → only show this nav item if the user's entitlements
@@ -19,14 +20,20 @@ const adminNav = [{ to: "/admin", label: "Admin", icon: Shield }];
 
 export function AppShell() {
   const { user, clear } = useAuthStore();
+  const domainConfig = useDomainStore((s) => s.config);
+  const isPageAllowed = useDomainStore((s) => s.isPageAllowed);
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   const features = user?.entitlements?.features ?? {};
-  const visibleBase = baseNav.filter(
-    (n) => !n.feature || isAdmin || features[n.feature],
-  );
+  // Filter by both entitlements AND domain allowlist (admins bypass domain rules).
+  const visibleBase = baseNav.filter((n) => {
+    if (n.feature && !isAdmin && !features[n.feature]) return false;
+    if (!isAdmin && !isPageAllowed(n.to)) return false;
+    return true;
+  });
   const nav = isAdmin ? [...visibleBase, ...adminNav] : visibleBase;
   const planName = user?.entitlements?.plan_name;
+  const brandName = domainConfig?.brand_name ?? "GrokFlow";
 
   const onLogout = () => {
     clear();
@@ -38,7 +45,7 @@ export function AppShell() {
       <aside className="w-60 border-r border-slate-200 bg-white">
         <div className="px-5 py-4 border-b border-slate-200">
           <Link to="/dashboard" className="text-lg font-semibold text-brand-600">
-            GrokFlow
+            {brandName}
           </Link>
         </div>
         <nav className="p-2">

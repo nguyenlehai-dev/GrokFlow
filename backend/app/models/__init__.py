@@ -285,6 +285,34 @@ class Invoice(Base, TimestampMixin):
     pdf_url: Mapped[str | None] = mapped_column(Text)
 
 
+class Domain(Base, TimestampMixin):
+    """Per-domain access control config.
+
+    Each domain row says: when the frontend is loaded via hostname X,
+    what pages are accessible and what public flows (landing/register)
+    are exposed. Resolution: backend looks up by `hostname` (lower-cased).
+    Falls back to a row with hostname='*' (the default config) if no
+    exact match is found.
+    """
+    __tablename__ = "domains"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    hostname: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    # Public-area flags
+    allow_landing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    allow_register: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    allow_login: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    # Authed-area route allowlist. Set allow_all_pages=true for unrestricted.
+    allow_all_pages: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # List of route paths (e.g. ["/dashboard", "/jobs", "/api-keys"]). Empty = none.
+    allowed_pages: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    # Optional override: custom brand name shown in this domain's UI
+    brand_name: Mapped[str | None] = mapped_column(String(100))
+
+
 __all__ = [
     "Plan",
     "User",
@@ -297,4 +325,5 @@ __all__ = [
     "Subscription",
     "Payment",
     "Invoice",
+    "Domain",
 ]

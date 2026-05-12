@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
+import { PublicRouteGuard } from "@/components/layout/PublicRouteGuard";
 import { LoginPage } from "@/modules/auth/LoginPage";
 import { RegisterPage } from "@/modules/auth/RegisterPage";
 import { LandingPage } from "@/modules/landing/LandingPage";
@@ -17,9 +18,18 @@ import { AdminPage } from "@/modules/admin/AdminPage";
 import { AuditLogPage } from "@/modules/audit/AuditLogPage";
 
 export const router = createBrowserRouter([
-  { path: "/landing", element: <LandingPage /> },
-  { path: "/login", element: <LoginPage /> },
-  { path: "/register", element: <RegisterPage /> },
+  {
+    path: "/landing",
+    element: <PublicRouteGuard flag="allow_landing"><LandingPage /></PublicRouteGuard>,
+  },
+  {
+    path: "/login",
+    element: <PublicRouteGuard flag="allow_login"><LoginPage /></PublicRouteGuard>,
+  },
+  {
+    path: "/register",
+    element: <PublicRouteGuard flag="allow_register" fallback="/login"><RegisterPage /></PublicRouteGuard>,
+  },
   {
     path: "/app",
     element: (

@@ -8,6 +8,7 @@ import { useAuthStore } from "@/core/auth/store";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { toast } from "@/components/ui/Toast";
 import { AdminBillingTab } from "./AdminBillingTab";
+import { AdminDomainsTab } from "./AdminDomainsTab";
 
 interface AdminUser {
   id: string;
@@ -56,7 +57,7 @@ export function AdminPage() {
   const setUser = useAuthStore((s) => s.setUser);
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"users" | "plans" | "billing">("users");
+  const [tab, setTab] = useState<"users" | "plans" | "billing" | "domains">("users");
   // Re-fetch /me on mount: cached role from localStorage may be stale (e.g.
   // user logged in as admin earlier, then got demoted, then opened /admin
   // from cache → backend rejects with 403 even though the cached gate let
@@ -103,10 +104,12 @@ export function AdminPage() {
         <TabButton active={tab === "users"} onClick={() => setTab("users")}>Users</TabButton>
         <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>Plans / Gói</TabButton>
         <TabButton active={tab === "billing"} onClick={() => setTab("billing")}>Billing</TabButton>
+        <TabButton active={tab === "domains"} onClick={() => setTab("domains")}>Domains</TabButton>
       </div>
       {tab === "users" && <UsersTab meId={me.id} />}
       {tab === "plans" && <PlansTab />}
       {tab === "billing" && <AdminBillingTab />}
+      {tab === "domains" && <AdminDomainsTab />}
     </div>
   );
 }

@@ -1,12 +1,17 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
+import { useDomainStore } from "@/core/domain/store";
 import type { ReactNode } from "react";
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const token = useAuthStore((s) => s.token);
+  const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const domainConfig = useDomainStore((s) => s.config);
+  const isPageAllowed = useDomainStore((s) => s.isPageAllowed);
+  const location = useLocation();
 
   // Refresh /me on app boot — keeps cached entitlements in sync after admin
   // changes the user's plan/overrides server-side. Skip if no token.
@@ -21,9 +26,33 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
         /* keep cached state — auth interceptor handles 401s */
       }
     })();
-    return () => { cancelled = true; };
   }, [token]);
 
-  if (!token) return <Navigate to="/landing" replace />;
+  if (!token) {
+    // No login → push to landing if domain allows, else to login.
+    if (domainConfig && !domainConfig.allow_landing) {
+      return <Navigate to="/login" replace />;
+    }
+    return <Navigate to="/landing" replace />;
+  }
+
+  // Per-domain page allowlist. Admins bypass.
+  if (user?.role !== "admin" && !isPageAllowed(location.pathname)) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <div className="card max-w-md text-center">
+          <h2 className="text-lg font-semibold text-slate-900">Trang không khả dụng</h2>
+          <p className="text-sm text-slate-600 mt-2">
+            Domain <code className="font-mono">{domainConfig?.hostname}</code> không có quyền truy cập
+            <code className="font-mono ml-1">{location.pathname}</code>.
+          </p>
+          <p className="text-xs text-slate-500 mt-3">
+            Liên hệ admin để được cấp quyền.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return <>{children}</>;
 }
