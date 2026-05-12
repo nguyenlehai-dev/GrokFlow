@@ -96,29 +96,49 @@ async def logout() -> dict:
 @router.get("/me", response_model=MeResponse)
 async def me(user: CurrentUser, db: DbSession) -> MeResponse:
     eff = await get_effective_entitlements(db, user)
-    # Resolve effective allowed_pages from (role ∩ domain). When the user
-    # has no role we just return the domain's allowed_pages; when they have
-    # no domain (super_admin / legacy) we return None — FE treats that as
-    # "no per-user restriction, just use domain config from /domains/config".
+    # Resolve effective allowed_pages.
+    #
+    #   super_admin → no restriction (None).
+    #   admin       → always the full domain.allowed_pages. The named role_id
+    #                 is only meant to narrow regular users; an admin should
+    #                 manage everything their domain grants.
+    #   user        → role.allowed_pages ∩ domain.allowed_pages (or just
+    #                 domain.allowed_pages when no role is set).
     effective_pages: list[str] | None = None
     role_name: str | None = None
+    # role_name is informational only — show it even for admin tier so the
+    # UI can label the assignment.
     if user.role_id:
         role = await db.get(Role, user.role_id)
         if role and role.status == "active":
             role_name = role.name
-            if user.domain_id:
-                domain = await db.get(Domain, user.domain_id)
-                if domain and not domain.allow_all_pages:
-                    dom_set = set(domain.allowed_pages or [])
-                    effective_pages = [p for p in (role.allowed_pages or []) if p in dom_set]
+
+    if user.role == "super_admin":
+        # leave effective_pages None — no restriction
+        pass
+    elif user.role == "admin":
+        if user.domain_id:
+            domain = await db.get(Domain, user.domain_id)
+            if domain and not domain.allow_all_pages:
+                effective_pages = list(domain.allowed_pages or [])
+    else:
+        # user / support tier
+        if user.role_id:
+            role = await db.get(Role, user.role_id)
+            if role and role.status == "active":
+                if user.domain_id:
+                    domain = await db.get(Domain, user.domain_id)
+                    if domain and not domain.allow_all_pages:
+                        dom_set = set(domain.allowed_pages or [])
+                        effective_pages = [p for p in (role.allowed_pages or []) if p in dom_set]
+                    else:
+                        effective_pages = list(role.allowed_pages or [])
                 else:
                     effective_pages = list(role.allowed_pages or [])
-            else:
-                effective_pages = list(role.allowed_pages or [])
-    elif user.domain_id:
-        domain = await db.get(Domain, user.domain_id)
-        if domain and not domain.allow_all_pages:
-            effective_pages = list(domain.allowed_pages or [])
+        elif user.domain_id:
+            domain = await db.get(Domain, user.domain_id)
+            if domain and not domain.allow_all_pages:
+                effective_pages = list(domain.allowed_pages or [])
     return MeResponse(
         id=user.id,
         email=user.email,
