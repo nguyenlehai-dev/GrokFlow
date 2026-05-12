@@ -72,6 +72,10 @@ services:
       # Bind mount so paths inside backend match host paths (needed for spawning VNC).
       - ./browser_profiles:/app/browser_profiles
       - /var/run/docker.sock:/var/run/docker.sock
+      # Host-managed dir for per-domain nginx vhost files. Backend writes
+      # .conf files here; host nginx includes them via grokflow.conf; a host
+      # reloader picks up changes. See deploy/setup-host-nginx.sh.
+      - /etc/nginx/grokflow-vhosts:/host_nginx_vhosts
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 15s

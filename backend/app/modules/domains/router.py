@@ -15,6 +15,7 @@ from app.core.deps import AdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound
 from app.models import Domain
 from app.modules.audit import service as audit
+from app.services import nginx_sync
 
 router = APIRouter(tags=["domains"])
 
@@ -103,6 +104,10 @@ async def create_domain(payload: DomainIn, admin: AdminUser, db: DbSession) -> D
     )
     db.add(d)
     await db.flush()
+    # Auto-write nginx vhost so the domain is reachable as soon as DNS is set.
+    # Wildcard '*' has no vhost (it's the catch-all DB fallback, not a real host).
+    if d.status == "active" and d.hostname != "*":
+        nginx_sync.write_vhost(d.hostname)
     await audit.log_action(
         db, user_id=admin.id, action="admin_create_domain",
         target_type="domain", target_id=d.id, metadata={"hostname": hostname},
@@ -128,6 +133,12 @@ async def update_domain(
         if v is not None:
             setattr(d, field, v)
             changes[field] = v if not isinstance(v, list) else "updated"
+    # Re-sync nginx config: status flip or hostname change could need add/remove.
+    if d.hostname != "*":
+        if d.status == "active":
+            nginx_sync.write_vhost(d.hostname)
+        else:
+            nginx_sync.delete_vhost(d.hostname)
     await audit.log_action(
         db, user_id=admin.id, action="admin_update_domain",
         target_type="domain", target_id=d.id, metadata=changes,
@@ -144,6 +155,7 @@ async def delete_domain(domain_id: uuid.UUID, admin: AdminUser, db: DbSession) -
         raise NotFound("domain")
     if d.hostname == "*":
         raise InvalidPayload("Không xóa được domain mặc định '*'")
+    nginx_sync.delete_vhost(d.hostname)
     await audit.log_action(
         db, user_id=admin.id, action="admin_delete_domain",
         target_type="domain", target_id=d.id, metadata={"hostname": d.hostname},
