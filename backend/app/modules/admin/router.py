@@ -50,6 +50,32 @@ def _assert_can_touch(admin: User, target: User) -> None:
     # A non-super admin cannot escalate themselves or another admin's tier.
     if target.role == "super_admin":
         raise PermissionDenied("Không có quyền sửa super_admin")
+
+
+def _scope_to_admin_domain(q, user_id_column, admin: User):
+    """Narrow a billing query so a non-super admin only sees rows whose owning
+    user belongs to the admin's domain. Super admin sees everything.
+
+    Used by /subscriptions, /payments, /invoices. The billing tables don't
+    carry domain_id themselves; we go through the User FK each row already has.
+    """
+    if admin.role == "super_admin":
+        return q
+    return q.where(user_id_column.in_(
+        select(User.id).where(User.domain_id == admin.domain_id)
+    ))
+
+
+async def _assert_billing_owner_in_admin_domain(
+    db, admin: User, user_id: uuid.UUID | None,
+) -> None:
+    """For single-row read/write on billing rows owned by `user_id`, ensure the
+    domain admin owns that user. No-op for super_admin and for unscoped rows."""
+    if admin.role == "super_admin" or not user_id:
+        return
+    owner = await db.get(User, user_id)
+    if not owner or owner.domain_id != admin.domain_id:
+        raise PermissionDenied("Bản ghi không thuộc domain bạn quản lý")
 from app.modules.audit import service as audit
 from app.modules.entitlements.catalog import FEATURES, LIMITS
 from app.modules.entitlements.service import get_effective_entitlements
@@ -424,7 +450,7 @@ async def list_subscriptions(
     admin: AdminUser, db: DbSession,
     status_filter: str | None = None, user_id: uuid.UUID | None = None,
 ) -> list[AdminSubscriptionOut]:
-    q = select(Subscription)
+    q = _scope_to_admin_domain(select(Subscription), Subscription.user_id, admin)
     if status_filter:
         q = q.where(Subscription.status == status_filter)
     if user_id:
@@ -441,6 +467,7 @@ async def create_subscription_admin(
     """Admin creates a subscription directly (e.g. manual gift, comp, migrated user)."""
     if not await db.get(User, payload.user_id):
         raise NotFound("user")
+    await _assert_billing_owner_in_admin_domain(db, admin, payload.user_id)
     if not await db.get(Plan, payload.plan_id):
         raise NotFound("plan")
     sub = Subscription(
@@ -475,6 +502,7 @@ async def update_subscription_admin(
     sub = await db.get(Subscription, subscription_id)
     if not sub:
         raise NotFound("subscription")
+    await _assert_billing_owner_in_admin_domain(db, admin, sub.user_id)
     changes: dict = {}
     plan_changed = False
     if payload.plan_id is not None:
@@ -518,6 +546,7 @@ async def delete_subscription_admin(
     sub = await db.get(Subscription, subscription_id)
     if not sub:
         raise NotFound("subscription")
+    await _assert_billing_owner_in_admin_domain(db, admin, sub.user_id)
     await audit.log_action(
         db, user_id=admin.id, action="admin_delete_subscription",
         target_type="subscription", target_id=sub.id,
@@ -539,6 +568,7 @@ async def confirm_payment(
     sub = await db.get(Subscription, subscription_id)
     if not sub:
         raise NotFound("subscription")
+    await _assert_billing_owner_in_admin_domain(db, admin, sub.user_id)
     if sub.status != "pending":
         raise InvalidPayload(f"Subscription đang ở trạng thái {sub.status}, không phải pending")
 
@@ -587,7 +617,7 @@ async def list_payments(
     admin: AdminUser, db: DbSession,
     status_filter: str | None = None, user_id: uuid.UUID | None = None,
 ) -> list[AdminPaymentOut]:
-    q = select(Payment)
+    q = _scope_to_admin_domain(select(Payment), Payment.user_id, admin)
     if status_filter:
         q = q.where(Payment.status == status_filter)
     if user_id:
@@ -606,6 +636,7 @@ async def create_payment_admin(
         raise NotFound("user")
     if payload.subscription_id and not await db.get(Subscription, payload.subscription_id):
         raise NotFound("subscription")
+    await _assert_billing_owner_in_admin_domain(db, admin, payload.user_id)
     pay = Payment(
         user_id=payload.user_id, subscription_id=payload.subscription_id,
         amount=payload.amount, currency=payload.currency, status=payload.status,
@@ -634,6 +665,7 @@ async def update_payment_admin(
     pay = await db.get(Payment, payment_id)
     if not pay:
         raise NotFound("payment")
+    await _assert_billing_owner_in_admin_domain(db, admin, pay.user_id)
     changes: dict = {}
     for field in ("amount", "status", "provider", "provider_payment_id",
                   "payment_method", "paid_at", "failure_reason"):
@@ -657,6 +689,7 @@ async def delete_payment_admin(
     pay = await db.get(Payment, payment_id)
     if not pay:
         raise NotFound("payment")
+    await _assert_billing_owner_in_admin_domain(db, admin, pay.user_id)
     await audit.log_action(
         db, user_id=admin.id, action="admin_delete_payment",
         target_type="payment", target_id=pay.id,
@@ -672,7 +705,7 @@ async def list_invoices(
     admin: AdminUser, db: DbSession,
     status_filter: str | None = None, user_id: uuid.UUID | None = None,
 ) -> list[AdminInvoiceOut]:
-    q = select(Invoice)
+    q = _scope_to_admin_domain(select(Invoice), Invoice.user_id, admin)
     if status_filter:
         q = q.where(Invoice.status == status_filter)
     if user_id:
@@ -691,6 +724,7 @@ async def create_invoice_admin(
 
     if not await db.get(User, payload.user_id):
         raise NotFound("user")
+    await _assert_billing_owner_in_admin_domain(db, admin, payload.user_id)
     inv_no = await next_invoice_number(db)
     total = payload.amount + payload.tax
     now = datetime.now(timezone.utc)
@@ -725,6 +759,7 @@ async def update_invoice_admin(
     inv = await db.get(Invoice, invoice_id)
     if not inv:
         raise NotFound("invoice")
+    await _assert_billing_owner_in_admin_domain(db, admin, inv.user_id)
     changes: dict = {}
     if payload.amount is not None:
         inv.amount = payload.amount; changes["amount"] = float(payload.amount)
@@ -763,6 +798,7 @@ async def delete_invoice_admin(
     inv = await db.get(Invoice, invoice_id)
     if not inv:
         raise NotFound("invoice")
+    await _assert_billing_owner_in_admin_domain(db, admin, inv.user_id)
     await audit.log_action(
         db, user_id=admin.id, action="admin_delete_invoice",
         target_type="invoice", target_id=inv.id,

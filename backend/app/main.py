@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.database import Base, SessionLocal, engine
+from app.core.database import SessionLocal
 from app.core.monitoring import init_sentry
 from app.modules.admin.router import router as admin_router
 from app.modules.entitlements.service import seed_default_plans
@@ -29,8 +29,13 @@ init_sentry()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Alembic is the source of truth for the schema (see `alembic/versions/`).
+    # We used to call Base.metadata.create_all here, but that races with
+    # alembic — new model columns end up auto-created via SQLAlchemy on boot,
+    # then the matching migration fails with "table already exists" / "column
+    # already exists". Boot now leaves DDL alone; deploy must run
+    # `alembic upgrade head` separately (handled by the deploy script /
+    # systemd unit). Tests can still call create_all explicitly via fixtures.
     async with SessionLocal() as db:
         await seed_default_plans(db)
     yield
