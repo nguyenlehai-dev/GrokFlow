@@ -52,3 +52,5 @@ deploy/inspect*.py
 *.tgz
 frontend/dist/
 
+check_domain.py
+deploy_fe.py
