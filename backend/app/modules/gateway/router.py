@@ -23,7 +23,7 @@ from sqlalchemy import func, or_, select
 
 from app.core.database import SessionLocal
 
-from app.core.deps import AdminUser, CurrentUser, DbSession
+from app.core.deps import AdminUser, SuperAdminUser, CurrentUser, DbSession
 from app.core.exceptions import AppError, InvalidPayload, NotFound
 from app.core.security import hash_password, verify_password
 from app.models import (
@@ -45,13 +45,13 @@ router = APIRouter(prefix="/api/v1/gateway", tags=["gateway"])
 # ============================================================================
 
 @router.get("/vendors", response_model=list[s.VendorOut])
-async def list_vendors(admin: AdminUser, db: DbSession) -> list[GwVendor]:
+async def list_vendors(admin: SuperAdminUser, db: DbSession) -> list[GwVendor]:
     rows = (await db.execute(select(GwVendor).order_by(GwVendor.name))).scalars().all()
     return list(rows)
 
 
 @router.post("/vendors", response_model=s.VendorOut, status_code=http_status.HTTP_201_CREATED)
-async def create_vendor(payload: s.VendorIn, admin: AdminUser, db: DbSession) -> GwVendor:
+async def create_vendor(payload: s.VendorIn, admin: SuperAdminUser, db: DbSession) -> GwVendor:
     existing = (await db.execute(
         select(GwVendor).where(GwVendor.code == payload.code)
     )).scalar_one_or_none()
@@ -71,7 +71,7 @@ async def create_vendor(payload: s.VendorIn, admin: AdminUser, db: DbSession) ->
 
 @router.patch("/vendors/{vendor_id}", response_model=s.VendorOut)
 async def update_vendor(
-    vendor_id: uuid.UUID, payload: s.VendorUpdate, admin: AdminUser, db: DbSession,
+    vendor_id: uuid.UUID, payload: s.VendorUpdate, admin: SuperAdminUser, db: DbSession,
 ) -> GwVendor:
     v = await db.get(GwVendor, vendor_id)
     if not v:
@@ -88,7 +88,7 @@ async def update_vendor(
 
 
 @router.delete("/vendors/{vendor_id}", status_code=http_status.HTTP_204_NO_CONTENT, response_model=None)
-async def delete_vendor(vendor_id: uuid.UUID, admin: AdminUser, db: DbSession):
+async def delete_vendor(vendor_id: uuid.UUID, admin: SuperAdminUser, db: DbSession):
     v = await db.get(GwVendor, vendor_id)
     if not v:
         raise NotFound("vendor")
@@ -105,13 +105,13 @@ async def delete_vendor(vendor_id: uuid.UUID, admin: AdminUser, db: DbSession):
 # ============================================================================
 
 @router.get("/functions", response_model=list[s.ApiFunctionOut])
-async def list_functions(admin: AdminUser, db: DbSession) -> list[GwApiFunction]:
+async def list_functions(admin: SuperAdminUser, db: DbSession) -> list[GwApiFunction]:
     rows = (await db.execute(select(GwApiFunction).order_by(GwApiFunction.name))).scalars().all()
     return list(rows)
 
 
 @router.post("/functions", response_model=s.ApiFunctionOut, status_code=http_status.HTTP_201_CREATED)
-async def create_function(payload: s.ApiFunctionIn, admin: AdminUser, db: DbSession) -> GwApiFunction:
+async def create_function(payload: s.ApiFunctionIn, admin: SuperAdminUser, db: DbSession) -> GwApiFunction:
     existing = (await db.execute(
         select(GwApiFunction).where(GwApiFunction.code == payload.code)
     )).scalar_one_or_none()
@@ -131,7 +131,7 @@ async def create_function(payload: s.ApiFunctionIn, admin: AdminUser, db: DbSess
 
 @router.patch("/functions/{function_id}", response_model=s.ApiFunctionOut)
 async def update_function(
-    function_id: uuid.UUID, payload: s.ApiFunctionUpdate, admin: AdminUser, db: DbSession,
+    function_id: uuid.UUID, payload: s.ApiFunctionUpdate, admin: SuperAdminUser, db: DbSession,
 ) -> GwApiFunction:
     fn = await db.get(GwApiFunction, function_id)
     if not fn:
@@ -144,7 +144,7 @@ async def update_function(
 
 
 @router.delete("/functions/{function_id}", status_code=http_status.HTTP_204_NO_CONTENT, response_model=None)
-async def delete_function(function_id: uuid.UUID, admin: AdminUser, db: DbSession):
+async def delete_function(function_id: uuid.UUID, admin: SuperAdminUser, db: DbSession):
     fn = await db.get(GwApiFunction, function_id)
     if not fn:
         raise NotFound("function")
@@ -186,13 +186,13 @@ async def _pool_to_out(db, pool: GwPool) -> s.PoolOut:
 
 
 @router.get("/pools", response_model=list[s.PoolOut])
-async def list_pools(admin: AdminUser, db: DbSession) -> list[s.PoolOut]:
+async def list_pools(admin: SuperAdminUser, db: DbSession) -> list[s.PoolOut]:
     rows = (await db.execute(select(GwPool).order_by(GwPool.name))).scalars().all()
     return [await _pool_to_out(db, p) for p in rows]
 
 
 @router.post("/pools", response_model=s.PoolOut, status_code=http_status.HTTP_201_CREATED)
-async def create_pool(payload: s.PoolIn, admin: AdminUser, db: DbSession) -> s.PoolOut:
+async def create_pool(payload: s.PoolIn, admin: SuperAdminUser, db: DbSession) -> s.PoolOut:
     if not await db.get(GwVendor, payload.vendor_id):
         raise NotFound("vendor")
     if payload.function_id and not await db.get(GwApiFunction, payload.function_id):
@@ -211,7 +211,7 @@ async def create_pool(payload: s.PoolIn, admin: AdminUser, db: DbSession) -> s.P
 
 @router.patch("/pools/{pool_id}", response_model=s.PoolOut)
 async def update_pool(
-    pool_id: uuid.UUID, payload: s.PoolUpdate, admin: AdminUser, db: DbSession,
+    pool_id: uuid.UUID, payload: s.PoolUpdate, admin: SuperAdminUser, db: DbSession,
 ) -> s.PoolOut:
     p = await db.get(GwPool, pool_id)
     if not p:
@@ -224,7 +224,7 @@ async def update_pool(
 
 
 @router.delete("/pools/{pool_id}", status_code=http_status.HTTP_204_NO_CONTENT, response_model=None)
-async def delete_pool(pool_id: uuid.UUID, admin: AdminUser, db: DbSession):
+async def delete_pool(pool_id: uuid.UUID, admin: SuperAdminUser, db: DbSession):
     p = await db.get(GwPool, pool_id)
     if not p:
         raise NotFound("pool")
@@ -248,7 +248,7 @@ def _pool_key_to_out(k: GwPoolApiKey) -> s.PoolApiKeyOut:
 
 @router.get("/pools/{pool_id}/models")
 async def list_vendor_models(
-    pool_id: uuid.UUID, admin: AdminUser, db: DbSession,
+    pool_id: uuid.UUID, admin: SuperAdminUser, db: DbSession,
 ) -> dict:
     """Helper: lookup the first active key in this pool and ask the vendor
     which models are currently available. Saves admin from copy-pasting
@@ -320,7 +320,7 @@ async def list_vendor_models(
 
 @router.get("/pools/{pool_id}/keys", response_model=list[s.PoolApiKeyOut])
 async def list_pool_keys(
-    pool_id: uuid.UUID, admin: AdminUser, db: DbSession,
+    pool_id: uuid.UUID, admin: SuperAdminUser, db: DbSession,
 ) -> list[s.PoolApiKeyOut]:
     pool = await db.get(GwPool, pool_id)
     if not pool:
@@ -334,7 +334,7 @@ async def list_pool_keys(
 
 @router.post("/pools/{pool_id}/keys", response_model=s.PoolApiKeyOut, status_code=http_status.HTTP_201_CREATED)
 async def add_pool_key(
-    pool_id: uuid.UUID, payload: s.PoolApiKeyIn, admin: AdminUser, db: DbSession,
+    pool_id: uuid.UUID, payload: s.PoolApiKeyIn, admin: SuperAdminUser, db: DbSession,
 ) -> s.PoolApiKeyOut:
     pool = await db.get(GwPool, pool_id)
     if not pool:
@@ -354,7 +354,7 @@ async def add_pool_key(
 @router.patch("/pools/{pool_id}/keys/{key_id}", response_model=s.PoolApiKeyOut)
 async def update_pool_key(
     pool_id: uuid.UUID, key_id: uuid.UUID, payload: s.PoolApiKeyUpdate,
-    admin: AdminUser, db: DbSession,
+    admin: SuperAdminUser, db: DbSession,
 ) -> s.PoolApiKeyOut:
     k = await db.get(GwPoolApiKey, key_id)
     if not k or k.pool_id != pool_id:
@@ -371,7 +371,7 @@ async def update_pool_key(
     status_code=http_status.HTTP_204_NO_CONTENT, response_model=None,
 )
 async def delete_pool_key(
-    pool_id: uuid.UUID, key_id: uuid.UUID, admin: AdminUser, db: DbSession,
+    pool_id: uuid.UUID, key_id: uuid.UUID, admin: SuperAdminUser, db: DbSession,
 ):
     k = await db.get(GwPoolApiKey, key_id)
     if not k or k.pool_id != pool_id:
@@ -384,11 +384,23 @@ async def delete_pool_key(
 # Gateway Keys (issued to external clients)
 # ============================================================================
 
+def _scope_keys_query(q, admin):
+    """Scope a GwGatewayKey query to the admin's domain (super sees all).
+
+    Also surfaces legacy NULL-domain keys to super_admin only — a domain admin
+    can't see (or steal) keys that weren't tagged with a tenant.
+    """
+    if admin.role == "super_admin":
+        return q
+    return q.where(GwGatewayKey.domain_id == admin.domain_id)
+
+
 @router.get("/gateway-keys", response_model=list[s.GatewayKeyOut])
 async def list_gateway_keys(admin: AdminUser, db: DbSession) -> list[GwGatewayKey]:
-    rows = (await db.execute(
-        select(GwGatewayKey).order_by(GwGatewayKey.created_at.desc())
-    )).scalars().all()
+    q = _scope_keys_query(
+        select(GwGatewayKey).order_by(GwGatewayKey.created_at.desc()), admin,
+    )
+    rows = (await db.execute(q)).scalars().all()
     return list(rows)
 
 
@@ -403,10 +415,17 @@ async def create_gateway_key(
     raw = "gwk_live_" + secrets.token_urlsafe(24).rstrip("=")
     prefix = raw[:12]
     key_hash = hash_password(raw)
+    # Bind the key to the admin's domain. super_admin can override via
+    # payload.domain_id if they want to issue a key for a specific tenant;
+    # an unscoped key (None) is super-only.
+    target_domain = admin.domain_id
+    if admin.role == "super_admin" and payload.domain_id is not None:
+        target_domain = payload.domain_id
     k = GwGatewayKey(
         label=payload.label, prefix=prefix, key_hash=key_hash,
         allowed_functions=payload.allowed_functions, status="active",
         created_by=admin.id,
+        domain_id=target_domain,
         webhook_url=payload.webhook_url,
         rate_limit_per_minute=payload.rate_limit_per_minute,
         daily_quota=payload.daily_quota,
@@ -436,7 +455,12 @@ async def update_gateway_key(
     k = await db.get(GwGatewayKey, key_id)
     if not k:
         raise NotFound("gateway_key")
+    if admin.role != "super_admin" and k.domain_id != admin.domain_id:
+        raise NotFound("gateway_key")  # 404 not 403 — don't reveal foreign keys exist
     for field, value in payload.model_dump(exclude_unset=True).items():
+        # Block a domain admin from re-tagging a key into another domain.
+        if field == "domain_id" and admin.role != "super_admin":
+            continue
         setattr(k, field, value)
     await audit.log_action(
         db, user_id=admin.id, action="gw_update_gateway_key",
@@ -451,6 +475,8 @@ async def update_gateway_key(
 async def revoke_gateway_key(key_id: uuid.UUID, admin: AdminUser, db: DbSession):
     k = await db.get(GwGatewayKey, key_id)
     if not k:
+        raise NotFound("gateway_key")
+    if admin.role != "super_admin" and k.domain_id != admin.domain_id:
         raise NotFound("gateway_key")
     await db.delete(k)
     await db.commit()
@@ -487,9 +513,10 @@ async def verify_gateway_key(
 async def list_requests(
     admin: AdminUser, db: DbSession, limit: int = 100,
 ) -> list[s.RequestOut]:
-    rows = (await db.execute(
-        select(GwRequest).order_by(GwRequest.created_at.desc()).limit(min(limit, 500))
-    )).scalars().all()
+    q = select(GwRequest).order_by(GwRequest.created_at.desc()).limit(min(limit, 500))
+    if admin.role != "super_admin":
+        q = q.where(GwRequest.domain_id == admin.domain_id)
+    rows = (await db.execute(q)).scalars().all()
 
     out: list[s.RequestOut] = []
     for r in rows:
@@ -756,6 +783,7 @@ async def execute_function(
     gw_id = "gw_" + secrets.token_hex(8)
     req = GwRequest(
         gw_id=gw_id, gateway_key_id=caller.gateway_key_id,
+        domain_id=caller.domain_id,
         vendor_id=pool.vendor_id, pool_id=pool.id,
         function_code=function_code,
         request_body=payload.model_dump(),
@@ -802,6 +830,7 @@ async def submit_function(
     gw_id = "gw_" + secrets.token_hex(8)
     req = GwRequest(
         gw_id=gw_id, gateway_key_id=caller.gateway_key_id,
+        domain_id=caller.domain_id,
         vendor_id=pool.vendor_id, pool_id=pool.id,
         function_code=function_code, model=payload.model or pool.model,
         request_body=payload.model_dump(),
@@ -966,6 +995,17 @@ async def dashboard(admin: AdminUser, db: DbSession) -> s.DashboardOut:
     async def c(q):
         return (await db.execute(q)).scalar() or 0
 
+    # Per-tenant scope for domain admins. Vendors/Pools/Functions are global
+    # (super_admin manages them) so we leave them unfiltered — domain admins
+    # see the same global config but tenant-scoped counts for keys+requests.
+    is_super = admin.role == "super_admin"
+
+    def _keys_q(base):
+        return base if is_super else base.where(GwGatewayKey.domain_id == admin.domain_id)
+
+    def _req_q(base):
+        return base if is_super else base.where(GwRequest.domain_id == admin.domain_id)
+
     return s.DashboardOut(
         vendors_total=await c(select(func.count()).select_from(GwVendor)),
         pools_total=await c(select(func.count()).select_from(GwPool)),
@@ -973,10 +1013,10 @@ async def dashboard(admin: AdminUser, db: DbSession) -> s.DashboardOut:
         pool_keys_total=await c(select(func.count()).select_from(GwPoolApiKey)),
         pool_keys_active=await c(select(func.count()).select_from(GwPoolApiKey).where(GwPoolApiKey.status == "active")),
         functions_total=await c(select(func.count()).select_from(GwApiFunction)),
-        gateway_keys_total=await c(select(func.count()).select_from(GwGatewayKey)),
-        gateway_keys_active=await c(select(func.count()).select_from(GwGatewayKey).where(GwGatewayKey.status == "active")),
-        requests_total=await c(select(func.count()).select_from(GwRequest)),
-        requests_failed=await c(select(func.count()).select_from(GwRequest).where(GwRequest.status == "failed")),
-        requests_succeeded=await c(select(func.count()).select_from(GwRequest).where(GwRequest.status == "succeeded")),
-        requests_last_24h=await c(select(func.count()).select_from(GwRequest).where(GwRequest.created_at >= day_ago)),
+        gateway_keys_total=await c(_keys_q(select(func.count()).select_from(GwGatewayKey))),
+        gateway_keys_active=await c(_keys_q(select(func.count()).select_from(GwGatewayKey).where(GwGatewayKey.status == "active"))),
+        requests_total=await c(_req_q(select(func.count()).select_from(GwRequest))),
+        requests_failed=await c(_req_q(select(func.count()).select_from(GwRequest).where(GwRequest.status == "failed"))),
+        requests_succeeded=await c(_req_q(select(func.count()).select_from(GwRequest).where(GwRequest.status == "succeeded"))),
+        requests_last_24h=await c(_req_q(select(func.count()).select_from(GwRequest).where(GwRequest.created_at >= day_ago))),
     )

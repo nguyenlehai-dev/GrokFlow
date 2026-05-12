@@ -30,7 +30,7 @@ export function LoginPage() {
       setAuth(data.access_token, me.data);
       // Admin always lands on /dashboard, others land on the domain's
       // first allowed page (e.g. /gateway/dashboard for a gateway-only host).
-      const target = me.data?.role === "admin" ? "/dashboard" : firstAllowedPath();
+      const target = (me.data?.role === "admin" || me.data?.role === "super_admin") ? "/dashboard" : firstAllowedPath();
       navigate(target);
     } catch (e: any) {
       setError(e?.response?.data?.detail?.message ?? "Login failed");

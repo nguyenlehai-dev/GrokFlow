@@ -21,7 +21,7 @@ interface Profile {
 
 export function ProfilesPage() {
   const me = useAuthStore((s) => s.user);
-  const isAdmin = me?.role === "admin";
+  const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["profiles"],

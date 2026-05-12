@@ -34,7 +34,7 @@ export function AuditLogPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Audit Log</h1>
         <div className="flex gap-2">
-          {me?.role === "admin" && (
+          {(me?.role === "admin" || me?.role === "super_admin") && (
             <select className="input" value={scope} onChange={(e) => setScope(e.target.value as any)}>
               <option value="self">Của tôi</option>
               <option value="admin">Tất cả (admin)</option>

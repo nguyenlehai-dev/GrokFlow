@@ -23,7 +23,7 @@ export function AdminGuard({ children }: { children: ReactNode }) {
         const r = await api.get("/api/auth/me");
         if (cancelled) return;
         setUser(r.data);
-        if (r.data?.role !== "admin") {
+        if (r.data?.role !== "admin" && r.data?.role !== "super_admin") {
           toast("Tài khoản này không có quyền admin", "error");
           navigate("/dashboard", { replace: true });
           return;
@@ -39,7 +39,7 @@ export function AdminGuard({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  if (me?.role !== "admin") return <Navigate to="/dashboard" replace />;
+  if (me?.role !== "admin" && me?.role !== "super_admin") return <Navigate to="/dashboard" replace />;
   if (!verified) return <p className="text-slate-500">Đang xác thực quyền admin...</p>;
   return <>{children}</>;
 }

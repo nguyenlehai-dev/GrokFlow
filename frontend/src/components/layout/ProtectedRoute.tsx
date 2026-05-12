@@ -38,7 +38,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   }
 
   // Per-domain page allowlist. Admins bypass.
-  if (user?.role !== "admin" && !isPageAllowed(location.pathname)) {
+  if ((user?.role !== "admin" && user?.role !== "super_admin") && !isPageAllowed(location.pathname)) {
     const target = firstAllowedPath();
     // Avoid an infinite redirect if even the fallback target isn't allowed —
     // render the block panel so the user sees what's going on.

@@ -63,8 +63,19 @@ class User(Base, TimestampMixin):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     full_name: Mapped[str | None] = mapped_column(String(255))
+    # Role tiers:
+    #   super_admin — global super-admin (manages all domains, plans, users)
+    #   admin       — per-domain admin (scoped to their domain_id)
+    #   user        — regular user (scoped to their domain_id)
+    #   support     — read-only support tier (legacy)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    # Domain membership. NULL = unscoped / super_admin (sees everything).
+    # Non-super users created via /register at a domain get that domain's id;
+    # admins-created users get the domain admin picks (or super_admin's own).
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="SET NULL"), index=True,
+    )
     webhook_url: Mapped[str | None] = mapped_column(Text)
     webhook_secret: Mapped[str | None] = mapped_column(String(128))
     # Plan + per-user entitlement overrides. plan_id NULL → fall back to default plan.
@@ -457,6 +468,11 @@ class GwGatewayKey(Base, TimestampMixin):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("users.id", ondelete="SET NULL"),
     )
+    # Tenant scope. NULL = legacy / super_admin-issued (visible to super only).
+    # Domain admins see + manage only the keys for their own domain.
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="SET NULL"), index=True,
+    )
     # When set, async /submit results POST to this URL once status moves
     # to succeeded/failed. Best-effort — failure to deliver doesn't fail
     # the original job.
@@ -484,6 +500,11 @@ class GwRequest(Base, TimestampMixin):
     gw_id: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True)
     gateway_key_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("gw_gateway_keys.id", ondelete="SET NULL"),
+    )
+    # Tenant scope. Copied from the gateway key at request time so we can
+    # filter the requests list per-domain without a join.
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="SET NULL"), index=True,
     )
     vendor_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("gw_vendors.id", ondelete="SET NULL"),

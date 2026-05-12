@@ -13,7 +13,8 @@ import { useDomainStore } from "@/core/domain/store";
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 
 // `feature` — gate by user entitlement (admins bypass).
-// `adminOnly` — only admins see it.
+// `adminOnly` — visible to both per-domain admin and super_admin.
+// `superOnly` — visible only to super_admin (plans, domains, git, all-users CRUD).
 type IconType = LucideIcon;
 
 interface NavLeaf {
@@ -23,6 +24,7 @@ interface NavLeaf {
   icon: IconType;
   feature?: string;
   adminOnly?: boolean;
+  superOnly?: boolean;
 }
 
 interface NavGroup {
@@ -31,6 +33,7 @@ interface NavGroup {
   label: string;
   icon: IconType;
   adminOnly?: boolean;
+  superOnly?: boolean;
   items: NavLeaf[];
 }
 
@@ -67,15 +70,15 @@ const NAV: NavEntry[] = [
   {
     type: "group", key: "gateway", label: "Gateway Management", icon: Network,
     items: [
-      // Admin-only CRUD pages — backend gates all /api/v1/gateway/* mutations
-      // and aggregate reads with the admin role, so showing these to non-admin
-      // users only produces 403s and an "Admin role required" UI.
+      // Per-tenant admin pages — domain admin manages keys+requests for their
+      // own domain; backend filters by domain_id. super_admin sees everything.
       { type: "link", to: "/gateway/dashboard",  label: "Dashboard",     icon: LayoutDashboard, adminOnly: true },
-      { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers,          adminOnly: true },
-      { type: "link", to: "/gateway/pools",      label: "Pools",         icon: GitBranch,       adminOnly: true },
-      { type: "link", to: "/gateway/functions",  label: "API Functions", icon: Code2,           adminOnly: true },
       { type: "link", to: "/gateway/gateway-keys", label: "Gateway Keys", icon: Key,            adminOnly: true },
       { type: "link", to: "/gateway/requests",   label: "Requests",      icon: Activity,        adminOnly: true },
+      // Global provider config — super_admin only.
+      { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers,          superOnly: true },
+      { type: "link", to: "/gateway/pools",      label: "Pools",         icon: GitBranch,       superOnly: true },
+      { type: "link", to: "/gateway/functions",  label: "API Functions", icon: Code2,           superOnly: true },
       // Non-admin users on a granted domain get just these two.
       { type: "link", to: "/gateway/playground", label: "Playground",    icon: Terminal },
       { type: "link", to: "/gateway/docs",       label: "API Docs",      icon: BookOpen },
@@ -88,12 +91,15 @@ const NAV: NavEntry[] = [
   {
     type: "group", key: "auth", label: "Auth", icon: Shield, adminOnly: true,
     items: [
-      { type: "link", to: "/settings",      label: "Setting",     icon: Settings, feature: FEATURE_KEYS.uiSettings },
+      { type: "link", to: "/settings",      label: "Setting",     icon: Settings, feature: FEATURE_KEYS.uiSettings, superOnly: true },
+      // Users management is visible to both tiers; backend filters to admin's
+      // own domain when they're not super_admin.
       { type: "link", to: "/admin/users",   label: "Admin",       icon: UserCog },
-      { type: "link", to: "/admin/domains", label: "Domains",     icon: Globe },
-      { type: "link", to: "/admin/billing", label: "Billing",     icon: CreditCard },
-      { type: "link", to: "/admin/plans",   label: "Plans / Gói", icon: Wrench },
-      { type: "link", to: "/admin/git",     label: "Git / Deploy", icon: Rocket },
+      // Domains / Plans / Git affect global config — super_admin only.
+      { type: "link", to: "/admin/domains", label: "Domains",     icon: Globe,   superOnly: true },
+      { type: "link", to: "/admin/billing", label: "Billing",     icon: CreditCard, superOnly: true },
+      { type: "link", to: "/admin/plans",   label: "Plans / Gói", icon: Wrench,  superOnly: true },
+      { type: "link", to: "/admin/git",     label: "Git / Deploy", icon: Rocket, superOnly: true },
     ],
   },
 ];
@@ -104,12 +110,14 @@ export function AppShell() {
   const isPageAllowed = useDomainStore((s) => s.isPageAllowed);
   const navigate = useNavigate();
   const location = useLocation();
-  const isAdmin = user?.role === "admin";
+  const isSuper = user?.role === "super_admin";
+  const isAdmin = isSuper || user?.role === "admin";
   const features = user?.entitlements?.features ?? {};
   const brandName = domainConfig?.brand_name ?? "GrokFlow";
   const planName = user?.entitlements?.plan_name;
 
   const canSeeLeaf = (n: NavLeaf): boolean => {
+    if (n.superOnly && !isSuper) return false;
     if (n.adminOnly && !isAdmin) return false;
     if (n.feature && !isAdmin && !features[n.feature]) return false;
     if (!isAdmin && !isPageAllowed(n.to)) return false;
@@ -121,6 +129,7 @@ export function AppShell() {
     if (entry.type === "link") {
       return canSeeLeaf(entry) ? [entry] : [];
     }
+    if (entry.superOnly && !isSuper) return [];
     if (entry.adminOnly && !isAdmin) return [];
     const items = entry.items.filter(canSeeLeaf);
     if (items.length === 0) return [];
@@ -161,6 +170,11 @@ export function AppShell() {
             {planName && (
               <span className="ml-2 inline-block rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
                 {planName}
+              </span>
+            )}
+            {!isSuper && domainConfig?.hostname && (
+              <span className="ml-2 inline-block rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                @{domainConfig.hostname}
               </span>
             )}
           </div>

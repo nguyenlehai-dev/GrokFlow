@@ -32,13 +32,29 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+# Role tiers:
+#   super_admin — global super-admin (all domains)
+#   admin       — per-domain admin (scoped to user.domain_id)
+#   user        — regular user
+#
+# `AdminUser` keeps the legacy name and accepts BOTH super_admin and admin,
+# so existing endpoints that don't need cross-domain authority don't break.
+# Endpoints that touch global resources (plans, domains, all-users) should
+# switch to `SuperAdminUser`.
 def require_admin(user: CurrentUser) -> User:
-    if user.role != "admin":
+    if user.role not in ("admin", "super_admin"):
         raise PermissionDenied("Admin role required")
     return user
 
 
+def require_super_admin(user: CurrentUser) -> User:
+    if user.role != "super_admin":
+        raise PermissionDenied("Super admin role required")
+    return user
+
+
 AdminUser = Annotated[User, Depends(require_admin)]
+SuperAdminUser = Annotated[User, Depends(require_super_admin)]
 
 
 async def get_api_key_principal(

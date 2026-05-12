@@ -26,7 +26,7 @@ from fastapi import APIRouter, status as http_status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.core.deps import AdminUser, DbSession
+from app.core.deps import SuperAdminUser as AdminUser, DbSession
 from app.core.exceptions import AppError, InvalidPayload, NotFound
 from app.models import GitRepo
 from app.modules.audit import service as audit

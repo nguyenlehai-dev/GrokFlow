@@ -18,6 +18,7 @@ interface AdminUser {
   status: string;
   created_at: string;
   plan_id: string | null;
+  domain_id: string | null;
   entitlement_overrides: Record<string, unknown> | null;
 }
 
@@ -70,7 +71,7 @@ export function AdminPage() {
         const r = await api.get("/api/auth/me");
         if (cancelled) return;
         setUser(r.data);
-        if (r.data?.role !== "admin") {
+        if ((r.data?.role !== "admin" && r.data?.role !== "super_admin")) {
           toast("Tài khoản này không có quyền admin", "error");
           navigate("/dashboard", { replace: true });
           return;
@@ -88,7 +89,7 @@ export function AdminPage() {
 
   // While the cached role isn't admin we don't want to even mount the
   // queries (they'd 403). Render a redirect immediately.
-  if (me?.role !== "admin") return <Navigate to="/dashboard" replace />;
+  if ((me?.role !== "admin" && me?.role !== "super_admin")) return <Navigate to="/dashboard" replace />;
 
   // Wait for the fresh /me confirmation so admin queries don't fire with a
   // stale token (e.g. cache says admin, DB says user → 403).
@@ -96,15 +97,16 @@ export function AdminPage() {
     return <p className="text-slate-500">Đang xác thực quyền admin...</p>;
   }
 
+  const isSuper = me?.role === "super_admin";
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Admin</h1>
       <StatsBlock />
       <div className="flex gap-1 border-b">
         <TabButton active={tab === "users"} onClick={() => setTab("users")}>Users</TabButton>
-        <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>Plans / Gói</TabButton>
-        <TabButton active={tab === "billing"} onClick={() => setTab("billing")}>Billing</TabButton>
-        <TabButton active={tab === "domains"} onClick={() => setTab("domains")}>Domains</TabButton>
+        {isSuper && <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>Plans / Gói</TabButton>}
+        {isSuper && <TabButton active={tab === "billing"} onClick={() => setTab("billing")}>Billing</TabButton>}
+        {isSuper && <TabButton active={tab === "domains"} onClick={() => setTab("domains")}>Domains</TabButton>}
       </div>
       {tab === "users" && <UsersTab meId={me.id} />}
       {tab === "plans" && <PlansTab />}
@@ -248,6 +250,7 @@ function UserRow({
         <select className="input py-1" defaultValue={u.role} onChange={(e) => update.mutate({ role: e.target.value })}>
           <option value="user">user</option>
           <option value="admin">admin</option>
+          <option value="super_admin">super_admin</option>
           <option value="support">support</option>
         </select>
       </td>
@@ -305,19 +308,31 @@ interface CreateValues {
   email: string;
   password: string;
   full_name: string;
-  role: "admin" | "user" | "support";
+  role: "super_admin" | "admin" | "user" | "support";
   plan_id: string;
+  domain_id: string;
 }
+
+interface DomainOpt { id: string; hostname: string; label: string }
 
 function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => void }) {
   const qc = useQueryClient();
+  const me = useAuthStore((s) => s.user);
+  const isSuper = me?.role === "super_admin";
   const defaultPlan = plans.find((p) => p.is_default);
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<CreateValues>({
-    defaultValues: { role: "user", plan_id: defaultPlan?.id ?? "" },
+    defaultValues: { role: "user", plan_id: defaultPlan?.id ?? "", domain_id: "" },
+  });
+  // Domain picker — super_admin only (backend forces the admin's domain otherwise).
+  const { data: domains } = useQuery<DomainOpt[]>({
+    queryKey: ["admin-domains"],
+    queryFn: async () => (await api.get<DomainOpt[]>("/api/admin/domains")).data,
+    enabled: isSuper,
   });
   const onSubmit = async (v: CreateValues) => {
     const payload: any = { ...v };
     if (!payload.plan_id) delete payload.plan_id;
+    if (!payload.domain_id || !isSuper) delete payload.domain_id;
     try {
       await api.post("/api/admin/users", payload);
     } catch (e: any) {
@@ -350,8 +365,9 @@ function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => voi
           <div>
             <label className="text-sm font-medium">Role</label>
             <select className="input" {...register("role")}>
-              <option value="user">user</option>
-              <option value="admin">admin</option>
+              <option value="user">user (khách)</option>
+              <option value="admin">admin (per-domain)</option>
+              {isSuper && <option value="super_admin">super_admin (global)</option>}
               <option value="support">support</option>
             </select>
           </div>
@@ -363,6 +379,20 @@ function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => voi
             </select>
           </div>
         </div>
+        {isSuper && (
+          <div>
+            <label className="text-sm font-medium">Domain</label>
+            <select className="input" {...register("domain_id")}>
+              <option value="">— Global (không gắn domain) —</option>
+              {(domains ?? []).filter((d) => d.hostname !== "*").map((d) => (
+                <option key={d.id} value={d.id}>{d.hostname} — {d.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              Global = super_admin / không bị giới hạn theo domain. Chọn domain cụ thể để user/admin chỉ truy cập tài nguyên của domain đó.
+            </p>
+          </div>
+        )}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           <button className="btn-primary" disabled={isSubmitting}>Tạo</button>

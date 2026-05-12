@@ -12,8 +12,13 @@ interface User {
   id: string;
   email: string;
   full_name: string | null;
-  role: "admin" | "user" | "support";
+  // super_admin = global admin (manages all domains, plans, providers)
+  // admin       = per-domain admin (scoped to domain_id)
+  // user        = regular tenant user
+  role: "super_admin" | "admin" | "user" | "support";
   status: string;
+  // Tenant membership. null for super_admin / legacy unscoped users.
+  domain_id?: string | null;
   entitlements?: Entitlements;
 }
 
@@ -41,11 +46,16 @@ export const useAuthStore = create<AuthState>()(
   ),
 );
 
+/** Both tiers of admin bypass entitlement gates. */
+function isAnyAdmin(role: string | undefined): boolean {
+  return role === "admin" || role === "super_admin";
+}
+
 /** Hook helper — admins always pass any feature check. */
 export function useFeature(key: string): boolean {
   const user = useAuthStore((s) => s.user);
   if (!user) return false;
-  if (user.role === "admin") return true;
+  if (isAnyAdmin(user.role)) return true;
   return Boolean(user.entitlements?.features?.[key]);
 }
 
@@ -53,6 +63,6 @@ export function useFeature(key: string): boolean {
 export function useLimit(key: string): number {
   const user = useAuthStore((s) => s.user);
   if (!user) return 0;
-  if (user.role === "admin") return 0;
+  if (isAnyAdmin(user.role)) return 0;
   return user.entitlements?.limits?.[key] ?? 0;
 }

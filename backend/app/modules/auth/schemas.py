@@ -46,4 +46,6 @@ class MeResponse(BaseModel):
     role: str
     status: str
     created_at: datetime
+    # Tenant membership. NULL = unscoped (super_admin or legacy).
+    domain_id: uuid.UUID | None = None
     entitlements: EntitlementsResponse

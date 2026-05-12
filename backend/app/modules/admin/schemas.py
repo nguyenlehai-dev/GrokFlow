@@ -10,19 +10,25 @@ class AdminUserCreate(BaseModel):
     email: PermissiveEmail
     password: str = Field(min_length=8, max_length=128)
     full_name: str | None = None
-    role: str = Field(default="user", pattern="^(admin|user|support)$")
+    role: str = Field(default="user", pattern="^(super_admin|admin|user|support)$")
     plan_id: uuid.UUID | None = None
+    # Optional. super_admin can pick any domain; domain admin's domain_id is
+    # forced server-side regardless of what they send.
+    domain_id: uuid.UUID | None = None
 
 
 class AdminUserUpdate(BaseModel):
     full_name: str | None = None
-    role: str | None = Field(default=None, pattern="^(admin|user|support)$")
+    role: str | None = Field(default=None, pattern="^(super_admin|admin|user|support)$")
     status: str | None = Field(default=None, pattern="^(active|inactive|banned|pending)$")
     password: str | None = Field(default=None, min_length=8, max_length=128)
     plan_id: uuid.UUID | None = None
     # Partial overrides merged on top of the plan's entitlements.
     # Send {} to clear all overrides; omit to leave unchanged.
     entitlement_overrides: dict | None = None
+    # super_admin only — change which domain a user belongs to.
+    # Zero-uuid (00000000-0000-0000-0000-000000000000) clears the field.
+    domain_id: uuid.UUID | None = None
 
 
 class AdminUserOut(BaseModel):
@@ -38,6 +44,7 @@ class AdminUserOut(BaseModel):
     created_at: datetime
     plan_id: uuid.UUID | None = None
     entitlement_overrides: dict | None = None
+    domain_id: uuid.UUID | None = None
 
     class Config:
         from_attributes = True

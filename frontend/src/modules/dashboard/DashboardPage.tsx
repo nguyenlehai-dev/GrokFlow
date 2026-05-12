@@ -46,7 +46,7 @@ const fmtVnd = (n: number) => fmt(Math.round(n)) + "₫";
 
 export function DashboardPage() {
   const me = useAuthStore((s) => s.user);
-  const isAdmin = me?.role === "admin";
+  const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
   const [period, setPeriod] = useState<Period>("all");
   const [scope, setScope] = useState<"me" | "admin">(isAdmin ? "admin" : "me");
 

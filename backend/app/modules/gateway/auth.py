@@ -28,6 +28,10 @@ class GatewayCaller:
     gateway_key_id: uuid.UUID | None = None  # set when kind=gateway_key
     allowed_functions: list[str] | None = None
     label: str | None = None
+    # Tenant id resolved from the caller (admin → user.domain_id,
+    # gateway_key → key.domain_id). Stored on each GwRequest so per-domain
+    # filtering of the requests log + dashboard works without a join.
+    domain_id: uuid.UUID | None = None
 
     # Snapshot of the gateway-key row (only populated when kind=gateway_key)
     rate_limit_per_minute: int = 0
@@ -70,6 +74,7 @@ async def require_caller(
                         gateway_key_id=k.id,
                         allowed_functions=list(k.allowed_functions or []),
                         label=k.label,
+                        domain_id=k.domain_id,
                         rate_limit_per_minute=k.rate_limit_per_minute,
                         daily_quota=k.daily_quota,
                         used_today=k.used_today,
@@ -89,12 +94,12 @@ async def require_caller(
             detail={"code": "invalid_token", "message": "Token không hợp lệ"},
         )
     user = await db.get(User, payload["sub"])
-    if not user or user.status != "active" or user.role != "admin":
+    if not user or user.status != "active" or user.role not in ("admin", "super_admin"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "admin_required", "message": "Admin JWT required cho non-gateway-key calls"},
         )
-    return GatewayCaller(kind="admin", user_id=user.id)
+    return GatewayCaller(kind="admin", user_id=user.id, domain_id=user.domain_id)
 
 
 GatewayCallerDep = Depends(require_caller)

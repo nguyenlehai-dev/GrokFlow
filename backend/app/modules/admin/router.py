@@ -4,10 +4,32 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, status
 from sqlalchemy import func, select
 
-from app.core.deps import AdminUser, DbSession
-from app.core.exceptions import InvalidPayload, NotFound
+from app.core.deps import AdminUser, SuperAdminUser, DbSession
+from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
 from app.core.security import hash_password
 from app.models import ApiKey, Invoice, Job, Payment, Plan, Profile, Subscription, User
+
+
+def _scope_users_query(q, admin: User):
+    """Restrict a User query to the admin's domain when they're not super.
+
+    super_admin: no filter (sees everything across domains).
+    admin:       only users whose domain_id matches theirs.
+    """
+    if admin.role == "super_admin":
+        return q
+    return q.where(User.domain_id == admin.domain_id)
+
+
+def _assert_can_touch(admin: User, target: User) -> None:
+    """Raise if a domain admin tries to act on a user outside their domain."""
+    if admin.role == "super_admin":
+        return
+    if target.domain_id != admin.domain_id:
+        raise PermissionDenied("User không thuộc domain bạn quản lý")
+    # A non-super admin cannot escalate themselves or another admin's tier.
+    if target.role == "super_admin":
+        raise PermissionDenied("Không có quyền sửa super_admin")
 from app.modules.audit import service as audit
 from app.modules.entitlements.catalog import FEATURES, LIMITS
 from app.modules.entitlements.service import get_effective_entitlements
@@ -60,8 +82,9 @@ async def stats(_admin: AdminUser, db: DbSession) -> AdminStats:
 
 
 @router.get("/users", response_model=list[AdminUserOut])
-async def list_users(_admin: AdminUser, db: DbSession) -> list[User]:
-    rows = (await db.execute(select(User).order_by(User.created_at.desc()))).scalars().all()
+async def list_users(admin: AdminUser, db: DbSession) -> list[User]:
+    q = _scope_users_query(select(User).order_by(User.created_at.desc()), admin)
+    rows = (await db.execute(q)).scalars().all()
     return list(rows)
 
 
@@ -72,6 +95,17 @@ async def create_user(payload: AdminUserCreate, admin: AdminUser, db: DbSession)
         raise InvalidPayload(f"Email {payload.email} đã tồn tại")
     if payload.plan_id and not await db.get(Plan, payload.plan_id):
         raise InvalidPayload("Plan không tồn tại")
+
+    # Role + domain rules:
+    #   super_admin can create any role in any domain (uses payload.domain_id);
+    #   admin can create role=user|admin in THEIR domain only, never super_admin.
+    if admin.role != "super_admin":
+        if payload.role == "super_admin":
+            raise PermissionDenied("Không có quyền tạo super_admin")
+        target_domain = admin.domain_id  # force into admin's own domain
+    else:
+        target_domain = payload.domain_id
+
     user = User(
         email=payload.email,
         password_hash=hash_password(payload.password),
@@ -79,6 +113,7 @@ async def create_user(payload: AdminUserCreate, admin: AdminUser, db: DbSession)
         role=payload.role,
         status="active",
         plan_id=payload.plan_id,
+        domain_id=target_domain,
     )
     db.add(user)
     await db.flush()
@@ -96,6 +131,17 @@ async def update_user(user_id: uuid.UUID, payload: AdminUserUpdate, admin: Admin
     user = await db.get(User, user_id)
     if not user:
         raise NotFound("user")
+    _assert_can_touch(admin, user)
+    # A non-super admin can't promote anyone to super_admin.
+    if payload.role == "super_admin" and admin.role != "super_admin":
+        raise PermissionDenied("Không có quyền cấp super_admin")
+    # A non-super admin can't move a user into a different domain.
+    if (
+        payload.domain_id is not None
+        and admin.role != "super_admin"
+        and payload.domain_id != admin.domain_id
+    ):
+        raise PermissionDenied("Không có quyền chuyển user sang domain khác")
     changes: dict = {}
     if payload.full_name is not None:
         user.full_name = payload.full_name
@@ -123,6 +169,14 @@ async def update_user(user_id: uuid.UUID, payload: AdminUserUpdate, admin: Admin
         # Empty dict means "clear overrides".
         user.entitlement_overrides = payload.entitlement_overrides or None
         changes["entitlement_overrides"] = "set" if payload.entitlement_overrides else "cleared"
+    if payload.domain_id is not None and admin.role == "super_admin":
+        # Sentinel zero-uuid means "clear" (turn into unscoped super-tier).
+        if str(payload.domain_id) == "00000000-0000-0000-0000-000000000000":
+            user.domain_id = None
+            changes["domain_id"] = None
+        else:
+            user.domain_id = payload.domain_id
+            changes["domain_id"] = str(payload.domain_id)
     await audit.log_action(
         db, user_id=admin.id, action="admin_update_user", target_type="user", target_id=user.id,
         metadata=changes,
@@ -139,6 +193,7 @@ async def delete_user(user_id: uuid.UUID, admin: AdminUser, db: DbSession) -> No
     user = await db.get(User, user_id)
     if not user:
         raise NotFound("user")
+    _assert_can_touch(admin, user)
     await audit.log_action(
         db, user_id=admin.id, action="admin_delete_user", target_type="user", target_id=user.id,
         metadata={"email": user.email},
@@ -149,11 +204,12 @@ async def delete_user(user_id: uuid.UUID, admin: AdminUser, db: DbSession) -> No
 
 @router.get("/users/{user_id}/effective-entitlements", response_model=EffectiveEntitlementsOut)
 async def user_effective_entitlements(
-    user_id: uuid.UUID, _admin: AdminUser, db: DbSession,
+    user_id: uuid.UUID, admin: AdminUser, db: DbSession,
 ) -> EffectiveEntitlementsOut:
     user = await db.get(User, user_id)
     if not user:
         raise NotFound("user")
+    _assert_can_touch(admin, user)
     eff = await get_effective_entitlements(db, user)
     return EffectiveEntitlementsOut(**eff)
 
@@ -168,13 +224,13 @@ async def entitlement_catalog(_admin: AdminUser) -> EntitlementCatalogOut:
 
 
 @router.get("/plans", response_model=list[PlanOut])
-async def list_plans(_admin: AdminUser, db: DbSession) -> list[Plan]:
+async def list_plans(_admin: SuperAdminUser, db: DbSession) -> list[Plan]:
     rows = (await db.execute(select(Plan).order_by(Plan.sort_order, Plan.created_at))).scalars().all()
     return list(rows)
 
 
 @router.post("/plans", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
-async def create_plan(payload: PlanIn, admin: AdminUser, db: DbSession) -> Plan:
+async def create_plan(payload: PlanIn, admin: SuperAdminUser, db: DbSession) -> Plan:
     if (await db.execute(select(Plan).where(Plan.code == payload.code))).scalar_one_or_none():
         raise InvalidPayload(f"Plan code '{payload.code}' đã tồn tại")
     if payload.is_default:
@@ -204,7 +260,7 @@ async def create_plan(payload: PlanIn, admin: AdminUser, db: DbSession) -> Plan:
 
 
 @router.patch("/plans/{plan_id}", response_model=PlanOut)
-async def update_plan(plan_id: uuid.UUID, payload: PlanUpdate, admin: AdminUser, db: DbSession) -> Plan:
+async def update_plan(plan_id: uuid.UUID, payload: PlanUpdate, admin: SuperAdminUser, db: DbSession) -> Plan:
     plan = await db.get(Plan, plan_id)
     if not plan:
         raise NotFound("plan")
@@ -243,7 +299,7 @@ async def update_plan(plan_id: uuid.UUID, payload: PlanUpdate, admin: AdminUser,
 
 
 @router.delete("/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_plan(plan_id: uuid.UUID, admin: AdminUser, db: DbSession) -> None:
+async def delete_plan(plan_id: uuid.UUID, admin: SuperAdminUser, db: DbSession) -> None:
     plan = await db.get(Plan, plan_id)
     if not plan:
         raise NotFound("plan")

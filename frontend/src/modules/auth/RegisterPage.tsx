@@ -44,7 +44,7 @@ export function RegisterPage() {
         headers: { Authorization: `Bearer ${data.access_token}` },
       });
       setAuth(data.access_token, me.data);
-      const target = me.data?.role === "admin" ? "/dashboard" : firstAllowedPath();
+      const target = (me.data?.role === "admin" || me.data?.role === "super_admin") ? "/dashboard" : firstAllowedPath();
       navigate(target);
     } catch (e: any) {
       setError(e?.response?.data?.detail?.message ?? "Đăng ký thất bại");

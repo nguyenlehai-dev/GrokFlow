@@ -161,6 +161,9 @@ class GatewayKeyIn(BaseModel):
     webhook_url: str | None = None
     rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
     daily_quota: int = Field(default=0, ge=0, le=10_000_000)
+    # super_admin only: tag the issued key to a specific tenant domain.
+    # Domain admins always get their own domain_id forced server-side.
+    domain_id: uuid.UUID | None = None
 
 
 class GatewayKeyUpdate(BaseModel):
@@ -170,6 +173,7 @@ class GatewayKeyUpdate(BaseModel):
     status: str | None = Field(default=None, pattern="^(active|inactive)$")
     rate_limit_per_minute: int | None = Field(default=None, ge=1, le=10000)
     daily_quota: int | None = Field(default=None, ge=0, le=10_000_000)
+    domain_id: uuid.UUID | None = None  # super_admin only (ignored otherwise)
 
 
 class GatewayKeyOut(BaseModel):
@@ -183,6 +187,7 @@ class GatewayKeyOut(BaseModel):
     daily_quota: int
     used_today: int
     created_at: datetime
+    domain_id: uuid.UUID | None = None
 
     class Config:
         from_attributes = True

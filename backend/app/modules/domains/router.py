@@ -11,7 +11,7 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.core.deps import AdminUser, DbSession
+from app.core.deps import SuperAdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound
 from app.models import Domain
 from app.modules.audit import service as audit
@@ -80,13 +80,13 @@ class DomainConfig(BaseModel):
 # ---------------- Admin CRUD ----------------
 
 @router.get("/api/admin/domains", response_model=list[DomainOut])
-async def list_domains(admin: AdminUser, db: DbSession) -> list[Domain]:
+async def list_domains(admin: SuperAdminUser, db: DbSession) -> list[Domain]:
     rows = (await db.execute(select(Domain).order_by(Domain.hostname))).scalars().all()
     return list(rows)
 
 
 @router.post("/api/admin/domains", response_model=DomainOut, status_code=status.HTTP_201_CREATED)
-async def create_domain(payload: DomainIn, admin: AdminUser, db: DbSession) -> Domain:
+async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession) -> Domain:
     hostname = payload.hostname.strip().lower()
     if (await db.execute(select(Domain).where(Domain.hostname == hostname))).scalar_one_or_none():
         raise InvalidPayload(f"Domain '{hostname}' đã tồn tại")
@@ -119,7 +119,7 @@ async def create_domain(payload: DomainIn, admin: AdminUser, db: DbSession) -> D
 
 @router.patch("/api/admin/domains/{domain_id}", response_model=DomainOut)
 async def update_domain(
-    domain_id: uuid.UUID, payload: DomainUpdate, admin: AdminUser, db: DbSession,
+    domain_id: uuid.UUID, payload: DomainUpdate, admin: SuperAdminUser, db: DbSession,
 ) -> Domain:
     d = await db.get(Domain, domain_id)
     if not d:
@@ -149,7 +149,7 @@ async def update_domain(
 
 
 @router.delete("/api/admin/domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_domain(domain_id: uuid.UUID, admin: AdminUser, db: DbSession) -> None:
+async def delete_domain(domain_id: uuid.UUID, admin: SuperAdminUser, db: DbSession) -> None:
     d = await db.get(Domain, domain_id)
     if not d:
         raise NotFound("domain")

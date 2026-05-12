@@ -23,7 +23,7 @@ interface ExecuteResp {
 
 export function GatewayPlaygroundPage() {
   const me = useAuthStore((s) => s.user);
-  const isAdmin = me?.role === "admin";
+  const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
   const verified = usePlaygroundKey((s) => s.current);
   const unlocked = isAdmin || !!verified;
 
