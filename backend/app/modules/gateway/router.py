@@ -24,7 +24,7 @@ from sqlalchemy import func, or_, select
 from app.core.database import SessionLocal
 
 from app.core.deps import AdminUser, CurrentUser, DbSession
-from app.core.exceptions import InvalidPayload, NotFound
+from app.core.exceptions import AppError, InvalidPayload, NotFound
 from app.core.security import hash_password, verify_password
 from app.models import (
     GwApiFunction, GwGatewayKey, GwPool, GwPoolApiKey, GwRequest, GwVendor,
@@ -335,6 +335,9 @@ async def create_gateway_key(
         label=payload.label, prefix=prefix, key_hash=key_hash,
         allowed_functions=payload.allowed_functions, status="active",
         created_by=admin.id,
+        webhook_url=payload.webhook_url,
+        rate_limit_per_minute=payload.rate_limit_per_minute,
+        daily_quota=payload.daily_quota,
     )
     db.add(k)
     await db.flush()
@@ -347,6 +350,9 @@ async def create_gateway_key(
     return s.GatewayKeyCreated(
         id=k.id, label=k.label, prefix=k.prefix,
         allowed_functions=k.allowed_functions, status=k.status,
+        webhook_url=k.webhook_url,
+        rate_limit_per_minute=k.rate_limit_per_minute,
+        daily_quota=k.daily_quota, used_today=k.used_today,
         created_at=k.created_at, plain_key=raw,
     )
 
@@ -425,6 +431,8 @@ async def list_requests(
             pool_key_id=r.pool_key_id, pool_key_name=pk.name if pk else None,
             function_code=r.function_code, model=r.model, status=r.status,
             error_message=r.error_message, latency_ms=r.latency_ms,
+            tokens_input=r.tokens_input, tokens_output=r.tokens_output,
+            cost_cents=r.cost_cents,
             created_at=r.created_at,
         ))
     return out
@@ -435,6 +443,56 @@ async def list_requests(
 # ============================================================================
 
 QUOTA_COOLDOWN_DEFAULT = 300  # fallback if a pool has no cooldown_seconds (legacy rows)
+
+
+class GatewayRateLimitExceeded(AppError):
+    def __init__(self, message: str) -> None:
+        super().__init__(429, "rate_limited", message)
+
+
+class GatewayQuotaExceeded(AppError):
+    def __init__(self, message: str) -> None:
+        super().__init__(429, "daily_quota_exceeded", message)
+
+
+async def _enforce_gateway_key_quota(
+    db, caller: "GatewayCaller",
+) -> GwGatewayKey | None:
+    """Throttle the calling gateway key.
+
+    Two checks, in order: (1) requests in the last 60s vs rate_limit_per_minute,
+    (2) used_today vs daily_quota (0 = unlimited). Admin callers skip both.
+    Returns the GwGatewayKey for the caller (so caller can update used_today
+    after a successful call), or None when caller is admin.
+    """
+    if caller.kind != "gateway_key" or not caller.gateway_key_id:
+        return None
+
+    gk = await db.get(GwGatewayKey, caller.gateway_key_id)
+    if not gk:
+        return None
+
+    # Daily quota
+    if gk.daily_quota and gk.used_today >= gk.daily_quota:
+        raise GatewayQuotaExceeded(
+            f"Đã dùng hết daily quota ({gk.daily_quota}). Reset vào UTC midnight."
+        )
+
+    # Per-minute rate limit
+    one_min_ago = datetime.now(timezone.utc) - timedelta(minutes=1)
+    recent = (await db.execute(
+        select(func.count()).select_from(GwRequest)
+        .where(
+            GwRequest.gateway_key_id == gk.id,
+            GwRequest.created_at >= one_min_ago,
+        )
+    )).scalar() or 0
+    if gk.rate_limit_per_minute and recent >= gk.rate_limit_per_minute:
+        raise GatewayRateLimitExceeded(
+            f"Rate limit {gk.rate_limit_per_minute}/phút bị vượt — chờ vài giây."
+        )
+
+    return gk
 
 # Where multipart uploads land. Same volume as the rest of the app storage
 # so /api/v1/gateway/uploads/{filename} can serve them straight back.
@@ -564,6 +622,19 @@ async def _do_execute(
         used_key.used_count += 1
         used_key.last_used_at = datetime.now(timezone.utc)
 
+    # Cost / token usage — pulled out of the normalized provider response
+    # and combined with pool pricing (cents per million tokens).
+    tokens_in = (normalized or {}).get("tokens_input")
+    tokens_out = (normalized or {}).get("tokens_output")
+    cost_cents: int | None = None
+    if final_status == "succeeded" and (tokens_in or tokens_out):
+        ci = pool.cost_per_million_input_cents or 0
+        co = pool.cost_per_million_output_cents or 0
+        if ci or co:
+            cost_cents = int(
+                ((tokens_in or 0) * ci + (tokens_out or 0) * co) / 1_000_000
+            )
+
     req = (await db.execute(
         select(GwRequest).where(GwRequest.gw_id == gw_id)
     )).scalar_one()
@@ -573,6 +644,17 @@ async def _do_execute(
     req.response_body = normalized
     req.error_message = last_err
     req.latency_ms = latency
+    req.tokens_input = tokens_in
+    req.tokens_output = tokens_out
+    req.cost_cents = cost_cents
+
+    # Bump gateway key's used_today after success (cheap concurrent-safe-enough
+    # increment — slight overcount in races is acceptable for billing).
+    if final_status == "succeeded" and req.gateway_key_id:
+        gk = await db.get(GwGatewayKey, req.gateway_key_id)
+        if gk:
+            gk.used_today += 1
+
     await db.commit()
     return req
 
@@ -593,6 +675,7 @@ async def execute_function(
         raise InvalidPayload(
             f"Gateway key này không có quyền gọi function '{function_code}'"
         )
+    await _enforce_gateway_key_quota(db, caller)
 
     fn, pool, vendor, candidates = await _resolve_pool(
         db, function_code, payload.model,
@@ -638,6 +721,7 @@ async def submit_function(
         raise InvalidPayload(
             f"Gateway key này không có quyền gọi function '{function_code}'"
         )
+    await _enforce_gateway_key_quota(db, caller)
 
     fn, pool, vendor, candidates = await _resolve_pool(
         db, function_code, payload.model,
@@ -793,6 +877,8 @@ async def request_status(gw_id: str, db: DbSession) -> s.RequestOut:
         pool_key_id=r.pool_key_id, pool_key_name=pk.name if pk else None,
         function_code=r.function_code, model=r.model, status=r.status,
         error_message=r.error_message, latency_ms=r.latency_ms,
+        tokens_input=r.tokens_input, tokens_output=r.tokens_output,
+        cost_cents=r.cost_cents,
         created_at=r.created_at,
     )
 

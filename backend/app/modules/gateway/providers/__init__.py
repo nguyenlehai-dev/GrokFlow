@@ -51,4 +51,7 @@ def get_provider(vendor_code: str) -> "VendorProvider | None":
     if vendor_code in ("anthropic", "claude"):
         from .anthropic_provider import AnthropicProvider
         return AnthropicProvider()
+    if vendor_code in ("replicate",):
+        from .replicate_provider import ReplicateProvider
+        return ReplicateProvider()
     return None

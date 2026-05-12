@@ -29,6 +29,11 @@ class GatewayCaller:
     allowed_functions: list[str] | None = None
     label: str | None = None
 
+    # Snapshot of the gateway-key row (only populated when kind=gateway_key)
+    rate_limit_per_minute: int = 0
+    daily_quota: int = 0
+    used_today: int = 0
+
     def can_call_function(self, function_code: str) -> bool:
         if self.kind == "admin":
             return True
@@ -65,6 +70,9 @@ async def require_caller(
                         gateway_key_id=k.id,
                         allowed_functions=list(k.allowed_functions or []),
                         label=k.label,
+                        rate_limit_per_minute=k.rate_limit_per_minute,
+                        daily_quota=k.daily_quota,
+                        used_today=k.used_today,
                     )
             except Exception:  # noqa: BLE001
                 continue

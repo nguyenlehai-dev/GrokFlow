@@ -400,6 +400,15 @@ class GwPool(Base, TimestampMixin):
     cooldown_seconds: Mapped[int] = mapped_column(
         Integer, nullable=False, default=300, server_default="300",
     )
+    # Pricing per million tokens, in USD cents. Used to compute cost_cents
+    # on each GwRequest once the upstream returns usage stats. 0 = free
+    # / unknown — request still logs but cost stays NULL.
+    cost_per_million_input_cents: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    cost_per_million_output_cents: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
 
     vendor: Mapped["GwVendor"] = relationship()
     function: Mapped["GwApiFunction | None"] = relationship()
@@ -452,6 +461,19 @@ class GwGatewayKey(Base, TimestampMixin):
     # to succeeded/failed. Best-effort — failure to deliver doesn't fail
     # the original job.
     webhook_url: Mapped[str | None] = mapped_column(Text)
+    # Rate-limit + quota counters. rate_limit_per_minute throttles bursts;
+    # daily_quota caps total calls per key per day (0 = unlimited). The
+    # daily_reset worker zeros used_today at UTC midnight (re-uses the
+    # same job that ApiKey already uses — see app/workers/daily_reset.py).
+    rate_limit_per_minute: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=60, server_default="60",
+    )
+    daily_quota: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    used_today: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
 
 
 class GwRequest(Base, TimestampMixin):
@@ -479,6 +501,12 @@ class GwRequest(Base, TimestampMixin):
     response_body: Mapped[dict | None] = mapped_column(JSONType)
     error_message: Mapped[str | None] = mapped_column(Text)
     latency_ms: Mapped[int | None] = mapped_column(Integer)
+    # Cost / usage breakdown — populated after upstream returns. Tokens
+    # parsed out of vendor-specific usage payloads in providers; cost
+    # computed from pool's pricing fields. All optional.
+    tokens_input: Mapped[int | None] = mapped_column(Integer)
+    tokens_output: Mapped[int | None] = mapped_column(Integer)
+    cost_cents: Mapped[int | None] = mapped_column(Integer)
 
 
 __all__ = [

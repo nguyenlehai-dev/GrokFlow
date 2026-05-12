@@ -71,6 +71,7 @@ const NAV: NavEntry[] = [
       { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers },
       { type: "link", to: "/gateway/pools",      label: "Pools",         icon: GitBranch },
       { type: "link", to: "/gateway/functions",  label: "API Functions", icon: Code2 },
+      { type: "link", to: "/gateway/gateway-keys", label: "Gateway Keys", icon: Key },
       { type: "link", to: "/gateway/requests",   label: "Requests",      icon: Activity },
       { type: "link", to: "/gateway/playground", label: "Playground",    icon: Terminal },
       { type: "link", to: "/gateway/docs",       label: "API Docs",      icon: BookOpen },

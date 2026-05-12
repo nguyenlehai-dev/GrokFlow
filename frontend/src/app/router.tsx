@@ -27,6 +27,7 @@ import { GatewayVendorsPage } from "@/modules/gateway/GatewayVendorsPage";
 import { GatewayPoolsPage } from "@/modules/gateway/GatewayPoolsPage";
 import { GatewayFunctionsPage } from "@/modules/gateway/GatewayFunctionsPage";
 import { GatewayRequestsPage } from "@/modules/gateway/GatewayRequestsPage";
+import { GatewayKeysPage } from "@/modules/gateway/GatewayKeysPage";
 import { GatewayPlaygroundPage } from "@/modules/gateway/GatewayPlaygroundPage";
 import { GatewayDocsPage } from "@/modules/gateway/GatewayDocsPage";
 
@@ -102,6 +103,7 @@ export const router = createBrowserRouter([
       { path: "gateway/vendors",    element: <GatewayVendorsPage /> },
       { path: "gateway/pools",      element: <GatewayPoolsPage /> },
       { path: "gateway/functions",  element: <GatewayFunctionsPage /> },
+      { path: "gateway/gateway-keys", element: <GatewayKeysPage /> },
       { path: "gateway/requests",   element: <GatewayRequestsPage /> },
       { path: "gateway/playground", element: <GatewayPlaygroundPage /> },
       { path: "gateway/docs",       element: <GatewayDocsPage /> },

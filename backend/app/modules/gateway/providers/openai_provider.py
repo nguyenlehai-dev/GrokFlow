@@ -127,9 +127,12 @@ def _normalize(data: dict[str, Any], *, model: str, is_image: bool) -> dict[str,
                     if part.get("type") == "text" and part.get("text"):
                         text_chunks.append(part["text"])
 
+    usage = data.get("usage") or {}
     return {
         "model": model,
         "text": "\n".join(text_chunks) if text_chunks else None,
         "media_urls": media_urls,
+        "tokens_input": usage.get("prompt_tokens") or usage.get("input_tokens"),
+        "tokens_output": usage.get("completion_tokens") or usage.get("output_tokens"),
         "raw": data,
     }

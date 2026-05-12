@@ -112,7 +112,7 @@ def _short_err(r: httpx.Response) -> str:
 def _normalize_response(data: dict[str, Any], *, model: str) -> dict[str, Any]:
     """Pull the useful bits out of Gemini's response so the FE doesn't need
     to know the SDK shape. We return text content (joined) + a list of
-    output image data URLs.
+    output image data URLs + token usage when present.
     """
     text_chunks: list[str] = []
     image_data_urls: list[str] = []
@@ -128,9 +128,15 @@ def _normalize_response(data: dict[str, Any], *, model: str) -> dict[str, Any]:
                 if b64:
                     image_data_urls.append(f"data:{mime};base64,{b64}")
 
+    usage = data.get("usageMetadata") or data.get("usage_metadata") or {}
+    tokens_input = usage.get("promptTokenCount") or usage.get("prompt_token_count")
+    tokens_output = usage.get("candidatesTokenCount") or usage.get("candidates_token_count")
+
     return {
         "model": model,
         "text": "\n".join(text_chunks) if text_chunks else None,
         "media_urls": image_data_urls,
+        "tokens_input": tokens_input,
+        "tokens_output": tokens_output,
         "raw": data,
     }

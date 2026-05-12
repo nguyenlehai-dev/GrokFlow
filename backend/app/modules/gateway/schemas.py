@@ -85,6 +85,8 @@ class PoolIn(BaseModel):
     description: str | None = None
     status: str = Field(default="active", pattern="^(active|inactive)$")
     cooldown_seconds: int = Field(default=300, ge=10, le=86400)
+    cost_per_million_input_cents: int = Field(default=0, ge=0)
+    cost_per_million_output_cents: int = Field(default=0, ge=0)
 
 
 class PoolUpdate(BaseModel):
@@ -95,6 +97,8 @@ class PoolUpdate(BaseModel):
     description: str | None = None
     status: str | None = Field(default=None, pattern="^(active|inactive)$")
     cooldown_seconds: int | None = Field(default=None, ge=10, le=86400)
+    cost_per_million_input_cents: int | None = Field(default=None, ge=0)
+    cost_per_million_output_cents: int | None = Field(default=None, ge=0)
 
 
 class PoolOut(BaseModel):
@@ -109,6 +113,8 @@ class PoolOut(BaseModel):
     description: str | None
     status: str
     cooldown_seconds: int = 300
+    cost_per_million_input_cents: int = 0
+    cost_per_million_output_cents: int = 0
     keys_total: int = 0
     keys_active: int = 0
     created_at: datetime
@@ -153,6 +159,8 @@ class GatewayKeyIn(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     allowed_functions: list[str] = Field(default_factory=list)
     webhook_url: str | None = None
+    rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
+    daily_quota: int = Field(default=0, ge=0, le=10_000_000)
 
 
 class GatewayKeyUpdate(BaseModel):
@@ -160,6 +168,8 @@ class GatewayKeyUpdate(BaseModel):
     allowed_functions: list[str] | None = None
     webhook_url: str | None = None
     status: str | None = Field(default=None, pattern="^(active|inactive)$")
+    rate_limit_per_minute: int | None = Field(default=None, ge=1, le=10000)
+    daily_quota: int | None = Field(default=None, ge=0, le=10_000_000)
 
 
 class GatewayKeyOut(BaseModel):
@@ -169,6 +179,9 @@ class GatewayKeyOut(BaseModel):
     allowed_functions: list[str]
     status: str
     webhook_url: str | None
+    rate_limit_per_minute: int
+    daily_quota: int
+    used_today: int
     created_at: datetime
 
     class Config:
@@ -206,6 +219,9 @@ class RequestOut(BaseModel):
     status: str
     error_message: str | None
     latency_ms: int | None
+    tokens_input: int | None = None
+    tokens_output: int | None = None
+    cost_cents: int | None = None
     created_at: datetime
 
 

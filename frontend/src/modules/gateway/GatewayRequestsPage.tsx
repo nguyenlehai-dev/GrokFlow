@@ -13,6 +13,9 @@ interface Req {
   status: string;
   error_message: string | null;
   latency_ms: number | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
+  cost_cents: number | null;
   created_at: string;
 }
 
@@ -58,6 +61,17 @@ export function GatewayRequestsPage() {
                     <div className="text-xs text-slate-500 font-mono">
                       {r.model ?? "—"} {r.pool_key_name && `· ${r.pool_key_name}`}
                     </div>
+                    {(r.tokens_input != null || r.tokens_output != null || r.cost_cents != null) && (
+                      <div className="text-xs text-slate-600 mt-0.5">
+                        {r.tokens_input != null && <span>in: <strong>{r.tokens_input}</strong></span>}
+                        {r.tokens_output != null && <span className="ml-2">out: <strong>{r.tokens_output}</strong></span>}
+                        {r.cost_cents != null && r.cost_cents > 0 && (
+                          <span className="ml-2 text-emerald-700">
+                            ${(r.cost_cents / 100).toFixed(4)}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {r.error_message && (
                       <p className="text-xs text-rose-600 mt-1 line-clamp-3">
                         {r.error_message}

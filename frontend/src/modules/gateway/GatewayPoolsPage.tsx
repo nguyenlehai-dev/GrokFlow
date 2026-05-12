@@ -283,6 +283,8 @@ function PoolEditorModal({
       description: pool?.description ?? "",
       status: pool?.status ?? "active",
       cooldown_seconds: (pool as any)?.cooldown_seconds ?? 300,
+      cost_per_million_input_cents: (pool as any)?.cost_per_million_input_cents ?? 0,
+      cost_per_million_output_cents: (pool as any)?.cost_per_million_output_cents ?? 0,
     },
   });
   const save = useMutation({
@@ -291,6 +293,8 @@ function PoolEditorModal({
         ...v,
         function_id: v.function_id || null,
         cooldown_seconds: Number(v.cooldown_seconds),
+        cost_per_million_input_cents: Number(v.cost_per_million_input_cents),
+        cost_per_million_output_cents: Number(v.cost_per_million_output_cents),
       };
       return isCreate
         ? gwApi.post("/api/v1/gateway/pools", payload)
@@ -353,6 +357,24 @@ function PoolEditorModal({
               {...register("cooldown_seconds", { valueAsNumber: true })} />
             <p className="text-[10px] text-slate-500 mt-0.5">
               Khi key 429, ngừng dùng trong N giây rồi tự thử lại.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 border-t pt-3">
+          <div>
+            <label className="text-sm font-medium">Cost / 1M input tokens (¢)</label>
+            <input className="input" type="number" min={0}
+              {...register("cost_per_million_input_cents", { valueAsNumber: true })} />
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              VD Gemini Flash: 7 (=$0.07/M)
+            </p>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Cost / 1M output tokens (¢)</label>
+            <input className="input" type="number" min={0}
+              {...register("cost_per_million_output_cents", { valueAsNumber: true })} />
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              VD Gemini Flash: 30 (=$0.30/M)
             </p>
           </div>
         </div>

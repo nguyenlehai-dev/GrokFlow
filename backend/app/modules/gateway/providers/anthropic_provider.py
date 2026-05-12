@@ -107,9 +107,12 @@ def _normalize(data: dict[str, Any], *, model: str) -> dict[str, Any]:
     for block in data.get("content", []) or []:
         if block.get("type") == "text" and block.get("text"):
             text_chunks.append(block["text"])
+    usage = data.get("usage") or {}
     return {
         "model": model,
         "text": "\n".join(text_chunks) if text_chunks else None,
         "media_urls": [],
+        "tokens_input": usage.get("input_tokens"),
+        "tokens_output": usage.get("output_tokens"),
         "raw": data,
     }
