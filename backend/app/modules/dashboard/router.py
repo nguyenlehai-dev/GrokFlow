@@ -140,37 +140,40 @@ async def _build(db, period: Period, scope: Literal["me", "admin"], user_id) -> 
         users_count = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
 
     # ------------------ Revenue (paid payments, by month, last 12 months) ------------------
+    # Aggregate in Python — small dataset (months × users) and avoids the
+    # Postgres "must appear in GROUP BY" gotcha with SQLAlchemy + to_char.
     one_year_ago = (datetime.now(timezone.utc) - timedelta(days=365))
     pay_q = (
-        select(
-            func.to_char(Payment.paid_at, "YYYY-MM").label("month"),
-            func.sum(Payment.amount).label("amount"),
-        )
+        select(Payment.paid_at, Payment.amount)
         .where(Payment.status == "success", Payment.paid_at >= one_year_ago)
-        .group_by(func.to_char(Payment.paid_at, "YYYY-MM"))
-        .order_by(func.to_char(Payment.paid_at, "YYYY-MM"))
     )
     if not is_admin:
         pay_q = pay_q.where(Payment.user_id == user_id)
-    revenue_rows = (await db.execute(pay_q)).all()
-    revenue = [RevenuePoint(month=r.month, amount=float(r.amount or 0)) for r in revenue_rows]
+    pay_rows = (await db.execute(pay_q)).all()
+    rev_by_month: dict[str, float] = defaultdict(float)
+    for paid_at, amount in pay_rows:
+        if paid_at is None:
+            continue
+        rev_by_month[paid_at.strftime("%Y-%m")] += float(amount or 0)
+    revenue = [
+        RevenuePoint(month=m, amount=a)
+        for m, a in sorted(rev_by_month.items())
+    ]
     revenue_total = sum(p.amount for p in revenue)
 
     # ------------------ Jobs timeseries (last 30 days) ------------------
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-    ts_q = (
-        select(
-            func.to_char(Job.created_at, "YYYY-MM-DD").label("day"),
-            func.count().label("count"),
-        )
-        .where(Job.created_at >= thirty_days_ago)
-        .group_by(func.to_char(Job.created_at, "YYYY-MM-DD"))
-        .order_by(func.to_char(Job.created_at, "YYYY-MM-DD"))
-    )
+    ts_q = select(Job.created_at).where(Job.created_at >= thirty_days_ago)
     if not is_admin:
         ts_q = ts_q.where(Job.user_id == user_id)
     ts_rows = (await db.execute(ts_q)).all()
-    jobs_timeseries = [JobTimePoint(day=r.day, count=r.count) for r in ts_rows]
+    jobs_by_day: dict[str, int] = defaultdict(int)
+    for (created_at,) in ts_rows:
+        jobs_by_day[created_at.strftime("%Y-%m-%d")] += 1
+    jobs_timeseries = [
+        JobTimePoint(day=d, count=c)
+        for d, c in sorted(jobs_by_day.items())
+    ]
 
     # ------------------ App groups (jobs grouped by model/provider in current period) ------------------
     apps_q = (
