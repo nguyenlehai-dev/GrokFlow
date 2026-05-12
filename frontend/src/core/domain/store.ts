@@ -67,13 +67,14 @@ export const useDomainStore = create<DomainState>((set, get) => ({
     if (!c) return true;
     if (c.status === "disabled") return false;
     if (c.allow_all_pages) return true;
+    const allowed = c.allowed_pages ?? [];
     // Exact match or prefix match (handles /jobs/:id etc.)
-    return c.allowed_pages.some((p) => path === p || path.startsWith(p + "/"));
+    return allowed.some((p) => path === p || path.startsWith(p + "/"));
   },
   firstAllowedPath: () => {
     const c = get().config;
     if (!c || c.allow_all_pages) return "/dashboard";
-    const allowed = c.allowed_pages;
+    const allowed = c.allowed_pages ?? [];
     // 1. Preferred dashboard-like pages first
     for (const p of LANDING_PREFERENCE) {
       if (allowed.some((a) => a === p || p.startsWith(a + "/"))) return p;
