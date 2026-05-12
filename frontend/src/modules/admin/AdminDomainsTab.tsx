@@ -30,14 +30,16 @@ const ALL_PAGES = [
   { path: "/api-docs", label: "API Docs (Grok)" },
   // Flow tools
   { path: "/flow", label: "Flow (toàn nhóm)" },
-  // Gateway sub-pages
+  // Gateway sub-pages. Items marked (admin) require the user's role to be
+  // admin — granting the domain alone won't make these visible to a regular
+  // user. Use them only when you plan to log in as admin from this domain.
   { path: "/gateway", label: "Gateway (toàn nhóm)" },
-  { path: "/gateway/dashboard", label: "Gateway · Dashboard" },
-  { path: "/gateway/vendors", label: "Gateway · Vendors" },
-  { path: "/gateway/pools", label: "Gateway · Pools" },
-  { path: "/gateway/functions", label: "Gateway · API Functions" },
-  { path: "/gateway/gateway-keys", label: "Gateway · Gateway Keys" },
-  { path: "/gateway/requests", label: "Gateway · Requests" },
+  { path: "/gateway/dashboard", label: "Gateway · Dashboard (admin)" },
+  { path: "/gateway/vendors", label: "Gateway · Vendors (admin)" },
+  { path: "/gateway/pools", label: "Gateway · Pools (admin)" },
+  { path: "/gateway/functions", label: "Gateway · API Functions (admin)" },
+  { path: "/gateway/gateway-keys", label: "Gateway · Gateway Keys (admin)" },
+  { path: "/gateway/requests", label: "Gateway · Requests (admin)" },
   { path: "/gateway/playground", label: "Gateway · Playground" },
   { path: "/gateway/docs", label: "Gateway · API Docs" },
   // Billing / settings

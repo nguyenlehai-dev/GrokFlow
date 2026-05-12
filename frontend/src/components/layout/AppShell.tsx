@@ -67,12 +67,16 @@ const NAV: NavEntry[] = [
   {
     type: "group", key: "gateway", label: "Gateway Management", icon: Network,
     items: [
-      { type: "link", to: "/gateway/dashboard",  label: "Dashboard",     icon: LayoutDashboard },
-      { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers },
-      { type: "link", to: "/gateway/pools",      label: "Pools",         icon: GitBranch },
-      { type: "link", to: "/gateway/functions",  label: "API Functions", icon: Code2 },
-      { type: "link", to: "/gateway/gateway-keys", label: "Gateway Keys", icon: Key },
-      { type: "link", to: "/gateway/requests",   label: "Requests",      icon: Activity },
+      // Admin-only CRUD pages — backend gates all /api/v1/gateway/* mutations
+      // and aggregate reads with the admin role, so showing these to non-admin
+      // users only produces 403s and an "Admin role required" UI.
+      { type: "link", to: "/gateway/dashboard",  label: "Dashboard",     icon: LayoutDashboard, adminOnly: true },
+      { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers,          adminOnly: true },
+      { type: "link", to: "/gateway/pools",      label: "Pools",         icon: GitBranch,       adminOnly: true },
+      { type: "link", to: "/gateway/functions",  label: "API Functions", icon: Code2,           adminOnly: true },
+      { type: "link", to: "/gateway/gateway-keys", label: "Gateway Keys", icon: Key,            adminOnly: true },
+      { type: "link", to: "/gateway/requests",   label: "Requests",      icon: Activity,        adminOnly: true },
+      // Non-admin users on a granted domain get just these two.
       { type: "link", to: "/gateway/playground", label: "Playground",    icon: Terminal },
       { type: "link", to: "/gateway/docs",       label: "API Docs",      icon: BookOpen },
     ],
