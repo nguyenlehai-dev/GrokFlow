@@ -57,10 +57,10 @@ export const PAGE_GROUPS: PageGroup[] = [
       { path: "/gateway/requests", label: "Gateway · Requests", adminOnly: true },
       { path: "/gateway/playground", label: "Gateway · Playground" },
       { path: "/gateway/docs", label: "Gateway · API Docs" },
-      // The next 3 are super_admin-only at the API level.
-      { path: "/gateway/vendors", label: "Gateway · Vendors (super)", adminOnly: true },
-      { path: "/gateway/pools", label: "Gateway · Pools (super)", adminOnly: true },
-      { path: "/gateway/functions", label: "Gateway · Functions (super)", adminOnly: true },
+      // Provider config — readable by per-domain admin, writes are super only.
+      { path: "/gateway/vendors", label: "Gateway · Vendors (read)", adminOnly: true },
+      { path: "/gateway/pools", label: "Gateway · Pools (read)", adminOnly: true },
+      { path: "/gateway/functions", label: "Gateway · Functions (read)", adminOnly: true },
     ],
   },
   {

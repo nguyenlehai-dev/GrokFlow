@@ -75,10 +75,11 @@ const NAV: NavEntry[] = [
       { type: "link", to: "/gateway/dashboard",  label: "Dashboard",     icon: LayoutDashboard, adminOnly: true },
       { type: "link", to: "/gateway/gateway-keys", label: "Gateway Keys", icon: Key,            adminOnly: true },
       { type: "link", to: "/gateway/requests",   label: "Requests",      icon: Activity,        adminOnly: true },
-      // Global provider config — super_admin only.
-      { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers,          superOnly: true },
-      { type: "link", to: "/gateway/pools",      label: "Pools",         icon: GitBranch,       superOnly: true },
-      { type: "link", to: "/gateway/functions",  label: "API Functions", icon: Code2,           superOnly: true },
+      // Provider config — visible to per-domain admin too (read-only for them;
+      // backend gates writes to super_admin). super_admin gets full CRUD.
+      { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers,          adminOnly: true },
+      { type: "link", to: "/gateway/pools",      label: "Pools",         icon: GitBranch,       adminOnly: true },
+      { type: "link", to: "/gateway/functions",  label: "API Functions", icon: Code2,           adminOnly: true },
       // Non-admin users on a granted domain get just these two.
       { type: "link", to: "/gateway/playground", label: "Playground",    icon: Terminal },
       { type: "link", to: "/gateway/docs",       label: "API Docs",      icon: BookOpen },
