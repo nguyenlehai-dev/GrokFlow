@@ -22,6 +22,8 @@ import { AdminBillingPage } from "@/modules/admin/AdminBillingPage";
 import { AdminDomainsPage } from "@/modules/admin/AdminDomainsPage";
 import { AdminGitPage } from "@/modules/admin/AdminGitPage";
 import { AuditLogPage } from "@/modules/audit/AuditLogPage";
+import { GatewayProfilesPage } from "@/modules/gateway/GatewayProfilesPage";
+import { GatewayProxiesPage } from "@/modules/gateway/GatewayProxiesPage";
 
 // Quản lý Flow — sub-pages, placeholders for now
 const flowRoutes = [
@@ -36,12 +38,12 @@ const flowRoutes = [
   ["docs",            "Flow API Docs"],
 ] as const;
 
-// Gateway Management — sub-pages, placeholders
+// Gateway Management — wired to gatewaygrok-backend via /api/gateway/* proxy.
+// Profiles + Proxies are real pages; the rest are placeholders for now.
 const gatewayRoutes = [
-  ["vendors",     "Vendor"],
-  ["pools",       "Pools"],
-  ["functions",   "API Functions"],
-  ["requests",    "Requests"],
+  ["api-keys",    "API Keys"],
+  ["jobs",        "Jobs"],
+  ["settings",   "Settings"],
   ["playground",  "Playground"],
   ["docs",        "Gateway API Docs"],
 ] as const;
@@ -96,8 +98,11 @@ export const router = createBrowserRouter([
         element: <ComingSoonPage title={`Flow — ${label}`} />,
       })),
 
-      // Gateway Management placeholders
-      { path: "gateway", element: <Navigate to="/gateway/vendors" replace /> },
+      // Gateway Management — Profiles + Proxies wired to gatewaygrok-backend,
+      // the rest are placeholders for now.
+      { path: "gateway", element: <Navigate to="/gateway/profiles" replace /> },
+      { path: "gateway/profiles", element: <GatewayProfilesPage /> },
+      { path: "gateway/proxies",  element: <GatewayProxiesPage /> },
       ...gatewayRoutes.map(([slug, label]) => ({
         path: `gateway/${slug}`,
         element: <ComingSoonPage title={`Gateway — ${label}`} />,

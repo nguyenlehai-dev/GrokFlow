@@ -162,6 +162,10 @@ services:
     restart: unless-stopped
     ports:
       - "5173:80"
+    # So nginx can reach gatewaygrok-backend running on host port 8001
+    # via the /gateway-api/* proxy location.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits: { memory: 128M, cpus: "0.25" }
