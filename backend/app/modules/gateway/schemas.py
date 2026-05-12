@@ -227,6 +227,11 @@ class RequestOut(BaseModel):
     tokens_input: int | None = None
     tokens_output: int | None = None
     cost_cents: int | None = None
+    # Full request/response payloads so the Requests page can show what the
+    # caller asked + what the vendor returned (image data URLs are huge but
+    # we already serve them inline in /execute responses, so this matches).
+    request_body: dict[str, Any] | None = None
+    response_body: dict[str, Any] | None = None
     created_at: datetime
 
 

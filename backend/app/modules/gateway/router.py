@@ -320,7 +320,7 @@ async def list_vendor_models(
 
 @router.get("/pools/{pool_id}/keys", response_model=list[s.PoolApiKeyOut])
 async def list_pool_keys(
-    pool_id: uuid.UUID, admin: SuperAdminUser, db: DbSession,
+    pool_id: uuid.UUID, admin: AdminUser, db: DbSession,
 ) -> list[s.PoolApiKeyOut]:
     pool = await db.get(GwPool, pool_id)
     if not pool:
@@ -532,6 +532,7 @@ async def list_requests(
             error_message=r.error_message, latency_ms=r.latency_ms,
             tokens_input=r.tokens_input, tokens_output=r.tokens_output,
             cost_cents=r.cost_cents,
+            request_body=r.request_body, response_body=r.response_body,
             created_at=r.created_at,
         ))
     return out
