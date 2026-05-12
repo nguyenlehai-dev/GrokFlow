@@ -1,0 +1,18 @@
+# Example of the .backup-env file. Copy to /home/vpsroot/grokflow/.backup-env
+# and `chmod 600 .backup-env`. DO NOT commit the real file to git.
+
+# Where restic stores snapshots. With rclone backend, this points at the
+# rclone remote + path. `gdrive` is the rclone remote name you set during
+# `rclone config`. The path is INSIDE the folder pinned by
+# root_folder_id in rclone.conf (if set), otherwise inside My Drive root.
+export RESTIC_REPOSITORY="rclone:gdrive:grokflow-restic"
+
+# Encryption passphrase for the restic repo. LOSE THIS = LOSE THE BACKUP.
+# Store it in a password manager AND write it on paper somewhere offline.
+# Generated with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+export RESTIC_PASSWORD="<paste your generated password here>"
+
+# Optional: throttle rclone if you hit Drive's 403 rate-limit errors.
+# Default unset = full speed. Uncomment if backups start failing on
+# "User Rate Limit Exceeded".
+# export RCLONE_TPSLIMIT=8

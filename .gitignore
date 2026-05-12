@@ -57,3 +57,7 @@ frontend/dist/
 
 check_domain.py
 deploy_fe.py
+
+# Backup credentials — DO NOT commit
+.backup-env
+
