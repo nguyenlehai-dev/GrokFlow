@@ -12,6 +12,98 @@ minutes for a small dataset, longer for big browser_profiles dirs.
 
 ---
 
+## ⚡ EXPRESS PATH (when the backup pipeline is set up)
+
+If [HIGH-AVAILABILITY.md](./HIGH-AVAILABILITY.md) Tier 1 is already
+configured (this is the project's current state), use this instead of
+the full manual migration below. You skip every scp/pg_dump/tar step —
+restic pulls everything from Drive.
+
+### What you need from the old server
+
+Nothing accessible. **All of this is in your password manager**:
+
+- `RESTIC_PASSWORD` (the long random string)
+- The Google account email + Drive folder ID (e.g. the
+  `1Ypxf2J6g4gDix2Igo2iapqY_wcqfJbkK` folder)
+- VPS credentials for the NEW server (you provisioned it)
+
+### Run order
+
+```bash
+# 1. Provision new VPS (Ubuntu 22.04+, 4 vCPU / 8 GB RAM / 80 GB)
+#    Follow SECTION 1 of this doc (apt install docker + nginx + ufw,
+#    create vpsroot user, copy ssh key). 10-15 min.
+
+ssh vpsroot@NEW_IP
+
+# 2. Tools
+sudo apt install -y rclone restic
+
+# 3. Re-OAuth rclone (tokens don't transfer across machines)
+#    Follow the SSH-tunnel trick from docs/HIGH-AVAILABILITY.md:
+#      a. Open: ssh -L 53682:localhost:53682 vpsroot@NEW_IP
+#      b. Run: rclone authorize drive
+#      c. Click URL on laptop, approve, copy token JSON
+#      d. Write ~/.config/rclone/rclone.conf with token + root_folder_id
+
+# 4. Drop in the backup credentials (from your password manager)
+mkdir -p /home/vpsroot/grokflow
+cat > /home/vpsroot/grokflow/.backup-env <<'EOF'
+export RESTIC_REPOSITORY="rclone:gdrive:grokflow-restic"
+export RESTIC_PASSWORD="<paste from password manager>"
+export RCLONE_CONFIG="/home/vpsroot/.config/rclone/rclone.conf"
+EOF
+chmod 600 /home/vpsroot/grokflow/.backup-env
+
+# 5. Clone the code
+cd /home/vpsroot
+git clone https://github.com/nguyenlehai-dev/GrokFlow grokflow
+cd grokflow
+git checkout prod              # or your live branch
+chmod +x scripts/*.sh
+
+# 6. Bring up Postgres + Redis ONLY (we need an empty DB to restore into)
+sudo docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+    up -d postgres redis
+sleep 15
+
+# 7. Restore EVERYTHING from Drive
+./scripts/restore.sh latest --profiles
+#  ↑ Pulls Postgres dump, storage volume, .env.prod, nginx vhosts,
+#    browser_profiles. The script copies .env.prod into place too.
+
+# 8. Bring up the rest of the stack
+sudo docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+    up -d
+sleep 30
+
+# 9. Catch up any pending migrations (no-op if your backup was recent)
+sudo docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+    exec backend alembic upgrade head
+
+# 10. Wire up host nginx + per-tenant vhosts
+#     (Section 4 of this doc — same as the manual path)
+
+# 11. DNS cutover (Section 6 of this doc)
+
+# 12. Verify backup pipeline kept running on the NEW server
+crontab -l | grep grokflow      # paste the cron line back if missing
+sudo /home/vpsroot/grokflow/scripts/backup-health.sh && echo OK
+```
+
+**Total time: ~40-60 minutes**, mostly Docker pulling base images.
+Data loss window during the move: whatever's between your last cron
+backup and the migration moment — currently capped at 15 minutes by
+the */15 cron schedule.
+
+The rest of this document is the MANUAL path. Use it when:
+- You don't have backups (shouldn't happen — set them up first).
+- You're moving so much data that backups would be slow to restore.
+- You're debugging the backup pipeline itself.
+
+---
+
 ## 0. Pre-flight on the OLD server (info to grab)
 
 ```bash
