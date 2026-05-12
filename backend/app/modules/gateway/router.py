@@ -8,13 +8,16 @@ lives in services/gateway_router.py (Phase 2).
 """
 from __future__ import annotations
 
+import asyncio
 import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, status as http_status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+
+from app.core.database import SessionLocal
 
 from app.core.deps import AdminUser, CurrentUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound
@@ -408,17 +411,16 @@ async def list_requests(
 # Execute (Playground placeholder — does not yet route to vendor)
 # ============================================================================
 
-@router.post("/functions/{function_code}/execute", response_model=s.ExecuteResponse)
-async def execute_function(
-    function_code: str, payload: s.ExecuteRequest, db: DbSession,
-    caller: GatewayCaller = Depends(require_caller),
-) -> s.ExecuteResponse:
-    """Run a function synchronously.
+QUOTA_COOLDOWN_SECONDS = 300  # 5 minutes — 429 keys come back automatically
 
-    Caller is either an admin JWT (for the Playground) or a gateway key
-    (`gwk_live_…`) for external clients — see modules/gateway/auth.py.
-    Picks the highest-priority active key from a matching pool, calls the
-    vendor provider, and on 429 falls back to the next-best key.
+
+async def _resolve_pool(
+    db, function_code: str, model: str | None,
+) -> tuple[GwApiFunction, GwPool, GwVendor, list[GwPoolApiKey]]:
+    """Look up function, pool, vendor, and pickable candidate keys.
+
+    A key is "pickable" when status='active' AND
+    (cooldown_until IS NULL OR cooldown_until < now).
     """
     fn = (await db.execute(
         select(GwApiFunction).where(GwApiFunction.code == function_code)
@@ -426,48 +428,72 @@ async def execute_function(
     if not fn:
         raise NotFound("function")
 
-    if not caller.can_call_function(function_code):
-        raise InvalidPayload(
-            f"Gateway key này không có quyền gọi function '{function_code}'"
-        )
-
-    # Match pool by function + optional model
     pool_q = select(GwPool).where(
         GwPool.function_id == fn.id, GwPool.status == "active",
     )
-    if payload.model:
-        pool_q = pool_q.where(GwPool.model == payload.model)
+    if model:
+        pool_q = pool_q.where(GwPool.model == model)
     pool = (await db.execute(pool_q.limit(1))).scalar_one_or_none()
     if not pool:
         raise InvalidPayload(
             f"Chưa có pool active nào cho function '{function_code}'"
-            + (f" + model '{payload.model}'" if payload.model else "")
+            + (f" + model '{model}'" if model else "")
         )
 
     vendor = await db.get(GwVendor, pool.vendor_id)
-    provider = get_provider(vendor.code if vendor else "")
-    if provider is None:
-        raise InvalidPayload(
-            f"Vendor '{vendor.code if vendor else 'unknown'}' chưa có provider implementation."
-        )
+    if not vendor:
+        raise InvalidPayload("Vendor không tồn tại")
 
-    # Ordered list of candidate keys: priority desc, then used_count asc
+    now = datetime.now(timezone.utc)
     candidates: list[GwPoolApiKey] = list((await db.execute(
         select(GwPoolApiKey)
-        .where(GwPoolApiKey.pool_id == pool.id, GwPoolApiKey.status == "active")
+        .where(
+            GwPoolApiKey.pool_id == pool.id,
+            GwPoolApiKey.status == "active",
+            or_(
+                GwPoolApiKey.cooldown_until.is_(None),
+                GwPoolApiKey.cooldown_until < now,
+            ),
+        )
         .order_by(GwPoolApiKey.priority.desc(), GwPoolApiKey.used_count)
     )).scalars().all())
 
     if not candidates:
-        raise InvalidPayload(f"Pool '{pool.name}' chưa có active API key nào")
+        raise InvalidPayload(
+            f"Pool '{pool.name}' không có API key khả dụng (hết cooldown / inactive)"
+        )
+
+    return fn, pool, vendor, candidates
+
+
+async def _do_execute(
+    db, gw_id: str, pool: GwPool, vendor: GwVendor,
+    candidates: list[GwPoolApiKey], function_code: str,
+    payload: s.ExecuteRequest, gateway_key_id: uuid.UUID | None,
+) -> GwRequest:
+    """Shared core: run through candidate keys, persist GwRequest row.
+
+    Pre-condition: caller has inserted a 'pending' GwRequest with `gw_id`.
+    This function updates it in place + commits.
+    """
+    provider = get_provider(vendor.code)
+    if provider is None:
+        # Find the pending row and mark failed
+        req = (await db.execute(
+            select(GwRequest).where(GwRequest.gw_id == gw_id)
+        )).scalar_one()
+        req.status = "failed"
+        req.error_message = f"Vendor '{vendor.code}' chưa có provider implementation"
+        await db.commit()
+        return req
 
     started = time.monotonic()
     last_err: str | None = None
     used_key: GwPoolApiKey | None = None
     normalized: dict | None = None
     final_status = "failed"
-
     model = payload.model or pool.model or ""
+
     for key in candidates:
         try:
             normalized = await provider.execute(
@@ -485,21 +511,22 @@ async def execute_function(
             final_status = "succeeded"
             break
         except ProviderQuotaExhausted as e:
-            # Mark down + try next key
             last_err = f"[quota] {e}"
-            key.used_count += 1
+            key.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=QUOTA_COOLDOWN_SECONDS)
             key.last_used_at = datetime.now(timezone.utc)
             await db.flush()
             continue
         except ProviderAuthError as e:
-            # Key revoked at upstream — disable + try next
             last_err = f"[auth] {e}"
             key.status = "inactive"
             await db.flush()
             continue
         except ProviderError as e:
             last_err = str(e)
-            # Don't try next on generic errors — likely a payload problem
+            used_key = key
+            break
+        except Exception as e:  # noqa: BLE001 — provider should subclass ProviderError, but be safe
+            last_err = f"unexpected: {e}"
             used_key = key
             break
 
@@ -508,28 +535,131 @@ async def execute_function(
         used_key.used_count += 1
         used_key.last_used_at = datetime.now(timezone.utc)
 
+    req = (await db.execute(
+        select(GwRequest).where(GwRequest.gw_id == gw_id)
+    )).scalar_one()
+    req.status = final_status
+    req.pool_key_id = used_key.id if used_key else None
+    req.model = model
+    req.response_body = normalized
+    req.error_message = last_err
+    req.latency_ms = latency
+    await db.commit()
+    return req
+
+
+@router.post("/functions/{function_code}/execute", response_model=s.ExecuteResponse)
+async def execute_function(
+    function_code: str, payload: s.ExecuteRequest, db: DbSession,
+    caller: GatewayCaller = Depends(require_caller),
+) -> s.ExecuteResponse:
+    """Run a function synchronously.
+
+    Caller is either an admin JWT (for the Playground) or a gateway key
+    (`gwk_live_…`) for external clients. Picks the highest-priority active
+    key from a matching pool that isn't on cooldown, calls the vendor
+    provider, and on 429 puts the key on a 5-min cooldown + tries next.
+    """
+    if not caller.can_call_function(function_code):
+        raise InvalidPayload(
+            f"Gateway key này không có quyền gọi function '{function_code}'"
+        )
+
+    fn, pool, vendor, candidates = await _resolve_pool(
+        db, function_code, payload.model,
+    )
+
     gw_id = "gw_" + secrets.token_hex(8)
     req = GwRequest(
-        gw_id=gw_id,
-        gateway_key_id=caller.gateway_key_id,
-        vendor_id=pool.vendor_id,
-        pool_id=pool.id,
-        pool_key_id=used_key.id if used_key else None,
-        function_code=function_code, model=model,
-        status=final_status,
+        gw_id=gw_id, gateway_key_id=caller.gateway_key_id,
+        vendor_id=pool.vendor_id, pool_id=pool.id,
+        function_code=function_code,
         request_body=payload.model_dump(),
-        response_body=normalized,
-        error_message=last_err,
-        latency_ms=latency,
+        status="pending",
+    )
+    db.add(req)
+    await db.flush()
+
+    req = await _do_execute(
+        db, gw_id, pool, vendor, candidates, function_code, payload,
+        caller.gateway_key_id,
+    )
+
+    used_key = await db.get(GwPoolApiKey, req.pool_key_id) if req.pool_key_id else None
+    return s.ExecuteResponse(
+        request_id=req.id, gw_id=gw_id, status=req.status,
+        pool_key_name=used_key.name if used_key else None,
+        response=req.response_body,
+        error_message=req.error_message if req.status == "failed" else None,
+    )
+
+
+@router.post("/functions/{function_code}/submit", response_model=s.ExecuteResponse)
+async def submit_function(
+    function_code: str, payload: s.ExecuteRequest, db: DbSession,
+    caller: GatewayCaller = Depends(require_caller),
+) -> s.ExecuteResponse:
+    """Async variant of /execute — returns immediately with status=pending.
+
+    The provider call fires off in a background task; the caller polls
+    GET /requests/{gw_id}/status until status moves to succeeded / failed.
+    Useful for video gen where upstream calls take 30+ seconds.
+    """
+    if not caller.can_call_function(function_code):
+        raise InvalidPayload(
+            f"Gateway key này không có quyền gọi function '{function_code}'"
+        )
+
+    fn, pool, vendor, candidates = await _resolve_pool(
+        db, function_code, payload.model,
+    )
+
+    gw_id = "gw_" + secrets.token_hex(8)
+    req = GwRequest(
+        gw_id=gw_id, gateway_key_id=caller.gateway_key_id,
+        vendor_id=pool.vendor_id, pool_id=pool.id,
+        function_code=function_code, model=payload.model or pool.model,
+        request_body=payload.model_dump(),
+        status="pending",
     )
     db.add(req)
     await db.flush()
     await db.commit()
 
+    # Snapshot the IDs — candidate ORM objects can't cross session boundary
+    candidate_ids = [k.id for k in candidates]
+    pool_id, vendor_id = pool.id, vendor.id
+    gateway_key_id = caller.gateway_key_id
+
+    async def _runner() -> None:
+        async with SessionLocal() as bg_db:
+            bg_pool = await bg_db.get(GwPool, pool_id)
+            bg_vendor = await bg_db.get(GwVendor, vendor_id)
+            bg_candidates = [await bg_db.get(GwPoolApiKey, cid) for cid in candidate_ids]
+            bg_candidates = [c for c in bg_candidates if c is not None]
+            try:
+                await _do_execute(
+                    bg_db, gw_id, bg_pool, bg_vendor, bg_candidates,
+                    function_code, payload, gateway_key_id,
+                )
+            except Exception as e:  # noqa: BLE001 — last-resort logging
+                # Try to mark the row failed even if _do_execute exploded
+                try:
+                    r = (await bg_db.execute(
+                        select(GwRequest).where(GwRequest.gw_id == gw_id)
+                    )).scalar_one_or_none()
+                    if r:
+                        r.status = "failed"
+                        r.error_message = f"background runner crash: {e}"
+                        await bg_db.commit()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    asyncio.create_task(_runner())
+
     return s.ExecuteResponse(
-        request_id=req.id, gw_id=gw_id, status=final_status,
-        pool_key_name=used_key.name if used_key else None,
-        response=normalized, error_message=last_err if final_status == "failed" else None,
+        request_id=req.id, gw_id=gw_id, status="pending",
+        pool_key_name=None, response=None, error_message=None,
     )
 
 

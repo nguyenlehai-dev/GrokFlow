@@ -67,27 +67,65 @@ export function GatewayPlaygroundPage() {
     onError: (e: any) => toast(extractError(e), "error"),
   });
 
+  const buildPayload = (v: any) => ({
+    model: v.model || null,
+    prompt: v.prompt,
+    aspect_ratio: v.aspect_ratio || null,
+    image_size: v.image_size || null,
+    reference_image_urls: v.reference_image_urls
+      ? v.reference_image_urls.split("\n").map((s: string) => s.trim()).filter(Boolean) : [],
+    reference_video_urls: v.reference_video_urls
+      ? v.reference_video_urls.split("\n").map((s: string) => s.trim()).filter(Boolean) : [],
+  });
+
   const execute = useMutation({
     mutationFn: async (v: any) => {
       if (!selectedFn) throw new Error("Chọn function");
-      const payload = {
-        model: v.model || null,
-        prompt: v.prompt,
-        aspect_ratio: v.aspect_ratio || null,
-        image_size: v.image_size || null,
-        reference_image_urls: v.reference_image_urls
-          ? v.reference_image_urls.split("\n").map((s: string) => s.trim()).filter(Boolean) : [],
-        reference_video_urls: v.reference_video_urls
-          ? v.reference_video_urls.split("\n").map((s: string) => s.trim()).filter(Boolean) : [],
-      };
       const r = await gwApi.post<ExecuteResp>(
-        `/api/v1/gateway/functions/${selectedFn.code}/execute`, payload,
+        `/api/v1/gateway/functions/${selectedFn.code}/execute`, buildPayload(v),
       );
       return r.data;
     },
     onSuccess: (data) => {
       setResponse(data);
       toast(data.status === "succeeded" ? "Execute thành công" : "Execute lỗi", data.status === "succeeded" ? "success" : "error");
+    },
+    onError: (e: any) => toast(extractError(e), "error"),
+  });
+
+  const [statusGwId, setStatusGwId] = useState("");
+
+  const submitAsync = useMutation({
+    mutationFn: async (v: any) => {
+      if (!selectedFn) throw new Error("Chọn function");
+      const r = await gwApi.post<ExecuteResp>(
+        `/api/v1/gateway/functions/${selectedFn.code}/submit`, buildPayload(v),
+      );
+      return r.data;
+    },
+    onSuccess: (data) => {
+      setResponse(data);
+      setStatusGwId(data.gw_id);  // ready for Check Status
+      toast(`Submitted: ${data.gw_id}`, "success");
+    },
+    onError: (e: any) => toast(extractError(e), "error"),
+  });
+  const checkStatus = useMutation({
+    mutationFn: async (gwId: string) =>
+      (await gwApi.get<ExecuteResp & { status: string }>(
+        `/api/v1/gateway/requests/${gwId}/status`,
+      )).data,
+    onSuccess: (data) => {
+      // Map to ExecuteResp shape for the result panel
+      setResponse({
+        request_id: (data as any).id,
+        gw_id: data.gw_id,
+        status: data.status,
+        pool_key_name: (data as any).pool_key_name ?? null,
+        response: (data as any).response_body ?? null,
+        error_message: (data as any).error_message ?? null,
+      } as ExecuteResp);
+      toast(`Status: ${data.status}`, "info");
     },
     onError: (e: any) => toast(extractError(e), "error"),
   });
@@ -218,11 +256,39 @@ export function GatewayPlaygroundPage() {
               placeholder="https://.../sample.mp4" {...register("reference_video_urls")} />
           </div>
 
-          <div className="flex justify-end">
-            <button type="submit" disabled={execute.isPending} className="btn-primary inline-flex items-center gap-1.5">
-              {execute.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-              {execute.isPending ? "Đang chạy..." : "Execute"}
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
+            <div className="flex items-center gap-2">
+              <button type="submit" disabled={execute.isPending} className="btn-primary inline-flex items-center gap-1.5">
+                {execute.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                {execute.isPending ? "Đang chạy..." : "Execute"}
+              </button>
+              <button
+                type="button"
+                disabled={submitAsync.isPending}
+                onClick={handleSubmit((v) => submitAsync.mutate(v))}
+                className="btn-ghost inline-flex items-center gap-1.5"
+                title="Async — trả gw_id ngay, status update sau"
+              >
+                {submitAsync.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
+                Submit Async
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <input
+                value={statusGwId}
+                onChange={(e) => setStatusGwId(e.target.value)}
+                placeholder="gw_id..."
+                className="input text-xs font-mono w-32"
+              />
+              <button
+                type="button"
+                disabled={!statusGwId || checkStatus.isPending}
+                onClick={() => checkStatus.mutate(statusGwId)}
+                className="btn-ghost text-xs"
+              >
+                Check Status
+              </button>
+            </div>
           </div>
         </form>
 

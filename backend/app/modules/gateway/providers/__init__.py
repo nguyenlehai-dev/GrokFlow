@@ -45,4 +45,7 @@ def get_provider(vendor_code: str) -> "VendorProvider | None":
     if vendor_code in ("google", "gemini"):
         from .gemini import GeminiProvider
         return GeminiProvider()
+    if vendor_code in ("openai", "oai"):
+        from .openai_provider import OpenAIProvider
+        return OpenAIProvider()
     return None

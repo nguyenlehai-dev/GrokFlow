@@ -420,6 +420,9 @@ class GwPoolApiKey(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     used_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 429-cooldown: set when upstream returns quota-exhausted; key is skipped
+    # by the picker until this timestamp passes. None = not on cooldown.
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     pool: Mapped["GwPool"] = relationship(back_populates="keys")
 
