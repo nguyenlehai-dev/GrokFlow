@@ -27,17 +27,101 @@ runbook as [SERVER-MIGRATION.md](./SERVER-MIGRATION.md) but with
 
 ### 1.1 Pick a storage provider
 
-Any S3-compatible bucket works. Cheapest options:
+| Provider | Free tier | Restic backend | Best for |
+|---|---|---|---|
+| **Cloudflare R2** | 10 GB | native S3 | most reliable for cron, no egress fee |
+| **Backblaze B2** | 10 GB | native S3 | cheapest paid ($0.006/GB/mo) |
+| **Google Drive** | **15 GB** | via `rclone` | familiar UI, but needs rclone + OAuth |
 
-| Provider | Free tier | Why |
+For this project's data size (Postgres dump < 200 MB, browser profiles
+1-5 GB), the 15 GB free Google Drive is realistically enough for years.
+
+Pick one path below.
+
+### 1.1a Option A: Cloudflare R2 (recommended for cron reliability)
+
+Create a bucket `grokflow-backups`, generate an Access Key + Secret.
+Note the endpoint (e.g. `https://<accountid>.r2.cloudflarestorage.com`).
+Skip to [section 1.3 — Initialize the repo](#13-initialize-the-repo).
+
+### 1.1b Option B: Google Drive (via rclone)
+
+Restic talks to Drive through `rclone`. Setup:
+
+```bash
+# 1. Install rclone on the VPS
+ssh vpsroot@VPS
+sudo apt install -y rclone
+
+# 2. Authorize against Google Drive — headless flow since the VPS has no browser
+rclone config
+#   n) new remote
+#   name> gdrive
+#   Storage> drive   (Google Drive)
+#   client_id/secret> press Enter for the rclone defaults (rate-limited
+#                     but fine for nightly backups) — OR create your own
+#                     OAuth client at https://console.cloud.google.com
+#                     for higher quotas
+#   scope> 1 (Full access)
+#   service_account_file> (blank)
+#   Edit advanced config> n
+#   Use auto config> n (because headless)
+#
+#   It prints a URL — open it on your LAPTOP:
+#     1. Log into the Google account that will OWN the backups
+#     2. Approve rclone access
+#     3. Copy the verification token back to the VPS prompt
+#   Configure as team drive> n
+#   y) Yes, this is OK
+#   q) Quit config
+
+# 3. Test the connection
+rclone mkdir gdrive:grokflow-backups
+rclone ls gdrive:grokflow-backups        # should be empty
+```
+
+> **Trade-offs vs R2** to know in advance:
+> - Drive's API has tighter rate limits — first full backup of a 5GB
+>   profiles dir can throttle (HTTP 403 "User rate limit exceeded").
+>   `rclone --tpslimit 8` mitigates if it happens.
+> - OAuth tokens refresh automatically but rarely (every few months)
+>   re-prompt. If a cron run fails with "token expired", run
+>   `rclone config reconnect gdrive:` once interactively.
+> - For higher reliability, use a **Google Workspace service account**
+>   instead of personal-account OAuth — set `service_account_file` in
+>   rclone config. Service accounts don't expire and get a higher
+>   default quota.
+
+Then point restic at the rclone remote — same `restic init` flow:
+
+```bash
+# In .backup-env instead of S3 vars:
+export RESTIC_REPOSITORY="rclone:gdrive:grokflow-backups"
+export RESTIC_PASSWORD="<long random string>"
+# (no AWS_* vars — rclone uses its own ~/.config/rclone/rclone.conf)
+
+source /home/vpsroot/grokflow/.backup-env
+restic init
+```
+
+Everything from section 1.4 onwards (backup script, cron, restore)
+works identically — `restic` doesn't care which backend it's writing
+to. Just remember `rclone` must be installed on whichever VPS runs the
+restore too.
+
+### 1.1c Quick comparison
+
+| Aspect | R2 / B2 | Google Drive |
 |---|---|---|
-| **Cloudflare R2** | 10 GB free | No egress fee; pairs well if you already use CF |
-| **Backblaze B2** | 10 GB free | $0.006/GB/month after — cheapest paid |
-| AWS S3 (Glacier) | small | More expensive but everyone knows it |
+| Setup time | 5 min (just credentials) | 15 min (rclone config + OAuth) |
+| Restore from a fresh VPS | install restic only | install **rclone + restic + restore OAuth** |
+| Reliability for daily cron | 99.99% | 99% (occasional 403s) |
+| Cost over 15 GB | $0.006-0.015/GB | needs Google One ($2/mo for 100 GB) |
+| Vendor lock-in | low (S3 API everywhere) | medium (rclone abstracts but Drive is Drive) |
 
-I'll use **R2** in examples. Create a bucket `grokflow-backups`,
-generate an Access Key ID + Secret. Note the S3 endpoint URL (e.g.
-`https://<accountid>.r2.cloudflarestorage.com`).
+**Honest pick**: if you already pay for Google One or use Workspace,
+Drive is fine and the 15 GB free tier is plenty. If you don't, R2 is
+faster to set up and 10× more reliable for unattended cron.
 
 ### 1.2 Install `restic` on the VPS
 
