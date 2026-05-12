@@ -28,8 +28,10 @@ export function lazyPage<T extends Record<string, ComponentType<any>>>(
 ): ReactElement {
   const Lazy = lazy(async () => {
     const mod = await loader();
-    return { default: mod[exportName] };
-  }) as ComponentType;
+    // Cast through unknown so generic-constrained T doesn't fight the
+    // default ComponentType<{}> we render as <Lazy /> below.
+    return { default: mod[exportName] as unknown as ComponentType };
+  });
   return (
     <Suspense fallback={<PageSpinner />}>
       <Lazy />
