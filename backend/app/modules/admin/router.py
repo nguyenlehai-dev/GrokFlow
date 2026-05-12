@@ -259,7 +259,7 @@ async def entitlement_catalog(_admin: AdminUser) -> EntitlementCatalogOut:
 
 
 @router.get("/plans", response_model=list[PlanOut])
-async def list_plans(_admin: SuperAdminUser, db: DbSession) -> list[Plan]:
+async def list_plans(_admin: AdminUser, db: DbSession) -> list[Plan]:
     rows = (await db.execute(select(Plan).order_by(Plan.sort_order, Plan.created_at))).scalars().all()
     return list(rows)
 
