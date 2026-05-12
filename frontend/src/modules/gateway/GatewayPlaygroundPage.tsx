@@ -248,9 +248,34 @@ export function GatewayPlaygroundPage() {
                   <div className="text-xs text-rose-600 mt-1">{response.error_message}</div>
                 )}
               </div>
-              <pre className="bg-slate-900 text-emerald-300 p-2 rounded text-[10px] whitespace-pre-wrap overflow-auto max-h-80 font-mono">
-                {JSON.stringify(response.response, null, 2)}
-              </pre>
+
+              {/* Generated media — show inline if vendor returned data URLs */}
+              {response.response?.media_urls?.length > 0 && (
+                <div className="grid grid-cols-2 gap-2">
+                  {response.response.media_urls.map((url: string, i: number) => (
+                    <img
+                      key={i}
+                      src={url}
+                      alt={`output ${i + 1}`}
+                      className="w-full rounded border border-slate-200"
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Text content (if any) */}
+              {response.response?.text && (
+                <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs whitespace-pre-wrap max-h-40 overflow-auto">
+                  {response.response.text}
+                </div>
+              )}
+
+              <details>
+                <summary className="text-xs text-slate-500 cursor-pointer">Xem raw JSON</summary>
+                <pre className="bg-slate-900 text-emerald-300 p-2 rounded text-[10px] whitespace-pre-wrap overflow-auto max-h-80 font-mono mt-1">
+                  {JSON.stringify(response.response, null, 2)}
+                </pre>
+              </details>
             </>
           )}
         </div>

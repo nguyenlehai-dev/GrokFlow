@@ -13,7 +13,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, status as http_status
+from fastapi import APIRouter, Depends, status as http_status
 from sqlalchemy import func, select
 
 from app.core.deps import AdminUser, CurrentUser, DbSession
@@ -25,6 +25,10 @@ from app.models import (
 from app.modules.audit import service as audit
 
 from . import schemas as s
+from .auth import GatewayCaller, require_caller
+from .providers import (
+    ProviderAuthError, ProviderError, ProviderQuotaExhausted, get_provider,
+)
 
 router = APIRouter(prefix="/api/v1/gateway", tags=["gateway"])
 
@@ -406,12 +410,15 @@ async def list_requests(
 
 @router.post("/functions/{function_code}/execute", response_model=s.ExecuteResponse)
 async def execute_function(
-    function_code: str, payload: s.ExecuteRequest, admin: AdminUser, db: DbSession,
+    function_code: str, payload: s.ExecuteRequest, db: DbSession,
+    caller: GatewayCaller = Depends(require_caller),
 ) -> s.ExecuteResponse:
-    """Run a function synchronously. Picks the highest-priority active key
-    from a pool that matches (function_code, optional model) and logs a
-    request. Actual upstream call is stubbed — Phase 2 will plug into
-    vendor SDKs. For now the response is an echo so the UX can be wired up.
+    """Run a function synchronously.
+
+    Caller is either an admin JWT (for the Playground) or a gateway key
+    (`gwk_live_…`) for external clients — see modules/gateway/auth.py.
+    Picks the highest-priority active key from a matching pool, calls the
+    vendor provider, and on 429 falls back to the next-best key.
     """
     fn = (await db.execute(
         select(GwApiFunction).where(GwApiFunction.code == function_code)
@@ -419,56 +426,135 @@ async def execute_function(
     if not fn:
         raise NotFound("function")
 
+    if not caller.can_call_function(function_code):
+        raise InvalidPayload(
+            f"Gateway key này không có quyền gọi function '{function_code}'"
+        )
+
+    # Match pool by function + optional model
     pool_q = select(GwPool).where(
         GwPool.function_id == fn.id, GwPool.status == "active",
     )
     if payload.model:
         pool_q = pool_q.where(GwPool.model == payload.model)
     pool = (await db.execute(pool_q.limit(1))).scalar_one_or_none()
-    pool_key = None
-    if pool:
-        pool_key = (await db.execute(
-            select(GwPoolApiKey)
-            .where(GwPoolApiKey.pool_id == pool.id, GwPoolApiKey.status == "active")
-            .order_by(GwPoolApiKey.priority.desc(), GwPoolApiKey.used_count)
-            .limit(1)
-        )).scalar_one_or_none()
+    if not pool:
+        raise InvalidPayload(
+            f"Chưa có pool active nào cho function '{function_code}'"
+            + (f" + model '{payload.model}'" if payload.model else "")
+        )
+
+    vendor = await db.get(GwVendor, pool.vendor_id)
+    provider = get_provider(vendor.code if vendor else "")
+    if provider is None:
+        raise InvalidPayload(
+            f"Vendor '{vendor.code if vendor else 'unknown'}' chưa có provider implementation."
+        )
+
+    # Ordered list of candidate keys: priority desc, then used_count asc
+    candidates: list[GwPoolApiKey] = list((await db.execute(
+        select(GwPoolApiKey)
+        .where(GwPoolApiKey.pool_id == pool.id, GwPoolApiKey.status == "active")
+        .order_by(GwPoolApiKey.priority.desc(), GwPoolApiKey.used_count)
+    )).scalars().all())
+
+    if not candidates:
+        raise InvalidPayload(f"Pool '{pool.name}' chưa có active API key nào")
 
     started = time.monotonic()
-    # Stub upstream call. Replace with actual SDK call in Phase 2.
-    response_body = {
-        "stub": True,
-        "function_code": function_code,
-        "model": payload.model,
-        "echo_prompt": payload.prompt,
-        "selected_pool": pool.name if pool else None,
-        "selected_key": pool_key.name if pool_key else None,
-    }
+    last_err: str | None = None
+    used_key: GwPoolApiKey | None = None
+    normalized: dict | None = None
+    final_status = "failed"
+
+    model = payload.model or pool.model or ""
+    for key in candidates:
+        try:
+            normalized = await provider.execute(
+                model=model,
+                prompt=payload.prompt,
+                reference_image_urls=payload.reference_image_urls,
+                reference_video_urls=payload.reference_video_urls,
+                aspect_ratio=payload.aspect_ratio,
+                image_size=payload.image_size,
+                extra=payload.raw,
+                api_key=key.api_key,
+                project_id=key.project_id,
+            )
+            used_key = key
+            final_status = "succeeded"
+            break
+        except ProviderQuotaExhausted as e:
+            # Mark down + try next key
+            last_err = f"[quota] {e}"
+            key.used_count += 1
+            key.last_used_at = datetime.now(timezone.utc)
+            await db.flush()
+            continue
+        except ProviderAuthError as e:
+            # Key revoked at upstream — disable + try next
+            last_err = f"[auth] {e}"
+            key.status = "inactive"
+            await db.flush()
+            continue
+        except ProviderError as e:
+            last_err = str(e)
+            # Don't try next on generic errors — likely a payload problem
+            used_key = key
+            break
+
     latency = int((time.monotonic() - started) * 1000)
+    if used_key and final_status == "succeeded":
+        used_key.used_count += 1
+        used_key.last_used_at = datetime.now(timezone.utc)
 
     gw_id = "gw_" + secrets.token_hex(8)
     req = GwRequest(
         gw_id=gw_id,
-        vendor_id=pool.vendor_id if pool else None,
-        pool_id=pool.id if pool else None,
-        pool_key_id=pool_key.id if pool_key else None,
-        function_code=function_code, model=payload.model,
-        status="succeeded",
+        gateway_key_id=caller.gateway_key_id,
+        vendor_id=pool.vendor_id,
+        pool_id=pool.id,
+        pool_key_id=used_key.id if used_key else None,
+        function_code=function_code, model=model,
+        status=final_status,
         request_body=payload.model_dump(),
-        response_body=response_body,
+        response_body=normalized,
+        error_message=last_err,
         latency_ms=latency,
     )
     db.add(req)
-    if pool_key:
-        pool_key.used_count += 1
-        pool_key.last_used_at = datetime.now(timezone.utc)
     await db.flush()
     await db.commit()
 
     return s.ExecuteResponse(
-        request_id=req.id, gw_id=gw_id, status="succeeded",
-        pool_key_name=pool_key.name if pool_key else None,
-        response=response_body, error_message=None,
+        request_id=req.id, gw_id=gw_id, status=final_status,
+        pool_key_name=used_key.name if used_key else None,
+        response=normalized, error_message=last_err if final_status == "failed" else None,
+    )
+
+
+@router.get("/requests/{gw_id}/status", response_model=s.RequestOut)
+async def request_status(gw_id: str, db: DbSession) -> s.RequestOut:
+    """Polling endpoint — public-ish, takes the gw_id as a lookup key.
+    Caller doesn't need auth because the gw_id is itself unguessable (random
+    16-byte token); same pattern Stripe / OpenAI use for their request ids.
+    """
+    r = (await db.execute(
+        select(GwRequest).where(GwRequest.gw_id == gw_id)
+    )).scalar_one_or_none()
+    if not r:
+        raise NotFound("request")
+    vendor = await db.get(GwVendor, r.vendor_id) if r.vendor_id else None
+    pool = await db.get(GwPool, r.pool_id) if r.pool_id else None
+    pk = await db.get(GwPoolApiKey, r.pool_key_id) if r.pool_key_id else None
+    return s.RequestOut(
+        id=r.id, gw_id=r.gw_id,
+        vendor_id=r.vendor_id, vendor_name=vendor.name if vendor else None,
+        pool_id=r.pool_id, pool_name=pool.name if pool else None,
+        pool_key_id=r.pool_key_id, pool_key_name=pk.name if pk else None,
+        function_code=r.function_code, model=r.model, status=r.status,
+        error_message=r.error_message, latency_ms=r.latency_ms,
+        created_at=r.created_at,
     )
 
 
@@ -479,7 +565,6 @@ async def execute_function(
 @router.get("/dashboard", response_model=s.DashboardOut)
 async def dashboard(admin: AdminUser, db: DbSession) -> s.DashboardOut:
     day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
-    cnt = lambda q: (db.execute(q).__await__().__next__() if False else None)  # placeholder for clarity
 
     async def c(q):
         return (await db.execute(q)).scalar() or 0
