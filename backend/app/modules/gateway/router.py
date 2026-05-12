@@ -444,7 +444,7 @@ async def create_gateway_key(
         webhook_url=k.webhook_url,
         rate_limit_per_minute=k.rate_limit_per_minute,
         daily_quota=k.daily_quota, used_today=k.used_today,
-        created_at=k.created_at, plain_key=raw,
+        created_at=k.created_at, domain_id=k.domain_id, plain_key=raw,
     )
 
 
