@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from app.core.http_client import get_http
 from . import ProviderAuthError, ProviderError, ProviderQuotaExhausted
 
 ROOT = "https://api.anthropic.com/v1"
@@ -55,42 +56,42 @@ class AnthropicProvider:
             raise ProviderError("Anthropic không hỗ trợ video input")
 
         content: list[dict[str, Any]] = []
-        async with httpx.AsyncClient(timeout=180) as cli:
-            for u in reference_image_urls:
-                if u.strip():
-                    content.append(await _fetch_image_block(cli, u.strip()))
-            if prompt:
-                content.append({"type": "text", "text": prompt})
+        cli = get_http()
+        for u in reference_image_urls:
+            if u.strip():
+                content.append(await _fetch_image_block(cli, u.strip()))
+        if prompt:
+            content.append({"type": "text", "text": prompt})
 
-            body: dict[str, Any] = {
-                "model": model,
-                "max_tokens": (extra or {}).get("max_tokens", 4096),
-                "messages": [{"role": "user", "content": content or [{"type": "text", "text": ""}]}],
-            }
-            if extra:
-                # Merge extra params (temperature, system, etc.) onto the body.
-                for k, v in extra.items():
-                    if k != "max_tokens":
-                        body[k] = v
+        body: dict[str, Any] = {
+            "model": model,
+            "max_tokens": (extra or {}).get("max_tokens", 4096),
+            "messages": [{"role": "user", "content": content or [{"type": "text", "text": ""}]}],
+        }
+        if extra:
+            # Merge extra params (temperature, system, etc.) onto the body.
+            for k, v in extra.items():
+                if k != "max_tokens":
+                    body[k] = v
 
-            r = await cli.post(
-                f"{ROOT}/messages",
-                json=body,
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": ANTHROPIC_VERSION,
-                    "content-type": "application/json",
-                },
-            )
+        r = await cli.post(
+            f"{ROOT}/messages",
+            json=body,
+            timeout=180.0,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": ANTHROPIC_VERSION,
+                "content-type": "application/json",
+            },
+        )
 
-            if r.status_code in (401, 403):
-                raise ProviderAuthError(_short_err(r))
-            if r.status_code == 429:
-                raise ProviderQuotaExhausted(_short_err(r))
-            if r.status_code >= 400:
-                raise ProviderError(_short_err(r))
-            data = r.json()
-
+        if r.status_code in (401, 403):
+            raise ProviderAuthError(_short_err(r))
+        if r.status_code == 429:
+            raise ProviderQuotaExhausted(_short_err(r))
+        if r.status_code >= 400:
+            raise ProviderError(_short_err(r))
+        data = r.json()
         return _normalize(data, model=model)
 
 

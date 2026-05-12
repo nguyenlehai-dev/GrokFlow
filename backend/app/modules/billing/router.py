@@ -1,9 +1,9 @@
 """User-facing billing endpoints.
 
 Read-only for the most part — POST /checkout creates a pending order chain
-(subscription + payment + invoice). With provider='manual' the user is told to
-contact admin; with a real provider this'll return a redirect URL (milestones
-2.2-2.5).
+(subscription + payment + invoice). With provider='manual' the user is told
+to contact admin. Stripe / MoMo / VNPay integrations land in their own
+modules; this router stays provider-agnostic.
 """
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -197,7 +197,9 @@ async def create_checkout(
         )
         payment_url = None
     else:
-        # Provider-specific URL generation will be added in milestones 2.2-2.5
+        # Real payment-gateway integrations (Stripe/MoMo/VNPay) will plug in
+        # their own URL-generation helpers here — keep this branch as the
+        # explicit fallback so unknown providers fail gracefully.
         instructions = (
             f"Provider {payload.provider} chưa được tích hợp. Vui lòng chọn 'manual' "
             f"để chuyển khoản tay, hoặc liên hệ admin."

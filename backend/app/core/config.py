@@ -31,7 +31,31 @@ class Settings(BaseSettings):
     DEFAULT_DAILY_LIMIT: int = 100
     JOB_TIMEOUT_SECONDS: int = 600
 
+    # Worker retry policy. Comma-separated list of delay-seconds; the Nth
+    # retry uses the Nth value (or the last one when retries exceed length).
+    #   JOB_BACKOFF_SECONDS         — generic transient failures
+    #   JOB_RATE_LIMIT_BACKOFF      — when the vendor returns 429
+    # Defaults match the historical hard-coded tables in workers/run.py.
+    JOB_BACKOFF_SECONDS: str = "15,60,180"
+    JOB_RATE_LIMIT_BACKOFF: str = "60,300,900"
+    # Error codes the worker should NEVER retry (terminal — fail fast).
+    JOB_TERMINAL_ERROR_CODES: str = (
+        "cookie_expired,captcha_required,provider_blocked,unsupported_job_type"
+    )
+
     CORS_ORIGINS: str = "http://localhost:5173"
+
+    @property
+    def job_backoff_seconds(self) -> list[int]:
+        return [int(s) for s in self.JOB_BACKOFF_SECONDS.split(",") if s.strip()]
+
+    @property
+    def job_rate_limit_backoff(self) -> list[int]:
+        return [int(s) for s in self.JOB_RATE_LIMIT_BACKOFF.split(",") if s.strip()]
+
+    @property
+    def job_terminal_error_codes(self) -> set[str]:
+        return {c.strip() for c in self.JOB_TERMINAL_ERROR_CODES.split(",") if c.strip()}
 
     @property
     def cors_origin_list(self) -> list[str]:

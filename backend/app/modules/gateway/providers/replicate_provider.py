@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from app.core.http_client import get_http
 from . import ProviderAuthError, ProviderError, ProviderQuotaExhausted
 
 ROOT = "https://api.replicate.com/v1"
@@ -68,27 +69,30 @@ class ReplicateProvider:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=POLL_MAX_SECONDS) as cli:
-            r = await cli.post(f"{ROOT}/predictions", json=body, headers=headers)
-            if r.status_code in (401, 403):
-                raise ProviderAuthError(_short_err(r))
-            if r.status_code == 429:
-                raise ProviderQuotaExhausted(_short_err(r))
-            if r.status_code >= 400:
-                raise ProviderError(_short_err(r))
-            data = r.json()
+        cli = get_http()
+        r = await cli.post(
+            f"{ROOT}/predictions", json=body, headers=headers,
+            timeout=float(POLL_MAX_SECONDS),
+        )
+        if r.status_code in (401, 403):
+            raise ProviderAuthError(_short_err(r))
+        if r.status_code == 429:
+            raise ProviderQuotaExhausted(_short_err(r))
+        if r.status_code >= 400:
+            raise ProviderError(_short_err(r))
+        data = r.json()
 
-            # Poll until terminal status or timeout.
-            poll_url = (data.get("urls") or {}).get("get")
-            started = time.monotonic()
-            while data.get("status") in {"starting", "processing"} and poll_url:
-                if time.monotonic() - started > POLL_MAX_SECONDS:
-                    raise ProviderError("Replicate prediction timed out (>180s)")
-                await asyncio.sleep(POLL_INTERVAL)
-                pr = await cli.get(poll_url, headers=headers)
-                if pr.status_code >= 400:
-                    raise ProviderError(_short_err(pr))
-                data = pr.json()
+        # Poll until terminal status or timeout.
+        poll_url = (data.get("urls") or {}).get("get")
+        started = time.monotonic()
+        while data.get("status") in {"starting", "processing"} and poll_url:
+            if time.monotonic() - started > POLL_MAX_SECONDS:
+                raise ProviderError("Replicate prediction timed out (>180s)")
+            await asyncio.sleep(POLL_INTERVAL)
+            pr = await cli.get(poll_url, headers=headers, timeout=float(POLL_MAX_SECONDS))
+            if pr.status_code >= 400:
+                raise ProviderError(_short_err(pr))
+            data = pr.json()
 
         if data.get("status") == "failed":
             raise ProviderError(data.get("error") or "Replicate prediction failed")

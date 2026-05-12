@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.http_client import close_http
 from app.core.monitoring import init_sentry
 from app.modules.admin.router import router as admin_router
 from app.modules.entitlements.service import seed_default_plans
@@ -41,6 +42,8 @@ async def lifespan(app: FastAPI):
     async with SessionLocal() as db:
         await seed_default_plans(db)
     yield
+    # On shutdown: drain the shared httpx pool so workers exit cleanly.
+    await close_http()
 
 
 app = FastAPI(

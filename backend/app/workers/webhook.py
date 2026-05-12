@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.http_client import get_http
 from app.models import Job, User
 
 log = logging.getLogger(__name__)
@@ -114,17 +115,19 @@ async def deliver(user: User, job: Job, event: str) -> bool:
         headers["X-Grokflow-Signature"] = sign(user.webhook_secret, body)
 
     backoff = 1.0
-    async with httpx.AsyncClient(timeout=10) as client:
-        for attempt in range(3):
-            try:
-                resp = await client.post(user.webhook_url, content=body, headers=headers)
-                if 200 <= resp.status_code < 300:
-                    return True
-                if resp.status_code in (400, 401, 403, 404, 410):
-                    return False  # client error, don't retry
-            except (httpx.RequestError, httpx.TimeoutException):
-                pass
-            if attempt < 2:
-                await asyncio.sleep(backoff)
-                backoff *= 4
+    client = get_http()
+    for attempt in range(3):
+        try:
+            resp = await client.post(
+                user.webhook_url, content=body, headers=headers, timeout=10.0,
+            )
+            if 200 <= resp.status_code < 300:
+                return True
+            if resp.status_code in (400, 401, 403, 404, 410):
+                return False  # client error, don't retry
+        except (httpx.RequestError, httpx.TimeoutException):
+            pass
+        if attempt < 2:
+            await asyncio.sleep(backoff)
+            backoff *= 4
     return False

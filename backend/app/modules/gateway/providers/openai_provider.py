@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 
+from app.core.http_client import get_http
 from . import ProviderAuthError, ProviderError, ProviderQuotaExhausted
 
 ROOT = "https://api.openai.com/v1"
@@ -52,38 +53,38 @@ class OpenAIProvider:
         if project_id:
             headers["OpenAI-Project"] = project_id
 
-        async with httpx.AsyncClient(timeout=180) as cli:
-            if _is_image_model(model):
-                body = {"model": model, "prompt": prompt or "", "n": 1}
-                # Image size shorthand: OpenAI accepts 1024x1024, 1792x1024, 1024x1792
-                if image_size:
-                    body["size"] = _map_size(image_size, aspect_ratio)
-                if extra:
-                    body.update(extra)
-                r = await cli.post(f"{ROOT}/images/generations", json=body, headers=headers)
-            else:
-                content: list[dict[str, Any]] = []
-                if prompt:
-                    content.append({"type": "text", "text": prompt})
-                for u in reference_image_urls:
-                    if not u.strip():
-                        continue
-                    data_url = await _download_data_url(cli, u.strip())
-                    content.append({"type": "image_url", "image_url": {"url": data_url}})
-                body = {"model": model, "messages": [{"role": "user", "content": content}]}
-                if extra:
-                    body.update(extra)
-                r = await cli.post(f"{ROOT}/chat/completions", json=body, headers=headers)
+        cli = get_http()
+        timeout = 180.0
+        if _is_image_model(model):
+            body = {"model": model, "prompt": prompt or "", "n": 1}
+            # Image size shorthand: OpenAI accepts 1024x1024, 1792x1024, 1024x1792
+            if image_size:
+                body["size"] = _map_size(image_size, aspect_ratio)
+            if extra:
+                body.update(extra)
+            r = await cli.post(f"{ROOT}/images/generations", json=body, headers=headers, timeout=timeout)
+        else:
+            content: list[dict[str, Any]] = []
+            if prompt:
+                content.append({"type": "text", "text": prompt})
+            for u in reference_image_urls:
+                if not u.strip():
+                    continue
+                data_url = await _download_data_url(cli, u.strip())
+                content.append({"type": "image_url", "image_url": {"url": data_url}})
+            body = {"model": model, "messages": [{"role": "user", "content": content}]}
+            if extra:
+                body.update(extra)
+            r = await cli.post(f"{ROOT}/chat/completions", json=body, headers=headers, timeout=timeout)
 
-            if r.status_code in (401, 403):
-                raise ProviderAuthError(_short_err(r))
-            if r.status_code == 429:
-                raise ProviderQuotaExhausted(_short_err(r))
-            if r.status_code >= 400:
-                raise ProviderError(_short_err(r))
+        if r.status_code in (401, 403):
+            raise ProviderAuthError(_short_err(r))
+        if r.status_code == 429:
+            raise ProviderQuotaExhausted(_short_err(r))
+        if r.status_code >= 400:
+            raise ProviderError(_short_err(r))
 
-            data = r.json()
-
+        data = r.json()
         return _normalize(data, model=model, is_image=_is_image_model(model))
 
 

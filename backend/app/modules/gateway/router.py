@@ -24,6 +24,7 @@ from sqlalchemy import func, or_, select
 from app.core.database import SessionLocal
 
 from app.core.deps import AdminUser, SuperAdminUser, CurrentUser, DbSession
+from app.core.http_client import get_http
 from app.core.tenant import bulk_fetch_map, scope_by_domain
 from app.core.exceptions import AppError, InvalidPayload, NotFound
 from app.core.security import hash_password, verify_password
@@ -270,47 +271,49 @@ async def list_vendor_models(
     if not key:
         raise InvalidPayload("Pool chưa có active API key để query vendor")
 
+    cli = get_http()
+    list_timeout = 20.0
     try:
         if vendor.code in ("google", "gemini"):
-            async with httpx.AsyncClient(timeout=20) as cli:
-                r = await cli.get(
-                    "https://generativelanguage.googleapis.com/v1beta/models",
-                    params={"key": key.api_key, "pageSize": 200},
-                )
-                r.raise_for_status()
-                data = r.json()
-                models = []
-                for m in data.get("models", []):
-                    name = (m.get("name") or "").replace("models/", "")
-                    methods = m.get("supportedGenerationMethods") or []
-                    if name and "generateContent" in methods:
-                        models.append({
-                            "id": name,
-                            "display_name": m.get("displayName"),
-                            "description": (m.get("description") or "")[:200],
-                        })
-                return {"vendor": "google", "models": models}
+            r = await cli.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": key.api_key, "pageSize": 200},
+                timeout=list_timeout,
+            )
+            r.raise_for_status()
+            data = r.json()
+            models = []
+            for m in data.get("models", []):
+                name = (m.get("name") or "").replace("models/", "")
+                methods = m.get("supportedGenerationMethods") or []
+                if name and "generateContent" in methods:
+                    models.append({
+                        "id": name,
+                        "display_name": m.get("displayName"),
+                        "description": (m.get("description") or "")[:200],
+                    })
+            return {"vendor": "google", "models": models}
 
         if vendor.code in ("openai", "oai"):
-            async with httpx.AsyncClient(timeout=20) as cli:
-                r = await cli.get(
-                    "https://api.openai.com/v1/models",
-                    headers={"Authorization": f"Bearer {key.api_key}"},
-                )
-                r.raise_for_status()
-                models = [{"id": m["id"]} for m in r.json().get("data", [])]
-                return {"vendor": "openai", "models": models}
+            r = await cli.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {key.api_key}"},
+                timeout=list_timeout,
+            )
+            r.raise_for_status()
+            models = [{"id": m["id"]} for m in r.json().get("data", [])]
+            return {"vendor": "openai", "models": models}
 
         if vendor.code in ("anthropic", "claude"):
-            async with httpx.AsyncClient(timeout=20) as cli:
-                r = await cli.get(
-                    "https://api.anthropic.com/v1/models",
-                    headers={"x-api-key": key.api_key, "anthropic-version": "2023-06-01"},
-                )
-                r.raise_for_status()
-                models = [{"id": m["id"], "display_name": m.get("display_name")}
-                          for m in r.json().get("data", [])]
-                return {"vendor": "anthropic", "models": models}
+            r = await cli.get(
+                "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": key.api_key, "anthropic-version": "2023-06-01"},
+                timeout=list_timeout,
+            )
+            r.raise_for_status()
+            models = [{"id": m["id"], "display_name": m.get("display_name")}
+                      for m in r.json().get("data", [])]
+            return {"vendor": "anthropic", "models": models}
 
         return {"vendor": vendor.code, "models": [], "note": "Vendor không hỗ trợ list models tự động"}
     except httpx.HTTPStatusError as e:
@@ -885,15 +888,15 @@ async def submit_function(
                     )).scalar_one_or_none()
                     if r:
                         try:
-                            async with httpx.AsyncClient(timeout=10) as cli:
-                                await cli.post(gk.webhook_url, json={
-                                    "gw_id": r.gw_id,
-                                    "status": r.status,
-                                    "function_code": r.function_code,
-                                    "model": r.model,
-                                    "error_message": r.error_message,
-                                    "latency_ms": r.latency_ms,
-                                })
+                            cli = get_http()
+                            await cli.post(gk.webhook_url, json={
+                                "gw_id": r.gw_id,
+                                "status": r.status,
+                                "function_code": r.function_code,
+                                "model": r.model,
+                                "error_message": r.error_message,
+                                "latency_ms": r.latency_ms,
+                            }, timeout=10.0)
                         except Exception:  # noqa: BLE001 — webhook is best-effort
                             pass
 

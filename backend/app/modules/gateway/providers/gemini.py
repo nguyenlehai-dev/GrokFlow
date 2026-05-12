@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 
+from app.core.http_client import get_http
 from . import ProviderAuthError, ProviderError, ProviderQuotaExhausted
 
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -28,9 +29,11 @@ def _looks_like_image_model(model: str) -> bool:
     return "image" in m or "nano-banana" in m or "imagen" in m
 
 
-async def _fetch_inline(cli: httpx.AsyncClient, url: str) -> dict[str, Any]:
+async def _fetch_inline(
+    cli: httpx.AsyncClient, url: str, timeout: float = 30.0,
+) -> dict[str, Any]:
     """Download a reference URL and return a Gemini `inlineData` part."""
-    r = await cli.get(url, timeout=30)
+    r = await cli.get(url, timeout=timeout)
     r.raise_for_status()
     ct = r.headers.get("content-type") or mimetypes.guess_type(url)[0] or "application/octet-stream"
     return {
@@ -62,13 +65,16 @@ class GeminiProvider:
         if prompt:
             parts.append({"text": prompt})
 
-        async with httpx.AsyncClient(timeout=180) as cli:
-            for u in reference_image_urls:
-                if u.strip():
-                    parts.append(await _fetch_inline(cli, u.strip()))
-            for u in reference_video_urls:
-                if u.strip():
-                    parts.append(await _fetch_inline(cli, u.strip()))
+        # Shared process-wide pool — reuses TCP+TLS to api.gemini.com
+        # across the gateway's many sequential vendor calls.
+        cli = get_http()
+        timeout = 180.0
+        for u in reference_image_urls:
+            if u.strip():
+                parts.append(await _fetch_inline(cli, u.strip(), timeout=timeout))
+        for u in reference_video_urls:
+            if u.strip():
+                parts.append(await _fetch_inline(cli, u.strip(), timeout=timeout))
 
             # Gemini's generateContent endpoint doesn't accept aspectRatio /
             # imageSize on generationConfig for the image-preview models — those
@@ -83,31 +89,30 @@ class GeminiProvider:
             if hint_bits and parts and "text" in parts[0]:
                 parts[0]["text"] = f"{parts[0]['text']}\n\n[Output: {', '.join(hint_bits)}]"
 
-            body: dict[str, Any] = {"contents": [{"parts": parts}]}
-            gen_cfg: dict[str, Any] = {}
+        body: dict[str, Any] = {"contents": [{"parts": parts}]}
+        gen_cfg: dict[str, Any] = {}
 
-            if _looks_like_image_model(model):
-                # The only generationConfig field image-preview models accept.
-                gen_cfg["responseModalities"] = ["IMAGE"]
+        if _looks_like_image_model(model):
+            # The only generationConfig field image-preview models accept.
+            gen_cfg["responseModalities"] = ["IMAGE"]
 
-            if extra:
-                # Caller can still override / pass advanced params via raw.
-                body.update(extra)
-            if gen_cfg:
-                body["generationConfig"] = gen_cfg
+        if extra:
+            # Caller can still override / pass advanced params via raw.
+            body.update(extra)
+        if gen_cfg:
+            body["generationConfig"] = gen_cfg
 
-            url = f"{API_ROOT}/{model}:generateContent?key={api_key}"
-            r = await cli.post(url, json=body)
+        url = f"{API_ROOT}/{model}:generateContent?key={api_key}"
+        r = await cli.post(url, json=body, timeout=timeout)
 
-            if r.status_code == 401 or r.status_code == 403:
-                raise ProviderAuthError(_short_err(r))
-            if r.status_code == 429:
-                raise ProviderQuotaExhausted(_short_err(r))
-            if r.status_code >= 400:
-                raise ProviderError(_short_err(r))
+        if r.status_code == 401 or r.status_code == 403:
+            raise ProviderAuthError(_short_err(r))
+        if r.status_code == 429:
+            raise ProviderQuotaExhausted(_short_err(r))
+        if r.status_code >= 400:
+            raise ProviderError(_short_err(r))
 
-            data = r.json()
-
+        data = r.json()
         return _normalize_response(data, model=model)
 
 
