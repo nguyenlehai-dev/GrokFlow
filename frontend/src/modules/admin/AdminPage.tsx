@@ -447,7 +447,12 @@ function UserPermissionsModal({
       )).data,
   });
 
+  const me = useAuthStore((s) => s.user);
+  const isSuper = me?.role === "super_admin";
+
   const [planId, setPlanId] = useState<string>(user.plan_id ?? "");
+  const [domainId, setDomainId] = useState<string>(user.domain_id ?? "");
+  const [roleId, setRoleId] = useState<string>(user.role_id ?? "");
   const [featOverride, setFeatOverride] = useState<Record<string, boolean>>(
     () => (user.entitlement_overrides as any)?.features ?? {},
   );
@@ -455,15 +460,44 @@ function UserPermissionsModal({
     () => (user.entitlement_overrides as any)?.limits ?? {},
   );
 
+  // Domain list (super only — domain admin's choice is fixed to their own).
+  const { data: domains } = useQuery<DomainOpt[]>({
+    queryKey: ["admin-domains"],
+    queryFn: async () => (await api.get<DomainOpt[]>("/api/admin/domains")).data,
+    enabled: isSuper,
+  });
+  // Roles for the user's (current/edited) domain.
+  const { data: roles } = useQuery<RoleOpt[]>({
+    queryKey: ["admin-roles-for-user", domainId],
+    queryFn: async () => {
+      const q = isSuper && domainId ? `?domain_id=${domainId}` : "";
+      return (await api.get<RoleOpt[]>(`/api/admin/roles${q}`)).data;
+    },
+    enabled: !!domainId,
+  });
+
+  // When domain changes, clear role (the role wouldn't be valid in the new
+  // domain anyway — backend rejects it).
+  const onDomainChange = (id: string) => {
+    setDomainId(id);
+    setRoleId("");
+  };
+
   const save = useMutation({
     mutationFn: async () => {
       const overrides: any = {};
       if (Object.keys(featOverride).length) overrides.features = featOverride;
       if (Object.keys(limitOverride).length) overrides.limits = limitOverride;
-      return api.patch(`/api/admin/users/${user.id}`, {
+      const body: any = {
         plan_id: planId || NULL_PLAN_ID,
         entitlement_overrides: overrides,
-      });
+        // Zero-uuid sentinel clears the field (backend understands this).
+        role_id: roleId || NULL_PLAN_ID,
+      };
+      if (isSuper) {
+        body.domain_id = domainId || NULL_PLAN_ID;
+      }
+      return api.patch(`/api/admin/users/${user.id}`, body);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-users"] });
@@ -523,6 +557,35 @@ function UserPermissionsModal({
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
+
+        <section className="border-b pb-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          {isSuper && (
+            <div>
+              <label className="text-sm font-medium">Domain</label>
+              <select className="input" value={domainId} onChange={(e) => onDomainChange(e.target.value)}>
+                <option value="">— Global (super_admin) —</option>
+                {(domains ?? []).filter((d) => d.hostname !== "*").map((d) => (
+                  <option key={d.id} value={d.id}>{d.hostname} — {d.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Đổi domain sẽ tự reset role (role không cross-domain).
+              </p>
+            </div>
+          )}
+          <div>
+            <label className="text-sm font-medium">Role (per-domain)</label>
+            <select className="input" value={roleId} onChange={(e) => setRoleId(e.target.value)} disabled={!domainId}>
+              <option value="">— Inherit domain pages —</option>
+              {(roles ?? []).filter((r) => r.status === "active").map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              Khi có role: user chỉ thấy menu trong role (giao với domain). Inherit = full menu của domain.
+            </p>
+          </div>
+        </section>
 
         <div>
           <label className="text-sm font-medium">Gói (Plan)</label>
