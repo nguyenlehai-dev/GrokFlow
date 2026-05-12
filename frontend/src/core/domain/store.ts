@@ -18,7 +18,21 @@ interface DomainState {
   loaded: boolean;
   load: () => Promise<void>;
   isPageAllowed: (path: string) => boolean;
+  firstAllowedPath: () => string;
 }
+
+// Preferred order: pick the most "dashboard-like" page first so the user
+// lands on something sensible after login.
+const LANDING_PREFERENCE = [
+  "/dashboard",
+  "/gateway/dashboard",
+  "/gateway",
+  "/jobs",
+  "/profiles",
+  "/api-keys",
+  "/flow",
+  "/billing",
+];
 
 // Default fail-open config used until /api/domains/config responds.
 const DEFAULT: DomainConfig = {
@@ -55,5 +69,17 @@ export const useDomainStore = create<DomainState>((set, get) => ({
     if (c.allow_all_pages) return true;
     // Exact match or prefix match (handles /jobs/:id etc.)
     return c.allowed_pages.some((p) => path === p || path.startsWith(p + "/"));
+  },
+  firstAllowedPath: () => {
+    const c = get().config;
+    if (!c || c.allow_all_pages) return "/dashboard";
+    const allowed = c.allowed_pages;
+    // 1. Preferred dashboard-like pages first
+    for (const p of LANDING_PREFERENCE) {
+      if (allowed.some((a) => a === p || p.startsWith(a + "/"))) return p;
+    }
+    // 2. Fallback: first allowed page
+    if (allowed.length > 0) return allowed[0];
+    return "/dashboard";
   },
 }));

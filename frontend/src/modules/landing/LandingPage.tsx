@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Check, Image as ImageIcon, Video, Zap, Shield, Code2 } from "lucide-react";
+import { useDomainStore } from "@/core/domain/store";
 
 type Tier = {
   code: string;
@@ -95,12 +96,13 @@ const formatVnd = (n: number) =>
   new Intl.NumberFormat("vi-VN").format(n) + "₫";
 
 export function LandingPage() {
+  const brandName = useDomainStore((s) => s.config?.brand_name) ?? "GrokFlow";
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Top nav */}
       <header className="border-b bg-white">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <Link to="/" className="text-xl font-bold text-brand-600">GrokFlow</Link>
+          <Link to="/" className="text-xl font-bold text-brand-600">{brandName}</Link>
           <div className="flex items-center gap-2">
             <Link to="/login" className="btn-ghost text-sm">Đăng nhập</Link>
             <Link to="/register" className="btn-primary text-sm">Đăng ký</Link>
@@ -184,7 +186,7 @@ export function LandingPage() {
       {/* Footer */}
       <footer className="border-t bg-white py-8">
         <div className="max-w-6xl mx-auto px-4 text-center text-sm text-slate-500">
-          <p>© {new Date().getFullYear()} GrokFlow. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} {brandName}. All rights reserved.</p>
           <div className="mt-2 flex gap-4 justify-center">
             <Link to="/terms" className="hover:text-slate-700">Điều khoản</Link>
             <Link to="/privacy" className="hover:text-slate-700">Bảo mật</Link>

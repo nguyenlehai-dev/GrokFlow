@@ -3,6 +3,7 @@ import { useNavigate, Navigate, Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
+import { useDomainStore } from "@/core/domain/store";
 
 interface FormValues {
   email: string;
@@ -19,8 +20,10 @@ export function RegisterPage() {
     register, handleSubmit, watch,
     formState: { isSubmitting, errors },
   } = useForm<FormValues>();
+  const brandName = useDomainStore((s) => s.config?.brand_name) ?? "GrokFlow";
+  const firstAllowedPath = useDomainStore((s) => s.firstAllowedPath);
 
-  if (token) return <Navigate to="/dashboard" replace />;
+  if (token) return <Navigate to={firstAllowedPath()} replace />;
 
   const passwordValue = watch("password");
 
@@ -41,7 +44,8 @@ export function RegisterPage() {
         headers: { Authorization: `Bearer ${data.access_token}` },
       });
       setAuth(data.access_token, me.data);
-      navigate("/dashboard");
+      const target = me.data?.role === "admin" ? "/dashboard" : firstAllowedPath();
+      navigate(target);
     } catch (e: any) {
       setError(e?.response?.data?.detail?.message ?? "Đăng ký thất bại");
     }
@@ -51,7 +55,7 @@ export function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
       <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-sm card space-y-4">
         <div>
-          <h1 className="text-2xl font-semibold text-brand-600">GrokFlow</h1>
+          <h1 className="text-2xl font-semibold text-brand-600">{brandName}</h1>
           <p className="text-sm text-slate-500">Tạo tài khoản miễn phí — bắt đầu trong 30 giây</p>
         </div>
 

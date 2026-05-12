@@ -3,6 +3,7 @@ import { useNavigate, Navigate, Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
+import { useDomainStore } from "@/core/domain/store";
 
 interface FormValues {
   email: string;
@@ -14,8 +15,10 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<FormValues>();
+  const brandName = useDomainStore((s) => s.config?.brand_name) ?? "GrokFlow";
+  const firstAllowedPath = useDomainStore((s) => s.firstAllowedPath);
 
-  if (token) return <Navigate to="/dashboard" replace />;
+  if (token) return <Navigate to={firstAllowedPath()} replace />;
 
   const onSubmit = async (values: FormValues) => {
     setError(null);
@@ -25,7 +28,10 @@ export function LoginPage() {
         headers: { Authorization: `Bearer ${data.access_token}` },
       });
       setAuth(data.access_token, me.data);
-      navigate("/dashboard");
+      // Admin always lands on /dashboard, others land on the domain's
+      // first allowed page (e.g. /gateway/dashboard for a gateway-only host).
+      const target = me.data?.role === "admin" ? "/dashboard" : firstAllowedPath();
+      navigate(target);
     } catch (e: any) {
       setError(e?.response?.data?.detail?.message ?? "Login failed");
     }
@@ -35,7 +41,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50">
       <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-sm card space-y-4">
         <div>
-          <h1 className="text-2xl font-semibold text-brand-600">GrokFlow</h1>
+          <h1 className="text-2xl font-semibold text-brand-600">{brandName}</h1>
           <p className="text-sm text-slate-500">Đăng nhập để tiếp tục</p>
         </div>
         <div className="space-y-2">

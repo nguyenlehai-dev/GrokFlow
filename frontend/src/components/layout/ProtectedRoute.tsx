@@ -11,6 +11,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const setUser = useAuthStore((s) => s.setUser);
   const domainConfig = useDomainStore((s) => s.config);
   const isPageAllowed = useDomainStore((s) => s.isPageAllowed);
+  const firstAllowedPath = useDomainStore((s) => s.firstAllowedPath);
   const location = useLocation();
 
   // Refresh /me on app boot — keeps cached entitlements in sync after admin
@@ -38,13 +39,18 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 
   // Per-domain page allowlist. Admins bypass.
   if (user?.role !== "admin" && !isPageAllowed(location.pathname)) {
+    const target = firstAllowedPath();
+    // Avoid an infinite redirect if even the fallback target isn't allowed —
+    // render the block panel so the user sees what's going on.
+    if (target !== location.pathname && isPageAllowed(target)) {
+      return <Navigate to={target} replace />;
+    }
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
         <div className="card max-w-md text-center">
           <h2 className="text-lg font-semibold text-slate-900">Trang không khả dụng</h2>
           <p className="text-sm text-slate-600 mt-2">
-            Domain <code className="font-mono">{domainConfig?.hostname}</code> không có quyền truy cập
-            <code className="font-mono ml-1">{location.pathname}</code>.
+            Domain <code className="font-mono">{domainConfig?.hostname}</code> chưa được cấp quyền vào trang nào.
           </p>
           <p className="text-xs text-slate-500 mt-3">
             Liên hệ admin để được cấp quyền.
