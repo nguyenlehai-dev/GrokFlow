@@ -5,7 +5,7 @@ from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
 from app.core.exceptions import EmailAlreadyRegistered, InvalidCredentials
 from app.core.security import create_access_token, hash_password, verify_password
-from app.models import Domain, Plan, User
+from app.models import Domain, Plan, Role, User
 from app.modules.audit import service as audit
 from app.modules.entitlements.service import get_effective_entitlements
 
@@ -96,6 +96,29 @@ async def logout() -> dict:
 @router.get("/me", response_model=MeResponse)
 async def me(user: CurrentUser, db: DbSession) -> MeResponse:
     eff = await get_effective_entitlements(db, user)
+    # Resolve effective allowed_pages from (role ∩ domain). When the user
+    # has no role we just return the domain's allowed_pages; when they have
+    # no domain (super_admin / legacy) we return None — FE treats that as
+    # "no per-user restriction, just use domain config from /domains/config".
+    effective_pages: list[str] | None = None
+    role_name: str | None = None
+    if user.role_id:
+        role = await db.get(Role, user.role_id)
+        if role and role.status == "active":
+            role_name = role.name
+            if user.domain_id:
+                domain = await db.get(Domain, user.domain_id)
+                if domain and not domain.allow_all_pages:
+                    dom_set = set(domain.allowed_pages or [])
+                    effective_pages = [p for p in (role.allowed_pages or []) if p in dom_set]
+                else:
+                    effective_pages = list(role.allowed_pages or [])
+            else:
+                effective_pages = list(role.allowed_pages or [])
+    elif user.domain_id:
+        domain = await db.get(Domain, user.domain_id)
+        if domain and not domain.allow_all_pages:
+            effective_pages = list(domain.allowed_pages or [])
     return MeResponse(
         id=user.id,
         email=user.email,
@@ -104,5 +127,8 @@ async def me(user: CurrentUser, db: DbSession) -> MeResponse:
         status=user.status,
         created_at=user.created_at,
         domain_id=user.domain_id,
+        role_id=user.role_id,
+        role_name=role_name,
+        effective_allowed_pages=effective_pages,
         entitlements=EntitlementsResponse(**eff),
     )

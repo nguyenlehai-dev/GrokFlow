@@ -1,7 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import { api } from "@/core/api/axios";
-import { useAuthStore } from "@/core/auth/store";
+import { useAuthStore, userCanSeePath } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
 import type { ReactNode } from "react";
 
@@ -37,8 +37,12 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/landing" replace />;
   }
 
-  // Per-domain page allowlist. Admins bypass.
-  if ((user?.role !== "admin" && user?.role !== "super_admin") && !isPageAllowed(location.pathname)) {
+  // Per-user (role) allowlist takes priority; falls back to domain config.
+  // Admins bypass everything.
+  if (
+    (user?.role !== "admin" && user?.role !== "super_admin") &&
+    !userCanSeePath(user ?? null, location.pathname, isPageAllowed)
+  ) {
     const target = firstAllowedPath();
     // Avoid an infinite redirect if even the fallback target isn't allowed —
     // render the block panel so the user sees what's going on.

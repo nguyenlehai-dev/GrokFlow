@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Globe, Plus, Pencil, Trash2 } from "lucide-react";
 import { api } from "@/core/api/axios";
 import { toast } from "@/components/ui/Toast";
+import { PAGE_GROUPS } from "./pageCatalog";
 
 interface Domain {
   id: string;
@@ -18,37 +19,8 @@ interface Domain {
   brand_name: string | null;
 }
 
-// All known frontend routes. Keep in sync with router.tsx.
-// Granular sub-pages first so admin can grant just one Gateway tab without
-// the rest; the parent path (eg "/gateway") still matches all if used.
-const ALL_PAGES = [
-  { path: "/dashboard", label: "Dashboard" },
-  { path: "/api-keys", label: "API Keys" },
-  // Grok management
-  { path: "/profiles", label: "Profiles" },
-  { path: "/jobs", label: "Jobs" },
-  { path: "/api-docs", label: "API Docs (Grok)" },
-  // Flow tools
-  { path: "/flow", label: "Flow (toàn nhóm)" },
-  // Gateway sub-pages. Items marked (admin) require the user's role to be
-  // admin — granting the domain alone won't make these visible to a regular
-  // user. Use them only when you plan to log in as admin from this domain.
-  { path: "/gateway", label: "Gateway (toàn nhóm)" },
-  { path: "/gateway/dashboard", label: "Gateway · Dashboard (admin)" },
-  { path: "/gateway/vendors", label: "Gateway · Vendors (admin)" },
-  { path: "/gateway/pools", label: "Gateway · Pools (admin)" },
-  { path: "/gateway/functions", label: "Gateway · API Functions (admin)" },
-  { path: "/gateway/gateway-keys", label: "Gateway · Gateway Keys (admin)" },
-  { path: "/gateway/requests", label: "Gateway · Requests (admin)" },
-  { path: "/gateway/playground", label: "Gateway · Playground" },
-  { path: "/gateway/docs", label: "Gateway · API Docs" },
-  // Billing / settings
-  { path: "/billing", label: "Billing (user)" },
-  { path: "/pricing", label: "Pricing" },
-  { path: "/checkout", label: "Checkout" },
-  { path: "/audit-logs", label: "Audit Log" },
-  { path: "/settings", label: "Settings" },
-];
+// PAGE_GROUPS is imported from pageCatalog.ts — keeps the menu hierarchy in
+// one place so both Domain admin and Role editor share the same definition.
 
 export function AdminDomainsTab() {
   const qc = useQueryClient();
@@ -309,17 +281,47 @@ function DomainEditorModal({
             </Checkbox>
           </div>
           {!allowAllPages && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 text-sm">
-              {ALL_PAGES.map((p) => (
-                <Checkbox
-                  key={p.path}
-                  checked={allowedPages.includes(p.path)}
-                  onChange={() => togglePage(p.path)}
-                >
-                  <span className="font-medium">{p.label}</span>
-                  <span className="text-xs text-slate-500 block">{p.path}</span>
-                </Checkbox>
-              ))}
+            <div className="space-y-3">
+              {PAGE_GROUPS.map((group) => {
+                const groupPaths = group.items.map((i) => i.path);
+                const allOn = groupPaths.every((p) => allowedPages.includes(p));
+                const someOn = !allOn && groupPaths.some((p) => allowedPages.includes(p));
+                const toggleGroup = () => {
+                  setAllowedPages((prev) =>
+                    allOn
+                      ? prev.filter((p) => !groupPaths.includes(p))
+                      : Array.from(new Set([...prev, ...groupPaths])),
+                  );
+                };
+                return (
+                  <div key={group.key} className="border rounded-md p-2">
+                    <label className="flex items-center gap-2 cursor-pointer mb-2">
+                      <input
+                        type="checkbox"
+                        checked={allOn}
+                        ref={(el) => { if (el) el.indeterminate = someOn; }}
+                        onChange={toggleGroup}
+                      />
+                      <span className="font-semibold text-sm">{group.label}</span>
+                      <span className="text-xs text-slate-500">
+                        {allOn ? "(toàn nhóm)" : someOn ? `(${groupPaths.filter((p) => allowedPages.includes(p)).length}/${groupPaths.length})` : ""}
+                      </span>
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 pl-5 text-sm">
+                      {group.items.map((p) => (
+                        <Checkbox
+                          key={p.path}
+                          checked={allowedPages.includes(p.path)}
+                          onChange={() => togglePage(p.path)}
+                        >
+                          <span className="font-medium">{p.label}</span>
+                          <span className="text-xs text-slate-500 block">{p.path}</span>
+                        </Checkbox>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
           <p className="text-xs text-slate-500">

@@ -15,6 +15,8 @@ class AdminUserCreate(BaseModel):
     # Optional. super_admin can pick any domain; domain admin's domain_id is
     # forced server-side regardless of what they send.
     domain_id: uuid.UUID | None = None
+    # Optional per-domain role. Must belong to the same domain as the user.
+    role_id: uuid.UUID | None = None
 
 
 class AdminUserUpdate(BaseModel):
@@ -29,6 +31,9 @@ class AdminUserUpdate(BaseModel):
     # super_admin only — change which domain a user belongs to.
     # Zero-uuid (00000000-0000-0000-0000-000000000000) clears the field.
     domain_id: uuid.UUID | None = None
+    # Per-domain role assignment. Zero-uuid clears the role (user falls
+    # back to inheriting the domain's allowed_pages).
+    role_id: uuid.UUID | None = None
 
 
 class AdminUserOut(BaseModel):
@@ -45,6 +50,7 @@ class AdminUserOut(BaseModel):
     plan_id: uuid.UUID | None = None
     entitlement_overrides: dict | None = None
     domain_id: uuid.UUID | None = None
+    role_id: uuid.UUID | None = None
 
     class Config:
         from_attributes = True

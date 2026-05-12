@@ -7,7 +7,27 @@ from sqlalchemy import func, select
 from app.core.deps import AdminUser, SuperAdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
 from app.core.security import hash_password
-from app.models import ApiKey, Invoice, Job, Payment, Plan, Profile, Subscription, User
+from app.models import ApiKey, Invoice, Job, Payment, Plan, Profile, Role, Subscription, User
+
+
+async def _validate_role_id_for_domain(
+    db, role_id: uuid.UUID | None, domain_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    """Ensure a role_id (when set) belongs to the same domain as the user.
+
+    Returns the role_id to assign, or None when the caller passed the zero-uuid
+    sentinel (interpreted as "clear the role").
+    """
+    if role_id is None:
+        return None
+    if str(role_id) == "00000000-0000-0000-0000-000000000000":
+        return None
+    role = await db.get(Role, role_id)
+    if not role:
+        raise InvalidPayload("Role không tồn tại")
+    if domain_id is None or role.domain_id != domain_id:
+        raise InvalidPayload("Role phải thuộc cùng domain với user")
+    return role_id
 
 
 def _scope_users_query(q, admin: User):
@@ -106,6 +126,9 @@ async def create_user(payload: AdminUserCreate, admin: AdminUser, db: DbSession)
     else:
         target_domain = payload.domain_id
 
+    # Validate role binding (role must belong to the target domain).
+    role_id = await _validate_role_id_for_domain(db, payload.role_id, target_domain)
+
     user = User(
         email=payload.email,
         password_hash=hash_password(payload.password),
@@ -114,6 +137,7 @@ async def create_user(payload: AdminUserCreate, admin: AdminUser, db: DbSession)
         status="active",
         plan_id=payload.plan_id,
         domain_id=target_domain,
+        role_id=role_id,
     )
     db.add(user)
     await db.flush()
@@ -173,10 +197,21 @@ async def update_user(user_id: uuid.UUID, payload: AdminUserUpdate, admin: Admin
         # Sentinel zero-uuid means "clear" (turn into unscoped super-tier).
         if str(payload.domain_id) == "00000000-0000-0000-0000-000000000000":
             user.domain_id = None
+            # Clearing the domain also clears any role (role lives under a domain).
+            user.role_id = None
             changes["domain_id"] = None
         else:
+            # Drop the existing role if the user is moving to a new domain —
+            # the old role won't be valid for the new domain.
+            if user.domain_id != payload.domain_id:
+                user.role_id = None
             user.domain_id = payload.domain_id
             changes["domain_id"] = str(payload.domain_id)
+    if payload.role_id is not None:
+        user.role_id = await _validate_role_id_for_domain(
+            db, payload.role_id, user.domain_id,
+        )
+        changes["role_id"] = str(user.role_id) if user.role_id else None
     await audit.log_action(
         db, user_id=admin.id, action="admin_update_user", target_type="user", target_id=user.id,
         metadata=changes,

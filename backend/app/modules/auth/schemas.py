@@ -48,4 +48,13 @@ class MeResponse(BaseModel):
     created_at: datetime
     # Tenant membership. NULL = unscoped (super_admin or legacy).
     domain_id: uuid.UUID | None = None
+    # Per-domain role (Role row, not the role string above). When set the
+    # user's menu is further narrowed to role.allowed_pages.
+    role_id: uuid.UUID | None = None
+    role_name: str | None = None
+    # Effective allowed pages = role.allowed_pages ∩ domain.allowed_pages
+    # (or domain.allowed_pages alone when role_id is null). The FE uses this
+    # in place of domain.allowed_pages whenever the user is logged in, so
+    # menu visibility narrows per-user.
+    effective_allowed_pages: list[str] | None = None
     entitlements: EntitlementsResponse

@@ -82,6 +82,11 @@ class User(Base, TimestampMixin):
     # entitlement_overrides is a partial map merged on top of the plan's entitlements.
     plan_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType, ForeignKey("plans.id", ondelete="SET NULL"))
     entitlement_overrides: Mapped[dict | None] = mapped_column(JSONType)
+    # Per-domain named role. Subset of allowed pages — narrows the user's
+    # menu beyond what the domain itself grants. NULL = inherit domain pages.
+    role_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("roles.id", ondelete="SET NULL"), index=True,
+    )
 
     plan: Mapped[Plan | None] = relationship()
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -346,6 +351,27 @@ class Domain(Base, TimestampMixin):
     allowed_pages: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # Optional override: custom brand name shown in this domain's UI
     brand_name: Mapped[str | None] = mapped_column(String(100))
+
+
+class Role(Base, TimestampMixin):
+    """A named permission set within a domain.
+
+    Each role is scoped to exactly one domain and lists a subset of that
+    domain's allowed_pages. A user with `role_id` set sees the intersection
+    of `role.allowed_pages` and `domain.allowed_pages`. A user without a
+    role inherits the full domain page list (legacy behavior).
+    """
+    __tablename__ = "roles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    domain_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    allowed_pages: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
 
 
 # ============================================================================

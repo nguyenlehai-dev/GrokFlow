@@ -8,7 +8,7 @@ import {
   Rocket,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useAuthStore } from "@/core/auth/store";
+import { useAuthStore, userCanSeePath } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 
@@ -95,6 +95,7 @@ const NAV: NavEntry[] = [
       // Users management is visible to both tiers; backend filters to admin's
       // own domain when they're not super_admin.
       { type: "link", to: "/admin/users",   label: "Admin",       icon: UserCog },
+      { type: "link", to: "/admin/roles",   label: "Roles",       icon: Shield },
       // Domains / Plans / Git affect global config — super_admin only.
       { type: "link", to: "/admin/domains", label: "Domains",     icon: Globe,   superOnly: true },
       { type: "link", to: "/admin/billing", label: "Billing",     icon: CreditCard, superOnly: true },
@@ -120,7 +121,9 @@ export function AppShell() {
     if (n.superOnly && !isSuper) return false;
     if (n.adminOnly && !isAdmin) return false;
     if (n.feature && !isAdmin && !features[n.feature]) return false;
-    if (!isAdmin && !isPageAllowed(n.to)) return false;
+    // Use the user's effective allowed_pages (role ∩ domain) when present;
+    // otherwise fall back to the domain-level check. Admins bypass both.
+    if (!isAdmin && !userCanSeePath(user ?? null, n.to, isPageAllowed)) return false;
     return true;
   };
 

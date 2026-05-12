@@ -17,6 +17,7 @@ import { ApiDocsPage } from "@/modules/api-docs/ApiDocsPage";
 import { SettingsPage } from "@/modules/settings/SettingsPage";
 import { AdminPage } from "@/modules/admin/AdminPage";
 import { AdminUsersPage } from "@/modules/admin/AdminUsersPage";
+import { AdminRolesPage } from "@/modules/admin/AdminRolesPage";
 import { AdminPlansPage } from "@/modules/admin/AdminPlansPage";
 import { AdminBillingPage } from "@/modules/admin/AdminBillingPage";
 import { AdminDomainsPage } from "@/modules/admin/AdminDomainsPage";
@@ -83,6 +84,7 @@ export const router = createBrowserRouter([
       // Admin sub-routes (each is admin-guarded internally)
       { path: "admin", element: <Navigate to="/admin/users" replace /> },
       { path: "admin/users", element: <AdminUsersPage /> },
+      { path: "admin/roles", element: <AdminRolesPage /> },
       { path: "admin/plans", element: <AdminPlansPage /> },
       { path: "admin/billing", element: <AdminBillingPage /> },
       { path: "admin/domains", element: <AdminDomainsPage /> },

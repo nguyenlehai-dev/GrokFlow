@@ -311,17 +311,19 @@ interface CreateValues {
   role: "super_admin" | "admin" | "user" | "support";
   plan_id: string;
   domain_id: string;
+  role_id: string;
 }
 
 interface DomainOpt { id: string; hostname: string; label: string }
+interface RoleOpt { id: string; name: string; domain_id: string; status: string }
 
 function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => void }) {
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
   const isSuper = me?.role === "super_admin";
   const defaultPlan = plans.find((p) => p.is_default);
-  const { register, handleSubmit, formState: { isSubmitting } } = useForm<CreateValues>({
-    defaultValues: { role: "user", plan_id: defaultPlan?.id ?? "", domain_id: "" },
+  const { register, handleSubmit, watch, formState: { isSubmitting } } = useForm<CreateValues>({
+    defaultValues: { role: "user", plan_id: defaultPlan?.id ?? "", domain_id: "", role_id: "" },
   });
   // Domain picker — super_admin only (backend forces the admin's domain otherwise).
   const { data: domains } = useQuery<DomainOpt[]>({
@@ -329,10 +331,23 @@ function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => voi
     queryFn: async () => (await api.get<DomainOpt[]>("/api/admin/domains")).data,
     enabled: isSuper,
   });
+  // Roles list — for super_admin filtered by the picked domain; for domain
+  // admin all roles in their own domain (backend scopes /api/admin/roles).
+  const watchedDomainId = watch("domain_id");
+  const targetDomainId = isSuper ? watchedDomainId : (me?.domain_id ?? "");
+  const { data: roles } = useQuery<RoleOpt[]>({
+    queryKey: ["admin-roles-for-create", targetDomainId],
+    queryFn: async () => {
+      const q = isSuper && targetDomainId ? `?domain_id=${targetDomainId}` : "";
+      return (await api.get<RoleOpt[]>(`/api/admin/roles${q}`)).data;
+    },
+    enabled: !isSuper || !!targetDomainId,
+  });
   const onSubmit = async (v: CreateValues) => {
     const payload: any = { ...v };
     if (!payload.plan_id) delete payload.plan_id;
     if (!payload.domain_id || !isSuper) delete payload.domain_id;
+    if (!payload.role_id) delete payload.role_id;
     try {
       await api.post("/api/admin/users", payload);
     } catch (e: any) {
@@ -393,6 +408,18 @@ function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => voi
             </p>
           </div>
         )}
+        <div>
+          <label className="text-sm font-medium">Role (per-domain)</label>
+          <select className="input" {...register("role_id")}>
+            <option value="">— Inherit domain pages —</option>
+            {(roles ?? []).filter((r) => r.status === "active").map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-500 mt-1">
+            Khi gán role: user chỉ thấy menu trong allowlist của role (giao với domain). Bỏ trống = thừa hưởng full menu của domain.
+          </p>
+        </div>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           <button className="btn-primary" disabled={isSubmitting}>Tạo</button>
