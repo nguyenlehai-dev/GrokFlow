@@ -15,6 +15,7 @@ from app.modules.billing.router import router as billing_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.domains.router import router as domains_router
 from app.modules.files.router import router as files_router
+from app.modules.flow.router import router as flow_router
 from app.modules.gateway.router import router as gateway_router
 # Removed: app.modules.gateway_proxy — was a thin SSO proxy to the legacy
 # `gatewaygrok-backend` service. That service is gone; the LLM Gateway
@@ -77,6 +78,7 @@ app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(dashboard_router)
 app.include_router(domains_router)
+app.include_router(flow_router)
 app.include_router(gateway_router)
 # (gateway_proxy_router removed alongside its module — see import section.)
 app.include_router(git_admin_router)

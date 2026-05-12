@@ -1,30 +1,17 @@
 import { Navigate } from "react-router-dom";
-import {
-  Video, Scissors, Combine, AudioLines, Replace, Gauge, Maximize2, Crop, Film,
-  FileText,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Video, FileText } from "lucide-react";
 
-import { ComingSoonPage } from "@/components/ui/ComingSoonPage";
 import type { FrontendModule } from "@/app/types";
+import { TOOLS, TOOL_BY_SLUG } from "./tools";
+import { VideoToolPage } from "./components/VideoToolPage";
+import { FlowApiDocsPage } from "./components/FlowApiDocsPage";
 
-/** All Flow tool slugs in one place. When real implementations land they
- *  swap the ComingSoonPage element below for the real page component. */
-const TOOLS: { slug: string; label: string; icon: LucideIcon }[] = [
-  { slug: "cut",            label: "Cut Video",            icon: Scissors },
-  { slug: "merge",          label: "Merge Videos",         icon: Combine },
-  { slug: "extract-audio",  label: "Extract Audio",        icon: AudioLines },
-  { slug: "replace-audio",  label: "Merge / Replace Audio", icon: Replace },
-  { slug: "change-speed",   label: "Change Speed",         icon: Gauge },
-  { slug: "resize",         label: "Resize",               icon: Maximize2 },
-  { slug: "crop",           label: "Crop Video",           icon: Crop },
-  { slug: "extract-frames", label: "Extract Frames",       icon: Film },
-  { slug: "docs",           label: "Flow API Docs",        icon: FileText },
-];
-
-/** Flow video tools module. Pages are placeholders today; ready to slot in
- *  the real BE implementations one by one. Set VITE_MODULE_FLOW_API to
- *  route the module's axios at a remote Flow service. */
+/** Flow video-tools module.
+ *
+ *  Every tool is rendered by the same `VideoToolPage` driven by `tools.ts`
+ *  — adding a new tool is a one-line addition to TOOLS, not a new React
+ *  page. Same-origin API by default; override with VITE_MODULE_FLOW_API
+ *  when the proxy is hosted out-of-process. */
 export const moduleManifest: FrontendModule = {
   name: "flow",
   label: "Quản lý Flow",
@@ -33,8 +20,9 @@ export const moduleManifest: FrontendModule = {
     { path: "flow", element: <Navigate to="/flow/cut" replace /> },
     ...TOOLS.map((t) => ({
       path: `flow/${t.slug}`,
-      element: <ComingSoonPage title={`Flow — ${t.label}`} />,
+      element: <VideoToolPage tool={TOOL_BY_SLUG[t.slug]} />,
     })),
+    { path: "flow/docs", element: <FlowApiDocsPage /> },
   ],
   nav: [
     {
@@ -42,12 +30,20 @@ export const moduleManifest: FrontendModule = {
       key: "flow",
       label: "Quản lý Flow",
       icon: Video,
-      items: TOOLS.map((t) => ({
-        type: "link" as const,
-        to: `/flow/${t.slug}`,
-        label: t.label,
-        icon: t.icon,
-      })),
+      items: [
+        ...TOOLS.map((t) => ({
+          type: "link" as const,
+          to: `/flow/${t.slug}`,
+          label: t.label,
+          icon: t.icon,
+        })),
+        {
+          type: "link" as const,
+          to: "/flow/docs",
+          label: "Flow API Docs",
+          icon: FileText,
+        },
+      ],
     },
   ],
 };
