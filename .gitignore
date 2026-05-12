@@ -41,8 +41,11 @@ frontend/.env
 *.key
 cookies.txt
 
-# Claude tooling
-.claude/
+# Claude tooling — keep settings/transcripts/local out of git, but commit
+# the project-scoped skill catalog so every contributor gets the same set.
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 
 # Deploy probe scripts (one-shot debugging)
 deploy/probe*.py
