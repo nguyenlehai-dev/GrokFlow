@@ -22,12 +22,11 @@ import { AdminBillingPage } from "@/modules/admin/AdminBillingPage";
 import { AdminDomainsPage } from "@/modules/admin/AdminDomainsPage";
 import { AdminGitPage } from "@/modules/admin/AdminGitPage";
 import { AuditLogPage } from "@/modules/audit/AuditLogPage";
-import { GatewayOverviewPage } from "@/modules/gateway/GatewayOverviewPage";
-import { GatewayProfilesPage } from "@/modules/gateway/GatewayProfilesPage";
-import { GatewayProxiesPage } from "@/modules/gateway/GatewayProxiesPage";
-import { GatewayApiKeysPage } from "@/modules/gateway/GatewayApiKeysPage";
-import { GatewayJobsPage } from "@/modules/gateway/GatewayJobsPage";
-import { GatewaySettingsPage } from "@/modules/gateway/GatewaySettingsPage";
+import { GatewayDashboardPage } from "@/modules/gateway/GatewayDashboardPage";
+import { GatewayVendorsPage } from "@/modules/gateway/GatewayVendorsPage";
+import { GatewayPoolsPage } from "@/modules/gateway/GatewayPoolsPage";
+import { GatewayFunctionsPage } from "@/modules/gateway/GatewayFunctionsPage";
+import { GatewayRequestsPage } from "@/modules/gateway/GatewayRequestsPage";
 import { GatewayPlaygroundPage } from "@/modules/gateway/GatewayPlaygroundPage";
 import { GatewayDocsPage } from "@/modules/gateway/GatewayDocsPage";
 
@@ -97,14 +96,13 @@ export const router = createBrowserRouter([
         element: <ComingSoonPage title={`Flow — ${label}`} />,
       })),
 
-      // Gateway Management — all 7 sub-routes wired to gatewaygrok-backend
-      { path: "gateway", element: <Navigate to="/gateway/overview" replace /> },
-      { path: "gateway/overview",   element: <GatewayOverviewPage /> },
-      { path: "gateway/profiles",   element: <GatewayProfilesPage /> },
-      { path: "gateway/proxies",    element: <GatewayProxiesPage /> },
-      { path: "gateway/api-keys",   element: <GatewayApiKeysPage /> },
-      { path: "gateway/jobs",       element: <GatewayJobsPage /> },
-      { path: "gateway/settings",   element: <GatewaySettingsPage /> },
+      // Gateway Management — LLM gateway (Vendors / Pools / Functions / Requests)
+      { path: "gateway", element: <Navigate to="/gateway/dashboard" replace /> },
+      { path: "gateway/dashboard",  element: <GatewayDashboardPage /> },
+      { path: "gateway/vendors",    element: <GatewayVendorsPage /> },
+      { path: "gateway/pools",      element: <GatewayPoolsPage /> },
+      { path: "gateway/functions",  element: <GatewayFunctionsPage /> },
+      { path: "gateway/requests",   element: <GatewayRequestsPage /> },
       { path: "gateway/playground", element: <GatewayPlaygroundPage /> },
       { path: "gateway/docs",       element: <GatewayDocsPage /> },
     ],

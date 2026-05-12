@@ -1,196 +1,260 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { Terminal, Play, Loader2 } from "lucide-react";
-import { gatewayApi } from "@/core/api/gateway";
+import { Terminal, Play, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { gwApi, extractError } from "./common";
 import { toast } from "@/components/ui/Toast";
-import { GatewayAuthGuard } from "./GatewayAuthGuard";
-import { extractError } from "./GatewayProfilesPage";
 
-const PRESETS = [
-  {
-    label: "GET /api/meta",
-    method: "GET",
-    path: "/api/meta",
-    body: "",
-  },
-  {
-    label: "GET /api/profiles",
-    method: "GET",
-    path: "/api/profiles",
-    body: "",
-  },
-  {
-    label: "GET /api/proxies",
-    method: "GET",
-    path: "/api/proxies",
-    body: "",
-  },
-  {
-    label: "GET /api/jobs",
-    method: "GET",
-    path: "/api/jobs",
-    body: "",
-  },
-  {
-    label: "POST /api/jobs",
-    method: "POST",
-    path: "/api/jobs",
-    body: JSON.stringify({
-      profile_id: "<profile-id>",
-      target: "grok_image",
-      prompt: "A cyberpunk Tokyo street at night",
-      count: 1,
-    }, null, 2),
-  },
-];
-
-export function GatewayPlaygroundPage() {
-  return (
-    <GatewayAuthGuard>
-      <Inner />
-    </GatewayAuthGuard>
-  );
+interface Vendor { id: string; name: string; code: string; }
+interface Func { id: string; code: string; name: string; function_type: string; }
+interface Pool { id: string; name: string; vendor_id: string; function_id: string | null; model: string | null; }
+interface ExecuteResp {
+  request_id: string;
+  gw_id: string;
+  status: string;
+  pool_key_name: string | null;
+  response: any;
+  error_message: string | null;
 }
 
-function Inner() {
-  const [response, setResponse] = useState<{
-    ok: boolean;
-    status: number;
-    durationMs: number;
-    body: any;
-  } | null>(null);
-  const [running, setRunning] = useState(false);
+export function GatewayPlaygroundPage() {
+  const [verifyingKey, setVerifyingKey] = useState("");
+  const [verifiedKey, setVerifiedKey] = useState<{ label: string; functions: string[] } | null>(null);
+  const [response, setResponse] = useState<ExecuteResp | null>(null);
 
-  const { register, handleSubmit, setValue, watch } = useForm({
+  const { data: vendors } = useQuery({
+    queryKey: ["gw-vendors"],
+    queryFn: async () => (await gwApi.get<Vendor[]>("/api/v1/gateway/vendors")).data,
+  });
+  const { data: functions } = useQuery({
+    queryKey: ["gw-functions"],
+    queryFn: async () => (await gwApi.get<Func[]>("/api/v1/gateway/functions")).data,
+  });
+  const { data: pools } = useQuery({
+    queryKey: ["gw-pools"],
+    queryFn: async () => (await gwApi.get<Pool[]>("/api/v1/gateway/pools")).data,
+  });
+
+  const { register, handleSubmit, watch } = useForm({
     defaultValues: {
-      method: "GET",
-      path: "/api/meta",
-      body: "",
+      vendor_id: "",
+      function_id: "",
+      pool_id: "",
+      model: "",
+      prompt: "",
+      aspect_ratio: "1:1",
+      image_size: "1K",
+      reference_image_urls: "",
+      reference_video_urls: "",
     },
   });
-  const method = watch("method");
+  const fnId = watch("function_id");
+  const selectedFn = functions?.find((f) => f.id === fnId);
 
-  const onSubmit = async (v: { method: string; path: string; body: string }) => {
-    setRunning(true);
-    setResponse(null);
-    const start = performance.now();
-    try {
-      let parsedBody: any = undefined;
-      if (v.body.trim() && v.method !== "GET" && v.method !== "DELETE") {
-        try {
-          parsedBody = JSON.parse(v.body);
-        } catch {
-          toast("Body không phải JSON hợp lệ", "error");
-          setRunning(false);
-          return;
-        }
+  const verify = useMutation({
+    mutationFn: (key: string) =>
+      gwApi.post<{ verified: boolean; label: string | null; allowed_functions: string[] }>(
+        "/api/v1/gateway/gateway-keys/verify", { key },
+      ),
+    onSuccess: ({ data }) => {
+      if (data.verified) {
+        setVerifiedKey({ label: data.label ?? "", functions: data.allowed_functions });
+        toast("Đã verify Gateway API Key", "success");
+      } else {
+        toast("Key không hợp lệ", "error");
       }
-      const r = await gatewayApi.request({
-        method: v.method,
-        url: v.path,
-        data: parsedBody,
-        validateStatus: () => true,
-      });
-      setResponse({
-        ok: r.status < 400,
-        status: r.status,
-        durationMs: Math.round(performance.now() - start),
-        body: r.data,
-      });
-    } catch (e: any) {
-      setResponse({
-        ok: false,
-        status: e?.response?.status ?? 0,
-        durationMs: Math.round(performance.now() - start),
-        body: { error: extractError(e) },
-      });
-    } finally {
-      setRunning(false);
-    }
-  };
+    },
+    onError: (e: any) => toast(extractError(e), "error"),
+  });
+
+  const execute = useMutation({
+    mutationFn: async (v: any) => {
+      if (!selectedFn) throw new Error("Chọn function");
+      const payload = {
+        model: v.model || null,
+        prompt: v.prompt,
+        aspect_ratio: v.aspect_ratio || null,
+        image_size: v.image_size || null,
+        reference_image_urls: v.reference_image_urls
+          ? v.reference_image_urls.split("\n").map((s: string) => s.trim()).filter(Boolean) : [],
+        reference_video_urls: v.reference_video_urls
+          ? v.reference_video_urls.split("\n").map((s: string) => s.trim()).filter(Boolean) : [],
+      };
+      const r = await gwApi.post<ExecuteResp>(
+        `/api/v1/gateway/functions/${selectedFn.code}/execute`, payload,
+      );
+      return r.data;
+    },
+    onSuccess: (data) => {
+      setResponse(data);
+      toast(data.status === "succeeded" ? "Execute thành công" : "Execute lỗi", data.status === "succeeded" ? "success" : "error");
+    },
+    onError: (e: any) => toast(extractError(e), "error"),
+  });
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
-          <Terminal size={22} /> Gateway — Playground
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Gọi thẳng API gatewaygrok-backend để test. Tự gắn admin token từ session.
-        </p>
-      </div>
+      <h1 className="text-2xl font-semibold flex items-center gap-2">
+        <Terminal size={22} /> Gateway — Playground
+      </h1>
 
-      <div className="flex flex-wrap gap-2">
-        {PRESETS.map((p, i) => (
-          <button
-            key={i}
-            onClick={() => {
-              setValue("method", p.method);
-              setValue("path", p.path);
-              setValue("body", p.body);
-            }}
-            className="px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-xs font-mono"
-          >
-            <span className={`mr-2 font-bold ${
-              p.method === "GET" ? "text-emerald-600"
-              : p.method === "POST" ? "text-blue-600"
-              : "text-amber-600"
-            }`}>{p.method}</span>
-            {p.path}
-          </button>
-        ))}
-      </div>
-
-      <form onSubmit={handleSubmit(onSubmit)} className="card space-y-3">
-        <div className="grid grid-cols-[120px_1fr] gap-2">
-          <select className="input" {...register("method")}>
-            <option value="GET">GET</option>
-            <option value="POST">POST</option>
-            <option value="PUT">PUT</option>
-            <option value="PATCH">PATCH</option>
-            <option value="DELETE">DELETE</option>
-          </select>
-          <input className="input font-mono" {...register("path", { required: true })}
-            placeholder="/api/profiles" />
-        </div>
-
-        {(method === "POST" || method === "PUT" || method === "PATCH") && (
-          <div>
-            <label className="text-sm font-medium">Body (JSON)</label>
-            <textarea
-              className="input font-mono text-xs"
-              rows={6}
-              placeholder='{"key": "value"}'
-              {...register("body")}
+      {/* Verify gateway key */}
+      <div className="card space-y-2">
+        <h2 className="font-semibold">Gateway API Key</h2>
+        {verifiedKey ? (
+          <div className="border border-emerald-200 bg-emerald-50 rounded p-3 text-sm">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-emerald-600" />
+              <strong>Đã verify · {verifiedKey.label}</strong>
+            </div>
+            <div className="text-xs text-slate-500 mt-1">
+              Allowed: {verifiedKey.functions.length ? verifiedKey.functions.join(", ") : "all"}
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              className="input flex-1 font-mono text-sm"
+              placeholder="gwk_live_..."
+              value={verifyingKey}
+              onChange={(e) => setVerifyingKey(e.target.value)}
             />
+            <button
+              onClick={() => verify.mutate(verifyingKey)}
+              disabled={!verifyingKey || verify.isPending}
+              className="btn-primary"
+            >
+              Verify
+            </button>
           </div>
         )}
+      </div>
 
-        <button
-          type="submit"
-          disabled={running}
-          className="btn-primary inline-flex items-center gap-1.5"
+      <div className="grid lg:grid-cols-[2fr_1fr] gap-4">
+        {/* Form */}
+        <form
+          onSubmit={handleSubmit((v) => execute.mutate(v))}
+          className="card space-y-3"
         >
-          {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-          {running ? "Đang gọi..." : "Send request"}
-        </button>
-      </form>
+          <h2 className="font-semibold">Playground</h2>
 
-      {response && (
-        <div className="card space-y-2">
-          <div className="flex items-center gap-3">
-            <span className={`text-sm font-semibold px-2 py-1 rounded ${
-              response.ok ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
-            }`}>
-              HTTP {response.status}
-            </span>
-            <span className="text-xs text-slate-500">{response.durationMs}ms</span>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-xs font-medium">Vendor</label>
+              <select className="input text-sm" {...register("vendor_id")}>
+                <option value="">— any —</option>
+                {(vendors ?? []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium">Pool</label>
+              <select className="input text-sm" {...register("pool_id")}>
+                <option value="">— auto —</option>
+                {(pools ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium">API Function</label>
+              <select className="input text-sm" {...register("function_id", { required: true })}>
+                <option value="">— chọn —</option>
+                {(functions ?? []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
           </div>
-          <pre className="bg-slate-900 text-slate-100 p-3 rounded text-xs whitespace-pre-wrap overflow-auto max-h-96">
-            {JSON.stringify(response.body, null, 2)}
-          </pre>
+
+          <div>
+            <label className="text-xs font-medium">Model</label>
+            <input className="input text-sm font-mono" placeholder="gemini-2.5-flash" {...register("model")} />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium">Prompt</label>
+            <textarea className="input" rows={3} placeholder="Prompt..." {...register("prompt", { required: true })} />
+          </div>
+
+          {selectedFn?.function_type === "image" && (
+            <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
+              <strong className="text-blue-700">Image Generation</strong>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Không upload ảnh tham chiếu thì đây là text-to-image. Upload reference URLs thì đây là image-to-image / reference-based.
+              </p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs font-medium">Aspect Ratio</label>
+              <select className="input text-sm" {...register("aspect_ratio")}>
+                <option value="1:1">1:1</option>
+                <option value="16:9">16:9</option>
+                <option value="9:16">9:16</option>
+                <option value="4:3">4:3</option>
+                <option value="3:4">3:4</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium">Image Size</label>
+              <select className="input text-sm" {...register("image_size")}>
+                <option value="1K">1K</option>
+                <option value="2K">2K</option>
+                <option value="4K">4K</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium">Reference Image URLs</label>
+            <textarea className="input text-sm font-mono" rows={2}
+              placeholder="https://.../ref-1.png&#10;https://.../ref-2.png"
+              {...register("reference_image_urls")} />
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Mỗi URL một dòng. Để trống = text-to-image.
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium">Reference Video URLs</label>
+            <textarea className="input text-sm font-mono" rows={2}
+              placeholder="https://.../sample.mp4" {...register("reference_video_urls")} />
+          </div>
+
+          <div className="flex justify-end">
+            <button type="submit" disabled={execute.isPending} className="btn-primary inline-flex items-center gap-1.5">
+              {execute.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              {execute.isPending ? "Đang chạy..." : "Execute"}
+            </button>
+          </div>
+        </form>
+
+        {/* Result */}
+        <div className="card space-y-2">
+          <h2 className="font-semibold">Execute Result</h2>
+          {!response ? (
+            <p className="text-slate-400 text-sm">Chưa có request nào.</p>
+          ) : (
+            <>
+              <div className={`border rounded p-2 text-sm ${response.status === "succeeded" ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  {response.status === "succeeded"
+                    ? <CheckCircle2 size={14} className="text-emerald-600" />
+                    : <AlertCircle size={14} className="text-rose-600" />}
+                  <strong>{response.status}</strong>
+                  <span className="text-xs text-slate-500 font-mono ml-auto">{response.gw_id}</span>
+                </div>
+                {response.pool_key_name && (
+                  <div className="text-xs text-slate-600">Pool key: {response.pool_key_name}</div>
+                )}
+                {response.error_message && (
+                  <div className="text-xs text-rose-600 mt-1">{response.error_message}</div>
+                )}
+              </div>
+              <pre className="bg-slate-900 text-emerald-300 p-2 rounded text-[10px] whitespace-pre-wrap overflow-auto max-h-80 font-mono">
+                {JSON.stringify(response.response, null, 2)}
+              </pre>
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -65,14 +65,13 @@ const NAV: NavEntry[] = [
   },
 
   {
-    type: "group", key: "gateway", label: "Gateway (gatewaygrok-be)", icon: Network,
+    type: "group", key: "gateway", label: "Gateway Management", icon: Network, adminOnly: true,
     items: [
-      { type: "link", to: "/gateway/overview",   label: "Overview",      icon: LayoutDashboard },
-      { type: "link", to: "/gateway/profiles",   label: "Profiles",      icon: Layers },
-      { type: "link", to: "/gateway/proxies",    label: "Proxies",       icon: GitBranch },
-      { type: "link", to: "/gateway/api-keys",   label: "API Keys",      icon: Code2 },
-      { type: "link", to: "/gateway/jobs",       label: "Jobs",          icon: Activity },
-      { type: "link", to: "/gateway/settings",   label: "Settings",      icon: Wrench },
+      { type: "link", to: "/gateway/dashboard",  label: "Dashboard",     icon: LayoutDashboard },
+      { type: "link", to: "/gateway/vendors",    label: "Vendors",       icon: Layers },
+      { type: "link", to: "/gateway/pools",      label: "Pools",         icon: GitBranch },
+      { type: "link", to: "/gateway/functions",  label: "API Functions", icon: Code2 },
+      { type: "link", to: "/gateway/requests",   label: "Requests",      icon: Activity },
       { type: "link", to: "/gateway/playground", label: "Playground",    icon: Terminal },
       { type: "link", to: "/gateway/docs",       label: "API Docs",      icon: BookOpen },
     ],
