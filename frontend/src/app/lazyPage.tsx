@@ -29,7 +29,7 @@ export function lazyPage<T extends Record<string, ComponentType<any>>>(
   const Lazy = lazy(async () => {
     const mod = await loader();
     return { default: mod[exportName] };
-  });
+  }) as ComponentType;
   return (
     <Suspense fallback={<PageSpinner />}>
       <Lazy />

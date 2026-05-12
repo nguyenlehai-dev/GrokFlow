@@ -15,6 +15,7 @@ interface AdminUser {
   email: string;
   full_name: string | null;
   role: string;
+  role_id: string | null;
   status: string;
   created_at: string;
   plan_id: string | null;
