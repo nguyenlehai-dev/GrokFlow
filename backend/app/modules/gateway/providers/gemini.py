@@ -70,18 +70,28 @@ class GeminiProvider:
                 if u.strip():
                     parts.append(await _fetch_inline(cli, u.strip()))
 
+            # Gemini's generateContent endpoint doesn't accept aspectRatio /
+            # imageSize on generationConfig for the image-preview models — those
+            # are only valid on the dedicated Imagen `:predict` endpoint.
+            # When the caller passes them we fold them into the prompt as a
+            # natural-language hint so the model can still react to them.
+            hint_bits = []
+            if aspect_ratio and _looks_like_image_model(model):
+                hint_bits.append(f"aspect ratio {aspect_ratio}")
+            if image_size and _looks_like_image_model(model):
+                hint_bits.append(f"image size {image_size}")
+            if hint_bits and parts and "text" in parts[0]:
+                parts[0]["text"] = f"{parts[0]['text']}\n\n[Output: {', '.join(hint_bits)}]"
+
             body: dict[str, Any] = {"contents": [{"parts": parts}]}
             gen_cfg: dict[str, Any] = {}
 
             if _looks_like_image_model(model):
+                # The only generationConfig field image-preview models accept.
                 gen_cfg["responseModalities"] = ["IMAGE"]
-                if aspect_ratio:
-                    gen_cfg["aspectRatio"] = aspect_ratio
-                if image_size:
-                    # Gemini's image-preview spec uses "imageSize" (eg "1K", "2K")
-                    gen_cfg["imageSize"] = image_size
 
             if extra:
+                # Caller can still override / pass advanced params via raw.
                 body.update(extra)
             if gen_cfg:
                 body["generationConfig"] = gen_cfg
