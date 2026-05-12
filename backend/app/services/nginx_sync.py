@@ -25,6 +25,8 @@ VHOSTS_DIR = Path(os.environ.get("NGINX_VHOSTS_DIR", "/host_nginx_vhosts"))
 # Where to send proxy_pass — must be the host port that maps to the
 # grokflow-frontend container (currently 127.0.0.1:5173 on host).
 FRONTEND_UPSTREAM = os.environ.get("NGINX_FRONTEND_UPSTREAM", "http://127.0.0.1:5173")
+# Backend (FastAPI) upstream — must serve /api/* and /openapi.json.
+BACKEND_UPSTREAM = os.environ.get("NGINX_BACKEND_UPSTREAM", "http://127.0.0.1:8000")
 
 # Safe-hostname regex. Anything outside this set is rejected (the admin UI
 # should already validate, but defense in depth).
@@ -67,6 +69,20 @@ server {{
     server_name {hostname};
 
     client_max_body_size 25m;
+
+    # API + docs go to FastAPI. Listed first so they win the longest-prefix
+    # match over the catch-all `/` location below.
+    location ~ ^/(api|openapi.json|docs|redoc)(/|$) {{
+        proxy_pass {BACKEND_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
+    }}
 
     location / {{
         proxy_pass {FRONTEND_UPSTREAM};
