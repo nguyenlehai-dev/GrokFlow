@@ -5,37 +5,30 @@ import {
 } from "lucide-react";
 
 import type { FrontendModule } from "@/app/types";
-
-import { GatewayDashboardPage } from "./GatewayDashboardPage";
-import { GatewayVendorsPage } from "./GatewayVendorsPage";
-import { GatewayPoolsPage } from "./GatewayPoolsPage";
-import { GatewayFunctionsPage } from "./GatewayFunctionsPage";
-import { GatewayKeysPage } from "./GatewayKeysPage";
-import { GatewayRequestsPage } from "./GatewayRequestsPage";
-import { GatewayPlaygroundPage } from "./GatewayPlaygroundPage";
-import { GatewayDocsPage } from "./GatewayDocsPage";
+import { lazyPage } from "@/app/lazyPage";
 
 /** LLM Gateway module. Multi-tenant: domain admins see their tenant's
  *  Dashboard / Keys / Requests; super_admin manages global Vendors / Pools
  *  / Functions; non-admin users on a granted domain just see Playground +
  *  API Docs (and verify a gwk_live_* key to use the playground).
  *
- *  apiBaseUrl points the gateway's axios at a different host if the gateway
- *  is split into its own service later. */
+ *  All pages are lazy-loaded — each path triggers its own Vite chunk so
+ *  the initial bundle stays small. Set apiBaseUrl via env to route the
+ *  gateway axios at a different host later. */
 export const moduleManifest: FrontendModule = {
   name: "gateway",
   label: "Gateway Management",
   apiBaseUrl: import.meta.env.VITE_MODULE_GATEWAY_API ?? "",
   routes: [
     { path: "gateway", element: <Navigate to="/gateway/dashboard" replace /> },
-    { path: "gateway/dashboard", element: <GatewayDashboardPage /> },
-    { path: "gateway/vendors", element: <GatewayVendorsPage /> },
-    { path: "gateway/pools", element: <GatewayPoolsPage /> },
-    { path: "gateway/functions", element: <GatewayFunctionsPage /> },
-    { path: "gateway/gateway-keys", element: <GatewayKeysPage /> },
-    { path: "gateway/requests", element: <GatewayRequestsPage /> },
-    { path: "gateway/playground", element: <GatewayPlaygroundPage /> },
-    { path: "gateway/docs", element: <GatewayDocsPage /> },
+    { path: "gateway/dashboard",     element: lazyPage(() => import("./GatewayDashboardPage"), "GatewayDashboardPage") },
+    { path: "gateway/vendors",       element: lazyPage(() => import("./GatewayVendorsPage"), "GatewayVendorsPage") },
+    { path: "gateway/pools",         element: lazyPage(() => import("./GatewayPoolsPage"), "GatewayPoolsPage") },
+    { path: "gateway/functions",     element: lazyPage(() => import("./GatewayFunctionsPage"), "GatewayFunctionsPage") },
+    { path: "gateway/gateway-keys",  element: lazyPage(() => import("./GatewayKeysPage"), "GatewayKeysPage") },
+    { path: "gateway/requests",      element: lazyPage(() => import("./GatewayRequestsPage"), "GatewayRequestsPage") },
+    { path: "gateway/playground",    element: lazyPage(() => import("./GatewayPlaygroundPage"), "GatewayPlaygroundPage") },
+    { path: "gateway/docs",          element: lazyPage(() => import("./GatewayDocsPage"), "GatewayDocsPage") },
   ],
   nav: [
     {

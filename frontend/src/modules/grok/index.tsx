@@ -2,26 +2,23 @@ import { Sparkles, Layers, Workflow, FileText } from "lucide-react";
 
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 import type { FrontendModule } from "@/app/types";
-
-import { ProfilesPage } from "./ProfilesPage";
-import { JobsPage } from "./JobsPage";
-import { ApiDocsPage } from "./ApiDocsPage";
+import { lazyPage } from "@/app/lazyPage";
 
 /** Grok automation module — Profiles (browser sessions), Jobs (image/video
  *  generation), and API Docs for the public Grok API.
  *
- *  Future: when the Grok backend lives in its own repo, set
- *  VITE_MODULE_GROK_API=https://grok-api.example.com and the module's
- *  axios instance will route there. For now `apiBaseUrl=""` keeps the
- *  same-origin behavior (FastAPI in this monorepo). */
+ *  All pages lazy-loaded so initial bundle stays small. Future: when the
+ *  Grok backend lives in its own repo, set VITE_MODULE_GROK_API and the
+ *  module's axios instance (built via core/api/factory.createHttp) routes
+ *  there. */
 export const moduleManifest: FrontendModule = {
   name: "grok",
   label: "Quản lý Grok",
   apiBaseUrl: import.meta.env.VITE_MODULE_GROK_API ?? "",
   routes: [
-    { path: "profiles", element: <ProfilesPage /> },
-    { path: "jobs", element: <JobsPage /> },
-    { path: "api-docs", element: <ApiDocsPage /> },
+    { path: "profiles", element: lazyPage(() => import("./ProfilesPage"), "ProfilesPage") },
+    { path: "jobs",     element: lazyPage(() => import("./JobsPage"), "JobsPage") },
+    { path: "api-docs", element: lazyPage(() => import("./ApiDocsPage"), "ApiDocsPage") },
   ],
   nav: [
     {

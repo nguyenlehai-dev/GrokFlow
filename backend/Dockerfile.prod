@@ -35,10 +35,17 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=15s \
   CMD curl -fsS http://localhost:8000/health || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["gunicorn", "app.main:app", \
-     "--bind", "0.0.0.0:8000", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--workers", "4", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "--timeout", "120"]
+# Workers configurable via GUNICORN_WORKERS env so we can tune per VPS
+# without rebuilding the image. Async uvicorn workers don't follow the
+# old (2*CPU+1) rule — 1 per vCPU + 1 buffer is plenty since each worker
+# itself handles many concurrent requests. Default 4 matches a 4-vCPU VPS.
+CMD ["sh", "-c", \
+     "exec gunicorn app.main:app \
+        --bind 0.0.0.0:8000 \
+        --worker-class uvicorn.workers.UvicornWorker \
+        --workers ${GUNICORN_WORKERS:-4} \
+        --access-logfile - \
+        --error-logfile - \
+        --timeout 120 \
+        --graceful-timeout 30 \
+        --keep-alive 5"]

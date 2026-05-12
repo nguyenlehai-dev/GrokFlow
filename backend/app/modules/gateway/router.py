@@ -24,6 +24,7 @@ from sqlalchemy import func, or_, select
 from app.core.database import SessionLocal
 
 from app.core.deps import AdminUser, SuperAdminUser, CurrentUser, DbSession
+from app.core.tenant import bulk_fetch_map, scope_by_domain
 from app.core.exceptions import AppError, InvalidPayload, NotFound
 from app.core.security import hash_password, verify_password
 from app.models import (
@@ -520,19 +521,10 @@ async def list_requests(
 
     # Batch-fetch vendor/pool/pool-key by id so the response doesn't issue
     # 3 extra SELECTs per row (was N+1 — limit=500 meant up to 1500 queries).
-    vendor_ids = {r.vendor_id for r in rows if r.vendor_id}
-    pool_ids = {r.pool_id for r in rows if r.pool_id}
-    pool_key_ids = {r.pool_key_id for r in rows if r.pool_key_id}
-
-    async def _map_by_id(model, ids):
-        if not ids:
-            return {}
-        result = await db.execute(select(model).where(model.id.in_(ids)))
-        return {row.id: row for row in result.scalars().all()}
-
-    vendors = await _map_by_id(GwVendor, vendor_ids)
-    pools = await _map_by_id(GwPool, pool_ids)
-    pool_keys = await _map_by_id(GwPoolApiKey, pool_key_ids)
+    # bulk_fetch_map lives in app.core.tenant.
+    vendors = await bulk_fetch_map(db, GwVendor, {r.vendor_id for r in rows if r.vendor_id})
+    pools = await bulk_fetch_map(db, GwPool, {r.pool_id for r in rows if r.pool_id})
+    pool_keys = await bulk_fetch_map(db, GwPoolApiKey, {r.pool_key_id for r in rows if r.pool_key_id})
 
     return [
         s.RequestOut(

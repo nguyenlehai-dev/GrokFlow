@@ -6,44 +6,33 @@ import {
 
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 import type { FrontendModule } from "@/app/types";
-
-import { DashboardPage } from "./DashboardPage";
-import { ApiKeysPage } from "./ApiKeysPage";
-import { AuditLogPage } from "./AuditLogPage";
-import { SettingsPage } from "./SettingsPage";
-import { BillingPage } from "./BillingPage";
-import { CheckoutPage } from "./CheckoutPage";
-import { AdminUsersPage } from "./AdminUsersPage";
-import { AdminRolesPage } from "./AdminRolesPage";
-import { AdminPlansPage } from "./AdminPlansPage";
-import { AdminBillingPage } from "./AdminBillingPage";
-import { AdminDomainsPage } from "./AdminDomainsPage";
-import { AdminGitPage } from "./AdminGitPage";
-import { AdminPage } from "./AdminPage";
+import { lazyPage } from "@/app/lazyPage";
 
 /** Admin & back-office module — everything authed but not a product:
  *    - Dashboard, API Keys, user-side Billing/Checkout, Audit Log, Settings
  *    - Admin tools (Users, Roles, Plans, Domains, Git, system Billing)
- *  Each admin sub-page is internally guarded by AdminGuard / domain scoping. */
+ *  Each admin sub-page is internally guarded by AdminGuard / domain scoping.
+ *  All pages lazy-loaded — initial bundle stays small even though this
+ *  module has ~14 routes. */
 export const moduleManifest: FrontendModule = {
   name: "admin",
   label: "Admin & Back-office",
   routes: [
-    { path: "dashboard", element: <DashboardPage /> },
-    { path: "api-keys", element: <ApiKeysPage /> },
-    { path: "billing", element: <BillingPage /> },
-    { path: "checkout/:plan_code", element: <CheckoutPage /> },
-    { path: "audit-logs", element: <AuditLogPage /> },
-    { path: "settings", element: <SettingsPage /> },
+    { path: "dashboard",   element: lazyPage(() => import("./DashboardPage"), "DashboardPage") },
+    { path: "api-keys",    element: lazyPage(() => import("./ApiKeysPage"), "ApiKeysPage") },
+    { path: "billing",     element: lazyPage(() => import("./BillingPage"), "BillingPage") },
+    { path: "checkout/:plan_code", element: lazyPage(() => import("./CheckoutPage"), "CheckoutPage") },
+    { path: "audit-logs",  element: lazyPage(() => import("./AuditLogPage"), "AuditLogPage") },
+    { path: "settings",    element: lazyPage(() => import("./SettingsPage"), "SettingsPage") },
     // Admin sub-routes
-    { path: "admin", element: <Navigate to="/admin/users" replace /> },
-    { path: "admin/users", element: <AdminUsersPage /> },
-    { path: "admin/roles", element: <AdminRolesPage /> },
-    { path: "admin/plans", element: <AdminPlansPage /> },
-    { path: "admin/billing", element: <AdminBillingPage /> },
-    { path: "admin/domains", element: <AdminDomainsPage /> },
-    { path: "admin/git", element: <AdminGitPage /> },
-    { path: "admin/legacy", element: <AdminPage /> },
+    { path: "admin",           element: <Navigate to="/admin/users" replace /> },
+    { path: "admin/users",     element: lazyPage(() => import("./AdminUsersPage"), "AdminUsersPage") },
+    { path: "admin/roles",     element: lazyPage(() => import("./AdminRolesPage"), "AdminRolesPage") },
+    { path: "admin/plans",     element: lazyPage(() => import("./AdminPlansPage"), "AdminPlansPage") },
+    { path: "admin/billing",   element: lazyPage(() => import("./AdminBillingPage"), "AdminBillingPage") },
+    { path: "admin/domains",   element: lazyPage(() => import("./AdminDomainsPage"), "AdminDomainsPage") },
+    { path: "admin/git",       element: lazyPage(() => import("./AdminGitPage"), "AdminGitPage") },
+    { path: "admin/legacy",    element: lazyPage(() => import("./AdminPage"), "AdminPage") },
   ],
   nav: [
     // Top-level entries (above the auth group)

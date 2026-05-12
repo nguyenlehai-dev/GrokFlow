@@ -76,50 +76,6 @@ export function useLimit(key: string): number {
   return user.entitlements?.limits?.[key] ?? 0;
 }
 
-/** Pages a per-domain admin can always reach (their domain's user + role
- *  management). Without this, granting a domain only /gateway/* would
- *  lock the domain admin out of managing their own users. */
-const ADMIN_BUILTIN_PATHS = ["/admin/users", "/admin/roles"];
-
-function _matchesAny(allowed: string[], path: string): boolean {
-  return allowed.some((p) => path === p || path.startsWith(p + "/"));
-}
-
-/** Decide whether a given route path is accessible to the user.
- *
- *  Tier rules:
- *    super_admin → bypass everything (cross-domain).
- *    admin       → always sees /admin/users + /admin/roles for their domain;
- *                  every other path must be in their domain's allowlist
- *                  (effective_allowed_pages is set to domain.allowed_pages
- *                  by the backend when there is no per-user role).
- *    user        → must be in effective_allowed_pages (role ∩ domain).
- *
- *  Falls back to the domain-level check when the backend hasn't yet
- *  returned a per-user allowlist (boot tick, or legacy unscoped users).
- *
- *  Pure helper — caller passes the domain check so this module doesn't
- *  import the domain store and create a circular dep.
- */
-export function userCanSeePath(
-  user: User | null,
-  path: string,
-  domainCheck: (p: string) => boolean,
-): boolean {
-  if (!user) return domainCheck(path);
-  if (user.role === "super_admin") return true;
-
-  if (user.role === "admin") {
-    if (_matchesAny(ADMIN_BUILTIN_PATHS, path)) return true;
-    // Per-domain admin uses effective_allowed_pages too (it's the domain's
-    // list when they have no role). Falls back to domainCheck if missing.
-    const eff = user.effective_allowed_pages;
-    if (Array.isArray(eff)) return _matchesAny(eff, path);
-    return domainCheck(path);
-  }
-
-  // user / support
-  const eff = user.effective_allowed_pages;
-  if (Array.isArray(eff)) return _matchesAny(eff, path);
-  return domainCheck(path);
-}
+// userCanSeePath lives in core/permissions.ts — re-exported so existing
+// imports `from "@/core/auth/store"` keep working without churn.
+export { userCanSeePath } from "@/core/permissions";

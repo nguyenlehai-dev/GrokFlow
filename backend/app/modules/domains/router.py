@@ -11,11 +11,19 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from app.core.cache import invalidate, redis_cached
 from app.core.deps import SuperAdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound
 from app.models import Domain
 from app.modules.audit import service as audit
 from app.services import nginx_sync
+
+
+# How long to cache the public /api/domains/config response. Frontend hits
+# this on every page load; the data changes only when an admin edits the
+# domain row. 60s gives ~95% cache hit rate without making admin edits
+# feel stale for too long. Admin CRUD invalidates the cache below anyway.
+DOMAIN_CONFIG_TTL = 60
 
 router = APIRouter(tags=["domains"])
 
@@ -114,6 +122,10 @@ async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession)
     )
     await db.commit()
     await db.refresh(d)
+    # Bust any cached config for this hostname (+ the * wildcard, which any
+    # unknown host might be falling back to and now needs to recompute).
+    await invalidate(f"cache:domain-config:{hostname}")
+    await invalidate("cache:domain-config:*")
     return d
 
 
@@ -145,6 +157,7 @@ async def update_domain(
     )
     await db.commit()
     await db.refresh(d)
+    await invalidate(f"cache:domain-config:{d.hostname}")
     return d
 
 
@@ -160,13 +173,16 @@ async def delete_domain(domain_id: uuid.UUID, admin: SuperAdminUser, db: DbSessi
         db, user_id=admin.id, action="admin_delete_domain",
         target_type="domain", target_id=d.id, metadata={"hostname": d.hostname},
     )
+    hostname = d.hostname
     await db.delete(d)
     await db.commit()
+    await invalidate(f"cache:domain-config:{hostname}")
 
 
 # ---------------- Public config ----------------
 
 @router.get("/api/domains/config", response_model=DomainConfig)
+@redis_cached(ttl=DOMAIN_CONFIG_TTL, key="domain-config:{host}")
 async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
     """Resolve the access config for a given hostname.
 

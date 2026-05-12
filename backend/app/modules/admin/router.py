@@ -7,6 +7,13 @@ from sqlalchemy import func, select
 from app.core.deps import AdminUser, SuperAdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
 from app.core.security import hash_password
+from app.core.tenant import (
+    assert_same_domain,
+    assert_user_in_admin_domain,
+    bulk_fetch_map,
+    scope_by_domain,
+    scope_by_user_domain,
+)
 from app.models import ApiKey, Invoice, Job, Payment, Plan, Profile, Role, Subscription, User
 
 
@@ -31,51 +38,30 @@ async def _validate_role_id_for_domain(
 
 
 def _scope_users_query(q, admin: User):
-    """Restrict a User query to the admin's domain when they're not super.
-
-    super_admin: no filter (sees everything across domains).
-    admin:       only users whose domain_id matches theirs.
-    """
-    if admin.role == "super_admin":
-        return q
-    return q.where(User.domain_id == admin.domain_id)
+    """Compat alias — admin/users endpoints scope by users.domain_id directly."""
+    return scope_by_domain(q, User.domain_id, admin)
 
 
 def _assert_can_touch(admin: User, target: User) -> None:
-    """Raise if a domain admin tries to act on a user outside their domain."""
-    if admin.role == "super_admin":
-        return
-    if target.domain_id != admin.domain_id:
-        raise PermissionDenied("User không thuộc domain bạn quản lý")
-    # A non-super admin cannot escalate themselves or another admin's tier.
-    if target.role == "super_admin":
+    """Raise if a domain admin tries to act on a user outside their domain.
+
+    Also forbids any non-super admin from touching a super_admin row (tier
+    escalation guard). Wraps the generic `assert_same_domain` core helper.
+    """
+    assert_same_domain(admin, target.domain_id)
+    if admin.role != "super_admin" and target.role == "super_admin":
         raise PermissionDenied("Không có quyền sửa super_admin")
 
 
+# Thin module-level aliases so the rest of the file stays readable. The
+# real implementation lives in app.core.tenant — these one-liners just
+# pick the right column for billing rows (which use user_id).
 def _scope_to_admin_domain(q, user_id_column, admin: User):
-    """Narrow a billing query so a non-super admin only sees rows whose owning
-    user belongs to the admin's domain. Super admin sees everything.
-
-    Used by /subscriptions, /payments, /invoices. The billing tables don't
-    carry domain_id themselves; we go through the User FK each row already has.
-    """
-    if admin.role == "super_admin":
-        return q
-    return q.where(user_id_column.in_(
-        select(User.id).where(User.domain_id == admin.domain_id)
-    ))
+    return scope_by_user_domain(q, user_id_column, admin)
 
 
-async def _assert_billing_owner_in_admin_domain(
-    db, admin: User, user_id: uuid.UUID | None,
-) -> None:
-    """For single-row read/write on billing rows owned by `user_id`, ensure the
-    domain admin owns that user. No-op for super_admin and for unscoped rows."""
-    if admin.role == "super_admin" or not user_id:
-        return
-    owner = await db.get(User, user_id)
-    if not owner or owner.domain_id != admin.domain_id:
-        raise PermissionDenied("Bản ghi không thuộc domain bạn quản lý")
+async def _assert_billing_owner_in_admin_domain(db, admin: User, user_id):
+    return await assert_user_in_admin_domain(db, admin, user_id)
 from app.modules.audit import service as audit
 from app.modules.entitlements.catalog import FEATURES, LIMITS
 from app.modules.entitlements.service import get_effective_entitlements
@@ -378,17 +364,9 @@ async def delete_plan(plan_id: uuid.UUID, admin: SuperAdminUser, db: DbSession) 
 # ============================================================================
 
 
-async def _bulk_fetch_map(db, model, ids: set[uuid.UUID]) -> dict[uuid.UUID, object]:
-    """Fetch many rows by primary key in a single SELECT ... WHERE id IN (...).
-
-    Returns {id: row}. Empty input → empty dict (no query).
-    Used by the billing list endpoints to avoid the N+1 that hit when each
-    row's user / plan was loaded with its own db.get().
-    """
-    if not ids:
-        return {}
-    rows = (await db.execute(select(model).where(model.id.in_(ids)))).scalars().all()
-    return {row.id: row for row in rows}
+# Replaced with app.core.tenant.bulk_fetch_map — kept under the old name
+# so the rest of the file (and any external import) keeps working.
+_bulk_fetch_map = bulk_fetch_map
 
 
 async def _subs_to_out(

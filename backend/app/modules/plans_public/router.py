@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.core.cache import redis_cached
 from app.core.deps import DbSession
 from app.models import Plan
 
@@ -33,10 +34,16 @@ class PublicPlan(BaseModel):
 
 
 @router.get("/public", response_model=list[PublicPlan])
-async def list_public_plans(db: DbSession) -> list[Plan]:
+@redis_cached(ttl=300, key="plans-public")
+async def list_public_plans(db: DbSession) -> list[dict]:
+    """Public plans rarely change (admin tweaks a feature once a week at
+    most). 5-minute cache cuts the FE pricing page from a DB hit per visit
+    to one per 5min. Admin /plans CRUD doesn't bust this — the slight
+    staleness is acceptable for marketing data."""
     rows = (
         await db.execute(
             select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.sort_order)
         )
     ).scalars().all()
-    return list(rows)
+    # Serialize to plain dicts so the cache stores JSON, not ORM instances.
+    return [PublicPlan.model_validate(p).model_dump(mode="json") for p in rows]
