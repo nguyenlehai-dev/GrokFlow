@@ -69,4 +69,4 @@ restic forget --prune \
 
 # ─── 7. Sanity: print the new snapshot id ──────────────────────────────────
 echo "OK $(date -Iseconds) — latest snapshots:"
-restic snapshots --last 2 --compact
+restic snapshots --latest 2 --compact
