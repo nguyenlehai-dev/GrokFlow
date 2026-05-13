@@ -18,6 +18,25 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-grokflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
       POSTGRES_DB: ${POSTGRES_DB:-grokflow}
+    # Bumped from defaults for a multi-tenant SaaS workload — shared_buffers
+    # gets ~25% of the container's RAM cap, effective_cache_size another 50%
+    # so the planner knows the OS pagecache is doing heavy lifting. work_mem
+    # at 8 MB keeps sort/hash operations off temp files for typical paginated
+    # admin queries.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_connections=80
+      - -c
+      - random_page_cost=1.1
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,13 +46,15 @@ services:
       retries: 5
     deploy:
       resources:
-        limits: { memory: 1G, cpus: "1.0" }
+        # Bumped from 1G → 2G — shared_buffers 512MB + maintenance_work_mem
+        # 128MB + work_mem buffers (80 conns × 8MB peak) need headroom.
+        limits: { memory: 2G, cpus: "1.0" }
     logging: *default-logging
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "384mb", "--maxmemory-policy", "allkeys-lru"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -43,7 +64,7 @@ services:
       retries: 5
     deploy:
       resources:
-        limits: { memory: 384M, cpus: "0.5" }
+        limits: { memory: 512M, cpus: "0.5" }
     logging: *default-logging
 
   backend:
@@ -66,6 +87,10 @@ services:
       HOST_SSH_PORT: ${HOST_SSH_PORT:-22}
       HOST_SSH_USER: ${HOST_SSH_USER:-vpsroot}
       HOST_SSH_PASSWORD: ${HOST_SSH_PASSWORD:-}
+      # Async UvicornWorker handles many concurrent requests per process,
+      # so 1 per vCPU is the right baseline for a 2-vCPU VPS. The old
+      # default of 4 wasted ~400 MB on duplicate process state.
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       HOST_GROKFLOW_PATH: ${HOST_GROKFLOW_PATH:-/home/vpsroot/grokflow}
       # NOTE: legacy `gatewaygrok-backend` SSO proxy env vars were removed in
       # May 2026 — that external service was replaced by the LLM Gateway

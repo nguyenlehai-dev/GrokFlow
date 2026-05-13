@@ -14,7 +14,9 @@ session is closed.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -30,6 +32,18 @@ from app.models import FlowJob
 from .ffmpeg import FfmpegError, probe_duration, run_ffmpeg
 
 logger = logging.getLogger(__name__)
+
+
+# Process-level FFmpeg concurrency cap. Each FFmpeg encode peaks at ~600 MB
+# RAM + one full vCPU; the backend container is capped at 1.5 GB and lives on
+# a 2-vCPU VPS, so >2 concurrent encodes either OOMs or thrashes. We size
+# this per-gunicorn-worker — with GUNICORN_WORKERS=2 and FLOW_MAX_CONCURRENT=1
+# the system-wide ceiling is 2 simultaneous encodes, which is the sweet spot.
+#
+# Jobs over the cap stay in the "pending" state and queue here naturally
+# (the semaphore.acquire blocks the BackgroundTasks thread until a slot
+# frees). No external queue / Celery / Redis-stream needed.
+_FFMPEG_SEM = threading.Semaphore(int(os.getenv("FLOW_MAX_CONCURRENT", "1")))
 
 
 # ---------------------------------------------------------------------------
@@ -161,56 +175,60 @@ def _process(job_id: uuid.UUID, recipe) -> None:
         logger.error("flow job %s vanished before processing", job_id)
         return
 
-    _sync_update(
-        job_id,
-        status="processing",
-        progress=10,
-        started_at=datetime.now(timezone.utc),
-    )
+    # Block on the FFmpeg slot before flipping status to "processing" — that
+    # way the FE sees the job correctly sitting in "pending" while queued
+    # rather than a fake "processing" with 0% progress.
+    with _FFMPEG_SEM:
+        _sync_update(
+            job_id,
+            status="processing",
+            progress=10,
+            started_at=datetime.now(timezone.utc),
+        )
 
-    try:
-        inputs = _resolve_inputs(job)
-        tmp_out = recipe(inputs)
-        # Probe BEFORE moving — the publish step renames the file out from
-        # under us, and ffprobe is happy with either location anyway.
-        media_seconds = probe_duration(tmp_out)
-        url, fname, size = _publish_output(job, tmp_out, ext=tmp_out.suffix or ".mp4")
-        _sync_update(
-            job_id,
-            status="completed",
-            progress=100,
-            output_url=url,
-            output_filename=fname,
-            file_size=size,
-            duration=round(time.time() - started, 3),
-            completed_at=datetime.now(timezone.utc),
-            error_message=None,
-        )
-        # Clean up input dir — output is published, inputs are dead weight.
-        # Comment out if you want retry-from-inputs to work without re-upload.
         try:
-            shutil.rmtree(input_dir(job_id), ignore_errors=True)
-        except Exception:  # noqa: BLE001
-            pass
-        _ = media_seconds  # currently unused — exposed via probe for future UI
-    except FfmpegError as exc:
-        logger.warning("flow %s failed: %s", job_id, exc)
-        _sync_update(
-            job_id,
-            status="failed",
-            error_message=str(exc),
-            duration=round(time.time() - started, 3),
-            completed_at=datetime.now(timezone.utc),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("flow %s crashed", job_id)
-        _sync_update(
-            job_id,
-            status="failed",
-            error_message=f"internal error: {exc}",
-            duration=round(time.time() - started, 3),
-            completed_at=datetime.now(timezone.utc),
-        )
+            inputs = _resolve_inputs(job)
+            tmp_out = recipe(inputs)
+            # Probe BEFORE moving — the publish step renames the file out from
+            # under us, and ffprobe is happy with either location anyway.
+            media_seconds = probe_duration(tmp_out)
+            url, fname, size = _publish_output(job, tmp_out, ext=tmp_out.suffix or ".mp4")
+            _sync_update(
+                job_id,
+                status="completed",
+                progress=100,
+                output_url=url,
+                output_filename=fname,
+                file_size=size,
+                duration=round(time.time() - started, 3),
+                completed_at=datetime.now(timezone.utc),
+                error_message=None,
+            )
+            # Clean up input dir — output is published, inputs are dead weight.
+            # Comment out if you want retry-from-inputs to work without re-upload.
+            try:
+                shutil.rmtree(input_dir(job_id), ignore_errors=True)
+            except Exception:  # noqa: BLE001
+                pass
+            _ = media_seconds  # currently unused — exposed via probe for future UI
+        except FfmpegError as exc:
+            logger.warning("flow %s failed: %s", job_id, exc)
+            _sync_update(
+                job_id,
+                status="failed",
+                error_message=str(exc),
+                duration=round(time.time() - started, 3),
+                completed_at=datetime.now(timezone.utc),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("flow %s crashed", job_id)
+            _sync_update(
+                job_id,
+                status="failed",
+                error_message=f"internal error: {exc}",
+                duration=round(time.time() - started, 3),
+                completed_at=datetime.now(timezone.utc),
+            )
 
 
 # Each tool's argv assembled inline — keeping them close together is easier
