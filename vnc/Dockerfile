@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium chromium-sandbox \
-    xvfb x11vnc \
+    xvfb x11vnc autocutsel \
     novnc websockify \
     supervisor nginx-light \
     fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
