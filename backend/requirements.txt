@@ -4,6 +4,10 @@ pydantic==2.9.2
 pydantic-settings==2.5.2
 sqlalchemy==2.0.35
 asyncpg==0.29.0
+# Sync driver — needed by Flow module's BackgroundTask DB updates
+# (create_engine defaults to psycopg2). Without this the Flow worker
+# never marks jobs as processing/completed and they hang at 'pending'.
+psycopg2-binary==2.9.9
 alembic==1.13.3
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
