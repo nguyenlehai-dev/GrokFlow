@@ -1,6 +1,6 @@
-import type { TranslationKeys } from "./vi";
+import type { Translations } from "./vi";
 
-export const en: TranslationKeys = {
+export const en: Translations = {
   nav: {
     dashboard: "Dashboard",
     api_keys: "API Keys",
