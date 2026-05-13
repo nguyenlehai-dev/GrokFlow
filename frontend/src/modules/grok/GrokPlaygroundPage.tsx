@@ -35,11 +35,12 @@ export function GrokPlaygroundPage() {
   const verified = useGrokKey((s) => s.current);
   const clear = useGrokKey((s) => s.clear);
   const domainConfig = useDomainStore((s) => s.config);
-  const isAdmin = me?.role === "admin" || me?.role === "super_admin";
-  // Domain-level gate: super_admin can disable the API-key requirement
-  // per domain. Default is `true` (locked) so opting out is explicit.
+  // Only super_admin bypasses the API-key gate — domain admins are
+  // tenants and go through the same auth path as third-party callers.
+  // Domain-level toggle on `/admin/domains` can disable the gate.
+  const isSuper = me?.role === "super_admin";
   const gateRequired = domainConfig?.require_playground_key ?? true;
-  const locked = gateRequired && !isAdmin && !verified;
+  const locked = gateRequired && !isSuper && !verified;
 
   return (
     <div className="relative space-y-4">
@@ -67,7 +68,7 @@ export function GrokPlaygroundPage() {
 
       {locked && <GrokKeyLockModal />}
 
-      <PlaygroundForm bearer={verified?.key ?? null} isAdmin={isAdmin} />
+      <PlaygroundForm bearer={verified?.key ?? null} isAdmin={isSuper} />
     </div>
   );
 }
