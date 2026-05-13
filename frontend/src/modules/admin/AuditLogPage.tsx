@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Globe, Search, X } from "lucide-react";
 
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
@@ -69,6 +69,10 @@ export function AuditLogPage() {
   const [params, setParams] = useState(pending);
   const [offset, setOffset] = useState(0);
   const [limit, setLimit] = useState(50);
+  // Domain tabs — super_admin gets a tab per registered domain plus "All".
+  // The tab maps 1:1 to the `domain_id` filter so switching tabs is a
+  // single setState; the table refetches via React Query's keying.
+  const [activeTab, setActiveTab] = useState<string>("");  // "" = All
 
   // Self-view (customer) shape vs admin paged shape — branch up front.
   const isSelf = !isAdmin;
@@ -92,12 +96,24 @@ export function AuditLogPage() {
     },
   });
 
-  // Domains list for the super_admin tenant filter — skipped for everyone else.
+  // Domains list — used both as the tab strip source AND the hostname lookup
+  // for rendering the Domain column. Refetched every 30s so a new domain
+  // created in another tab (or by another admin) shows up automatically
+  // without a page reload — satisfies "log tab auto-sinh khi tạo domain".
   const { data: domains } = useQuery({
     queryKey: ["admin-domains"],
     queryFn: async () => (await api.get<Domain[]>("/api/admin/domains")).data,
     enabled: isSuper,
+    refetchInterval: 30_000,
   });
+
+  // Keep the activeTab + the actual filter in sync. Switching tabs replaces
+  // pending.domain_id then re-applies — single source of truth is the tab.
+  useEffect(() => {
+    setPending((p) => ({ ...p, domain_id: activeTab }));
+    setParams((p) => ({ ...p, domain_id: activeTab }));
+    setOffset(0);
+  }, [activeTab]);
 
   const applyFilters = () => {
     setOffset(0);
@@ -134,10 +150,37 @@ export function AuditLogPage() {
           {isSelf
             ? "Lịch sử hoạt động của bạn."
             : isSuper
-            ? "Toàn bộ activity trên platform. Lọc theo domain để xem 1 tenant."
+            ? "Toàn bộ activity trên platform. Chọn tab để xem 1 tenant; tab tự sinh khi tạo domain mới."
             : "Activity trong domain của bạn."}
         </p>
       </header>
+
+      {/* ─── Tab strip per domain — super_admin only ─── */}
+      {isSuper && domains && domains.length > 0 && (
+        <div className="card overflow-x-auto p-0">
+          <div className="flex items-stretch border-b border-slate-100">
+            <TabBtn active={activeTab === ""} onClick={() => setActiveTab("")}>
+              <Globe size={14} />
+              <span>Tất cả</span>
+              <span className="text-xs text-slate-400">(toàn hệ thống)</span>
+            </TabBtn>
+            {domains.map((d) => (
+              <TabBtn
+                key={d.id}
+                active={activeTab === d.id}
+                onClick={() => setActiveTab(d.id)}
+              >
+                <span>{d.hostname}</span>
+                {d.status === "active" ? (
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                ) : (
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-300" />
+                )}
+              </TabBtn>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ─── Filter bar — admin only ─── */}
       {!isSelf && (
@@ -207,24 +250,10 @@ export function AuditLogPage() {
                 onChange={(e) => setPending({ ...pending, target_id: e.target.value })}
               />
             </label>
-            {isSuper && (
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Domain
-                </span>
-                <select
-                  className="input mt-1 w-full"
-                  value={pending.domain_id}
-                  onChange={(e) => setPending({ ...pending, domain_id: e.target.value })}
-                >
-                  <option value="">— Tất cả —</option>
-                  {(domains ?? []).map((d) => (
-                    <option key={d.id} value={d.id}>{d.hostname}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <div className={isSuper ? "" : "md:col-span-2"}>
+            {/* Domain dropdown removed — replaced by tab strip above. The
+                domain_id filter still flows through `params.domain_id`
+                from the active tab via the effect upstream. */}
+            <div className={isSuper ? "md:col-span-2" : "md:col-span-2"}>
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Date range
               </span>
@@ -438,5 +467,38 @@ export function AuditLogPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Single tab button used in the domain tab strip. Active tab shows a
+ *  violet underline; hover lightens; long hostnames truncate with `max-w`.
+ *  Children render inline so callers can pass an icon + name + status dot
+ *  (or anything else) in one block. */
+function TabBtn({
+  active, onClick, children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "relative flex flex-shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition",
+        active
+          ? "text-violet-700"
+          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+      ].join(" ")}
+    >
+      {children}
+      {active && (
+        <span
+          className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-violet-600"
+          aria-hidden
+        />
+      )}
+    </button>
   );
 }
