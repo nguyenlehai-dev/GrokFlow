@@ -1,32 +1,90 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
+import {
+  User as UserIcon, KeyRound, Webhook, Globe, Bell, Image as ImageIcon,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
 import { toast } from "@/components/ui/Toast";
 
-interface WebhookOut {
-  webhook_url: string | null;
-  has_secret: boolean;
-  new_secret?: string | null;
-}
+/** Tabbed settings page — each tab is a small functional area.
+ *
+ *  Tabs:
+ *    Tài khoản      — read-only identity + password change
+ *    Webhook        — existing webhook config
+ *    Đa ngôn ngữ    — locale switcher (vi/en today)
+ *    Thông báo      — per-event-type notification preferences
+ *    Grok Gallery   — link to the standalone gallery page
+ */
+
+type TabKey = "account" | "webhook" | "locale" | "notif" | "gallery";
+
+const TABS: { key: TabKey; label: string; icon: typeof UserIcon }[] = [
+  { key: "account",  label: "Tài khoản",     icon: UserIcon },
+  { key: "webhook",  label: "Webhook",       icon: Webhook },
+  { key: "locale",   label: "Đa ngôn ngữ",   icon: Globe },
+  { key: "notif",    label: "Thông báo",     icon: Bell },
+  { key: "gallery",  label: "Grok Gallery",  icon: ImageIcon },
+];
 
 export function SettingsPage() {
-  const user = useAuthStore((s) => s.user);
+  const [tab, setTab] = useState<TabKey>("account");
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-4 max-w-3xl">
       <h1 className="text-2xl font-semibold">Settings</h1>
 
+      <div className="card p-0 overflow-x-auto">
+        <div className="flex items-stretch border-b border-slate-100">
+          {TABS.map((t) => {
+            const Icon = t.icon;
+            const active = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={`relative inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition ${
+                  active ? "text-violet-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                }`}
+              >
+                <Icon size={14} />
+                {t.label}
+                {active && (
+                  <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-violet-600" aria-hidden />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {tab === "account" && <AccountTab />}
+        {tab === "webhook" && <WebhookSection />}
+        {tab === "locale" && <LocaleTab />}
+        {tab === "notif" && <NotificationsTab />}
+        {tab === "gallery" && <GalleryTab />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Account ────────────────────────────────────────────────────────────
+function AccountTab() {
+  const user = useAuthStore((s) => s.user);
+  return (
+    <>
       <section className="card space-y-2">
         <h2 className="font-semibold">Tài khoản</h2>
         <p className="text-sm text-slate-600">Email: <span className="font-medium">{user?.email}</span></p>
         <p className="text-sm text-slate-600">Role: <span className="font-medium">{user?.role}</span></p>
         <p className="text-sm text-slate-600">Status: <span className="font-medium">{user?.status}</span></p>
       </section>
-
       <PasswordSection />
-      <WebhookSection />
-    </div>
+    </>
   );
 }
 
@@ -39,7 +97,7 @@ function PasswordSection() {
   };
   return (
     <section className="card space-y-3">
-      <h2 className="font-semibold">Đổi mật khẩu</h2>
+      <h2 className="font-semibold flex items-center gap-2"><KeyRound size={16} /> Đổi mật khẩu</h2>
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-2">
         <div>
           <label className="text-sm font-medium">Mật khẩu hiện tại</label>
@@ -53,6 +111,13 @@ function PasswordSection() {
       </form>
     </section>
   );
+}
+
+// ─── Webhook ────────────────────────────────────────────────────────────
+interface WebhookOut {
+  webhook_url: string | null;
+  has_secret: boolean;
+  new_secret?: string | null;
 }
 
 function WebhookSection() {
@@ -85,7 +150,7 @@ function WebhookSection() {
 
   return (
     <section className="card space-y-3">
-      <h2 className="font-semibold">Webhook (job complete)</h2>
+      <h2 className="font-semibold flex items-center gap-2"><Webhook size={16} /> Webhook (job complete)</h2>
       <p className="text-sm text-slate-600">
         Server sẽ POST event <code>job.success</code> / <code>job.failed</code> / <code>job.cancelled</code> tới URL này.
         Header <code>X-Grokflow-Signature</code> = HMAC-SHA256(secret, body) base64.
@@ -114,6 +179,172 @@ function WebhookSection() {
           <button className="btn-ghost ml-2" onClick={() => setRevealed(null)}>Tôi đã lưu</button>
         </div>
       )}
+    </section>
+  );
+}
+
+// ─── Locale (i18n preference) ───────────────────────────────────────────
+function LocaleTab() {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["settings-locale"],
+    queryFn: async () => (await api.get<{ locale: string | null }>("/api/settings/locale")).data,
+  });
+  const [pick, setPick] = useState<string | null>(null);
+  const current = pick ?? data?.locale ?? "vi";
+  const save = useMutation({
+    mutationFn: (locale: string) => api.put("/api/settings/locale", { locale }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings-locale"] });
+      qc.invalidateQueries({ queryKey: ["me"] });
+      toast("Đã lưu ngôn ngữ. Refresh để áp dụng toàn bộ UI.", "success");
+    },
+  });
+  return (
+    <section className="card space-y-3">
+      <h2 className="font-semibold flex items-center gap-2"><Globe size={16} /> Đa ngôn ngữ</h2>
+      <p className="text-sm text-slate-600">
+        Chọn ngôn ngữ mặc định cho tài khoản. Toàn bộ UI sẽ được dịch trong phase 2 —
+        hiện preference đã được lưu, một số label sidebar/header sẽ đổi ngay.
+      </p>
+      <div className="flex items-center gap-3">
+        <select
+          className="input w-48"
+          value={current}
+          onChange={(e) => setPick(e.target.value)}
+        >
+          <option value="vi">Tiếng Việt</option>
+          <option value="en">English</option>
+        </select>
+        <button
+          className="btn-primary"
+          disabled={!pick || pick === data?.locale || save.isPending}
+          onClick={() => pick && save.mutate(pick)}
+        >
+          {save.isPending ? "Đang lưu..." : "Lưu"}
+        </button>
+      </div>
+      <p className="text-xs text-slate-400">
+        Hiện tại: <code>{data?.locale ?? "(chưa đặt — auto detect từ browser)"}</code>
+      </p>
+    </section>
+  );
+}
+
+// ─── Notifications preferences ──────────────────────────────────────────
+interface NotifPrefs {
+  prefs: Record<string, { email: boolean; in_app: boolean }>;
+}
+
+const NOTIF_LABEL: Record<string, string> = {
+  job_completed:        "Grok job hoàn tất (success)",
+  job_failed:           "Grok job lỗi (failed)",
+  flow_completed:       "Flow video xử lý xong",
+  billing_due:          "Hóa đơn sắp đến hạn",
+  domain_assignment:    "Được gán quyền vào domain mới",
+  profile_login_needed: "Profile cần đăng nhập lại (cookies hết hạn)",
+  system_announcement:  "Thông báo hệ thống / bảo trì",
+};
+
+function NotificationsTab() {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["settings-notif-prefs"],
+    queryFn: async () => (await api.get<NotifPrefs>("/api/settings/notifications")).data,
+  });
+  const [local, setLocal] = useState<NotifPrefs["prefs"] | null>(null);
+  const prefs = local ?? data?.prefs ?? {};
+
+  const save = useMutation({
+    mutationFn: () => api.put("/api/settings/notifications", { prefs }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings-notif-prefs"] });
+      toast("Đã lưu preference thông báo", "success");
+      setLocal(null);
+    },
+  });
+
+  const toggle = (event: string, channel: "email" | "in_app") => {
+    setLocal((cur) => {
+      const base = cur ?? { ...(data?.prefs ?? {}) };
+      const entry = base[event] ?? { email: false, in_app: true };
+      return { ...base, [event]: { ...entry, [channel]: !entry[channel] } };
+    });
+  };
+
+  return (
+    <section className="card space-y-3">
+      <h2 className="font-semibold flex items-center gap-2"><Bell size={16} /> Thông báo</h2>
+      <p className="text-sm text-slate-600">
+        Chọn kênh nhận từng loại sự kiện. <strong>In-app</strong> hiện ngay ở chuông góc trên, <strong>Email</strong> gửi sau (phase 2 sẽ wire email service).
+      </p>
+
+      <div className="overflow-hidden rounded-md border border-slate-200">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">Sự kiện</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold text-slate-600">In-app</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold text-slate-600">Email</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {Object.keys(NOTIF_LABEL).map((event) => {
+              const p = prefs[event] ?? { email: false, in_app: true };
+              return (
+                <tr key={event}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-700">{NOTIF_LABEL[event]}</div>
+                    <code className="text-xs text-slate-400">{event}</code>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={p.in_app}
+                      onChange={() => toggle(event, "in_app")}
+                      className="h-4 w-4 rounded border-slate-300 accent-violet-600"
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={p.email}
+                      onChange={() => toggle(event, "email")}
+                      className="h-4 w-4 rounded border-slate-300 accent-violet-600"
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          className="btn-primary"
+          disabled={!local || save.isPending}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? "Đang lưu..." : "Lưu"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ─── Grok Gallery shortcut ──────────────────────────────────────────────
+function GalleryTab() {
+  return (
+    <section className="card space-y-3">
+      <h2 className="font-semibold flex items-center gap-2"><ImageIcon size={16} /> Grok Gallery</h2>
+      <p className="text-sm text-slate-600">
+        Xem mọi kết quả Grok image/video đã render với filter theo user, profile, job_type, thời gian.
+        Page riêng để hiển thị grid + preview tốt hơn.
+      </p>
+      <Link to="/gallery" className="btn-primary inline-flex items-center gap-2 w-fit">
+        <ImageIcon size={14} /> Mở Gallery
+      </Link>
     </section>
   );
 }

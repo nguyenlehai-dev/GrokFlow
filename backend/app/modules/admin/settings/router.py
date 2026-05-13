@@ -60,3 +60,83 @@ async def change_password(payload: PasswordChange, user: CurrentUser, db: DbSess
                            target_type="user", target_id=user.id)
     await db.commit()
     return {"ok": True}
+
+
+# ─── i18n locale preference ─────────────────────────────────────────────
+class LocaleConfig(BaseModel):
+    locale: str = Field(min_length=2, max_length=10, description="vi | en")
+
+
+class LocaleOut(BaseModel):
+    locale: str | None
+
+
+@router.get("/locale", response_model=LocaleOut)
+async def get_locale(user: CurrentUser) -> LocaleOut:
+    return LocaleOut(locale=user.locale)
+
+
+@router.put("/locale", response_model=LocaleOut)
+async def set_locale(payload: LocaleConfig, user: CurrentUser, db: DbSession) -> LocaleOut:
+    # No allowlist server-side — the FE only offers vi/en today, but a future
+    # 3rd language doesn't require a BE change. Length-bounded to avoid abuse.
+    user.locale = payload.locale
+    await audit.log_action(
+        db, user_id=user.id, action="set_locale",
+        target_type="user", target_id=user.id,
+        metadata={"locale": payload.locale},
+    )
+    await db.commit()
+    return LocaleOut(locale=user.locale)
+
+
+# ─── Notification preferences ───────────────────────────────────────────
+# Stored as a JSON map { event_key: { email: bool, in_app: bool } } so adding
+# a new event type is a 1-line config change, no migration.
+DEFAULT_NOTIFICATION_PREFS: dict[str, dict[str, bool]] = {
+    "job_completed":      {"email": False, "in_app": True},
+    "job_failed":         {"email": True,  "in_app": True},
+    "billing_due":        {"email": True,  "in_app": True},
+    "domain_assignment":  {"email": False, "in_app": True},
+    "profile_login_needed": {"email": True, "in_app": True},
+    "flow_completed":     {"email": False, "in_app": True},
+    "system_announcement": {"email": True, "in_app": True},
+}
+
+
+class NotificationPrefsOut(BaseModel):
+    prefs: dict[str, dict[str, bool]]
+
+
+class NotificationPrefsUpdate(BaseModel):
+    prefs: dict[str, dict[str, bool]]
+
+
+@router.get("/notifications", response_model=NotificationPrefsOut)
+async def get_notification_prefs(user: CurrentUser) -> NotificationPrefsOut:
+    # Merge stored prefs over defaults so newly-added event types appear
+    # with sensible defaults without the user having to re-save.
+    stored = user.notification_prefs or {}
+    merged = {**DEFAULT_NOTIFICATION_PREFS, **stored}
+    return NotificationPrefsOut(prefs=merged)
+
+
+@router.put("/notifications", response_model=NotificationPrefsOut)
+async def set_notification_prefs(
+    payload: NotificationPrefsUpdate, user: CurrentUser, db: DbSession,
+) -> NotificationPrefsOut:
+    # Drop unknown event keys — keeps the JSON column tidy + prevents abuse.
+    cleaned = {
+        k: {"email": bool(v.get("email", False)), "in_app": bool(v.get("in_app", True))}
+        for k, v in payload.prefs.items()
+        if k in DEFAULT_NOTIFICATION_PREFS
+    }
+    user.notification_prefs = cleaned
+    await audit.log_action(
+        db, user_id=user.id, action="set_notification_prefs",
+        target_type="user", target_id=user.id,
+        metadata={"keys": sorted(cleaned.keys())},
+    )
+    await db.commit()
+    merged = {**DEFAULT_NOTIFICATION_PREFS, **cleaned}
+    return NotificationPrefsOut(prefs=merged)

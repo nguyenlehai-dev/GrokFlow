@@ -87,6 +87,12 @@ class User(Base, TimestampMixin):
     role_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("roles.id", ondelete="SET NULL"), index=True,
     )
+    # UI preferences. `locale` is the i18n choice (vi / en) — FE picks
+    # default from browser if NULL on first login. `notification_prefs`
+    # is a JSON blob of { event_key: { email: bool, in_app: bool } } so we
+    # don't have to bump a column every time a new event type is added.
+    locale: Mapped[str | None] = mapped_column(String(10))
+    notification_prefs: Mapped[dict | None] = mapped_column(JSONType)
 
     plan: Mapped[Plan | None] = relationship()
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -583,6 +589,33 @@ class GwRequest(Base, TimestampMixin):
     cost_cents: Mapped[int | None] = mapped_column(Integer)
 
 
+class Notification(Base, TimestampMixin):
+    """In-app notification queue.
+
+    The bell icon in the FE header polls `GET /api/notifications?unread=1`
+    every 15s and renders a dropdown. `kind` is a free-text event key
+    (job_completed / job_failed / billing_due / domain_assignment / …)
+    so adding a new event type is a 1-line backend change, no migration.
+
+    `target_url` is the FE route the user should land on when they click
+    the row — e.g. `/grok/jobs/<id>` after a job_completed. Leaving it
+    NULL just shows the notification without a click affordance.
+    """
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    target_url: Mapped[str | None] = mapped_column(String(500))
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="info")
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class FlowJob(Base, TimestampMixin):
     """Video-processing job (Flow module). Owns its own table because the
     work-unit shape is very different from the Grok automation `jobs` row
@@ -636,4 +669,5 @@ __all__ = [
     "GwRequest",
     "FlowJob",
     "ProfileDomainAssignment",
+    "Notification",
 ]

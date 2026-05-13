@@ -58,3 +58,6 @@ class MeResponse(BaseModel):
     # menu visibility narrows per-user.
     effective_allowed_pages: list[str] | None = None
     entitlements: EntitlementsResponse
+    # UI preferences. FE bootstraps i18next + notification bell on these.
+    locale: str | None = None
+    notification_prefs: dict | None = None

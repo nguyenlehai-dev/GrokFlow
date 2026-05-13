@@ -151,4 +151,6 @@ async def me(user: CurrentUser, db: DbSession) -> MeResponse:
         role_name=role_name,
         effective_allowed_pages=effective_pages,
         entitlements=EntitlementsResponse(**eff),
+        locale=user.locale,
+        notification_prefs=user.notification_prefs,
     )

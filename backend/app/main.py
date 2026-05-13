@@ -10,6 +10,8 @@ from app.modules.admin.router import router as admin_router
 from app.modules.entitlements.service import seed_default_plans
 from app.modules.auth.api_keys.router import router as api_keys_router
 from app.modules.admin.audit.router import router as audit_router
+from app.modules.admin.gallery.router import router as gallery_router
+from app.modules.admin.notifications.router import router as notifications_router
 from app.modules.auth.router import router as auth_router
 from app.modules.landing.billing.router import router as billing_router
 from app.modules.admin.dashboard.router import router as dashboard_router
@@ -74,6 +76,8 @@ app.include_router(profiles_router)
 app.include_router(jobs_router)
 app.include_router(files_router)
 app.include_router(audit_router)
+app.include_router(gallery_router)
+app.include_router(notifications_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(dashboard_router)

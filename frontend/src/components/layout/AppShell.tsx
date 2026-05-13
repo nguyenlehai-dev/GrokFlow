@@ -7,6 +7,7 @@ import { useDomainStore } from "@/core/domain/store";
 import type { NavEntry, NavLeaf, NavGroup } from "@/app/types";
 import { getAuthedNav } from "@/app/moduleRegistry";
 import { useDocumentTitle } from "@/core/useDocumentTitle";
+import { NotificationBell } from "./NotificationBell";
 
 // Sidebar entries come from the module registry — each module owns its own
 // nav. AppShell just filters by role/domain/feature and renders. The
@@ -149,10 +150,13 @@ export function AppShell() {
               )}
             </div>
           </div>
-          <button onClick={onLogout} className="btn-ghost shrink-0">
-            <LogOut size={16} className="sm:mr-2" />
-            <span className="hidden sm:inline">Logout</span>
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <NotificationBell />
+            <button onClick={onLogout} className="btn-ghost">
+              <LogOut size={16} className="sm:mr-2" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
         </header>
         <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
           <Outlet />

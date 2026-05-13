@@ -24,6 +24,7 @@ export const moduleManifest: FrontendModule = {
     { path: "checkout/:plan_code", element: lazyPage(() => import("./CheckoutPage"), "CheckoutPage") },
     { path: "audit-logs",  element: lazyPage(() => import("./AuditLogPage"), "AuditLogPage") },
     { path: "settings",    element: lazyPage(() => import("./SettingsPage"), "SettingsPage") },
+    { path: "gallery",     element: lazyPage(() => import("./GalleryPage"), "GalleryPage") },
     // Admin sub-routes
     { path: "admin",           element: <Navigate to="/admin/users" replace /> },
     { path: "admin/users",     element: lazyPage(() => import("./AdminUsersPage"), "AdminUsersPage") },
