@@ -1,4 +1,4 @@
-"""Inspect rebuild state — what's actually deployed."""
+"""Diagnose why VNC rebuild silently failed."""
 from __future__ import annotations
 
 import os
@@ -20,38 +20,32 @@ c.connect(HOST, username=USER, password=PASSWORD, timeout=20)
 script = textwrap.dedent("""\
     #!/usr/bin/env bash
     cd /home/vpsroot/grokflow
-    echo "=== git HEAD ==="
-    git log --oneline -2
+    echo "=== git state on VPS ==="
+    git log --oneline -3
+    git status -sb | head -3
 
     echo
-    echo "=== chrome-vnc image age + ID ==="
-    docker images grokflow/chrome-vnc --format '{{.Repository}}:{{.Tag}}\\t{{.CreatedSince}}\\t{{.Size}}\\t{{.ID}}' | head -3
+    echo "=== vnc/Dockerfile in VPS — does it have the split autocutsel? ==="
+    grep -A 4 "autocutsel" vnc/Dockerfile 2>&1 | head -10
 
     echo
-    echo "=== frontend image age ==="
-    docker images grokflow/frontend --format '{{.Repository}}:{{.Tag}}\\t{{.CreatedSince}}\\t{{.Size}}' | head -3
+    echo "=== frontend/nginx.conf in VPS — clipboardSync flag? ==="
+    grep "clipboardSync" frontend/nginx.conf 2>&1 | head -3
 
     echo
-    echo "=== running containers ==="
-    docker ps --filter name=grokflow --format '{{.Names}}\\t{{.Status}}\\t{{.Image}}' | head -10
-
-    echo
-    echo "=== nginx vnc redirect line in running frontend ==="
-    docker exec grokflow-frontend-1 grep "vnc.html" /etc/nginx/conf.d/default.conf 2>&1 | head -3
-
-    echo
-    echo "=== still building? any in-flight docker build ==="
-    pgrep -af 'docker.* build' | head -5 || echo "(no active build)"
+    echo "=== /tmp/rebuild-vnc.sh exists? what did it contain? ==="
+    ls -la /tmp/rebuild-vnc.sh 2>&1
+    [ -f /tmp/rebuild-vnc.sh ] && head -8 /tmp/rebuild-vnc.sh
 """)
 
 sftp = c.open_sftp()
-with sftp.open("/tmp/inspect.sh", "w") as f:
+with sftp.open("/tmp/diag.sh", "w") as f:
     f.write(script)
-sftp.chmod("/tmp/inspect.sh", 0o755)
+sftp.chmod("/tmp/diag.sh", 0o755)
 sftp.close()
 
 _, stdout, _ = c.exec_command(
-    f"echo {PASSWORD} | sudo -S bash /tmp/inspect.sh",
+    f"echo {PASSWORD} | sudo -S bash /tmp/diag.sh",
     timeout=60,
 )
 stdout.channel.settimeout(60.0)

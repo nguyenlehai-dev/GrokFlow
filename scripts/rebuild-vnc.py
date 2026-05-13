@@ -1,15 +1,15 @@
-"""Rebuild the chrome-vnc image and recreate every running VNC container.
+"""Rebuild chrome-vnc + frontend with the new clipboard-sync changes.
 
-Run after vnc/* changes so existing per-profile containers pick up the
-new image. Backend keeps existing CDP connections by spawning fresh VNC
-containers as users re-open profiles — but to make the switch immediate
-for an active session we recreate the running ones in place.
+Run via nohup on the VPS so the build survives SSH channel timeouts —
+the previous attempts had paramiko close the channel mid-build, which
+killed the foreground BuildKit process and left the old image in place.
 """
 from __future__ import annotations
 
 import os
 import sys
 import textwrap
+import time
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -24,63 +24,75 @@ c = paramiko.SSHClient()
 c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 c.connect(HOST, username=USER, password=PASSWORD, timeout=20)
 
+# 1) Drop a detached script that does the heavy lifting.
 script = textwrap.dedent(f"""\
     #!/usr/bin/env bash
     set -e
+    exec >/tmp/rebuild-vnc-detached.log 2>&1
     cd {ROOT}
 
-    echo "=== git pull ==="
+    echo "[$(date)] === git pull ==="
     git pull --rebase
 
-    echo "=== build chrome-vnc image ==="
+    echo "[$(date)] === build chrome-vnc ==="
     docker build -t grokflow/chrome-vnc:latest ./vnc
 
-    echo "=== rebuild frontend (nginx config changed) ==="
+    echo "[$(date)] === build frontend (new nginx.conf with clipboardSync=1) ==="
     docker compose --env-file .env.prod -f docker-compose.intranet.yml \\
       build frontend
     docker compose --env-file .env.prod -f docker-compose.intranet.yml \\
       up -d frontend
 
-    echo "=== recreate active VNC containers (preserve names + volume) ==="
+    echo "[$(date)] === recreate active VNC containers ==="
     for cname in $(docker ps --filter name=grokflow-vnc --format '{{{{.Names}}}}'); do
-      echo "--- $cname ---"
-      # Pull the host-side bind paths off the running container so we can
-      # reproduce the spawn exactly.
+      echo "  recreating $cname"
       profile_path=$(docker inspect "$cname" --format '{{{{range .Mounts}}}}{{{{if eq .Destination "/config"}}}}{{{{.Source}}}}{{{{end}}}}{{{{end}}}}')
       network=$(docker inspect "$cname" --format '{{{{range $k,$v := .NetworkSettings.Networks}}}}{{{{$k}}}}{{{{end}}}}')
-      echo "  profile=$profile_path  network=$network"
-
       docker rm -f "$cname"
       docker run -d --name "$cname" \\
         --network "$network" \\
         --restart unless-stopped \\
         -v "$profile_path:/config" \\
         grokflow/chrome-vnc:latest
-
-      sleep 3
-      docker exec "$cname" pgrep -af chrom 2>&1 | head -2 || echo "  (chromium starting)"
     done
 
-    echo "=== final ps ==="
-    docker ps --filter name=grokflow --format '{{{{.Names}}}}\\t{{{{.Status}}}}' | grep -E '(vnc|frontend)'
+    echo "[$(date)] === done ==="
+    docker images grokflow/chrome-vnc --format '{{{{.CreatedSince}}}}\\t{{{{.Size}}}}'
 """)
 
 sftp = c.open_sftp()
-with sftp.open("/tmp/rebuild-vnc.sh", "w") as f:
+with sftp.open("/tmp/rebuild-vnc-detached.sh", "w") as f:
     f.write(script)
-sftp.chmod("/tmp/rebuild-vnc.sh", 0o755)
+sftp.chmod("/tmp/rebuild-vnc-detached.sh", 0o755)
 sftp.close()
 
-_, stdout, _ = c.exec_command(
-    f"echo {PASSWORD} | sudo -S bash /tmp/rebuild-vnc.sh",
-    timeout=900,
-)
-stdout.channel.settimeout(900.0)
-data = b""
-while True:
-    chunk = stdout.channel.recv(65536)
-    if not chunk:
+# 2) Launch it under nohup so it survives the SSH session ending.
+launch = f"echo {PASSWORD} | sudo -S nohup setsid bash /tmp/rebuild-vnc-detached.sh </dev/null >/dev/null 2>&1 &"
+_, stdout, _ = c.exec_command(launch, timeout=10)
+stdout.read()
+print("Launched detached build. Tail /tmp/rebuild-vnc-detached.log to follow.\n")
+
+# 3) Wait + poll log for completion.
+for i in range(60):
+    time.sleep(15)
+    _, stdout, _ = c.exec_command(
+        f"echo {PASSWORD} | sudo -S tail -1 /tmp/rebuild-vnc-detached.log 2>/dev/null",
+        timeout=15,
+    )
+    line = stdout.read().decode("utf-8", errors="replace").strip()
+    print(f"  poll {i+1:>2}/60: {line[:120]}")
+    if "=== done ===" in line or "grokflow/chrome-vnc" in line:
         break
-    data += chunk
-print(data.decode("utf-8", errors="replace"))
+    if "ERROR" in line.upper() or "Error response" in line:
+        print("  ERROR detected — stopping poll")
+        break
+
+print()
+print("=== last 30 lines of log ===")
+_, stdout, _ = c.exec_command(
+    f"echo {PASSWORD} | sudo -S tail -30 /tmp/rebuild-vnc-detached.log",
+    timeout=20,
+)
+print(stdout.read().decode("utf-8", errors="replace"))
+
 c.close()

@@ -16,12 +16,20 @@ async def _resolve_profile_for_job(
     If `requested_id` provided: validate it belongs to admin and is logged_in / running_job.
     Else: auto-pick the least-recently-used logged_in admin profile for this provider.
     """
+    # "Admin pool" includes both per-domain `admin` and platform `super_admin`
+    # — the role hierarchy treats super_admin as a superset of admin, so any
+    # profile super_admin owns should also be available as a shared pool entry.
+    # Without this, a super_admin doing the initial Auto-login (the most
+    # common bootstrapping path) ends up with logged_in profiles that NOBODY
+    # — not even themselves — can use as a job runner.
+    ADMIN_ROLES = ("admin", "super_admin")
+
     if requested_id:
         profile = await db.get(Profile, requested_id)
         if not profile:
             raise NotFound("profile")
         owner = await db.get(User, profile.user_id)
-        if not owner or owner.role != "admin":
+        if not owner or owner.role not in ADMIN_ROLES:
             raise PermissionDenied("Profile is not in the admin pool")
         if profile.provider != provider:
             raise InvalidPayload(f"Profile provider mismatch: profile={profile.provider}, requested={provider}")
@@ -29,7 +37,7 @@ async def _resolve_profile_for_job(
             raise InvalidPayload(f"Profile not ready (status={profile.status}). Ask admin to refresh.")
         return profile
 
-    # Auto-pick: any logged_in / running_job admin profile for this provider.
+    # Auto-pick: any logged_in / running_job admin-pool profile for this provider.
     # We deliberately do NOT filter by `active_jobs < max_concurrent_jobs` here
     # — that's a runtime-concurrency check, not a queue-admission gate. Jobs
     # for a fully-loaded profile should QUEUE behind in-flight ones, not be
@@ -39,7 +47,7 @@ async def _resolve_profile_for_job(
         select(Profile)
         .join(User, User.id == Profile.user_id)
         .where(
-            User.role == "admin",
+            User.role.in_(ADMIN_ROLES),
             Profile.provider == provider,
             Profile.status.in_(["logged_in", "running_job"]),
         )
