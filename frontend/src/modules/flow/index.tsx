@@ -1,10 +1,11 @@
 import { Navigate } from "react-router-dom";
-import { Video, FileText } from "lucide-react";
+import { Video, FileText, Activity } from "lucide-react";
 
 import type { FrontendModule } from "@/app/types";
 import { TOOLS, TOOL_BY_SLUG } from "./tools";
 import { VideoToolPage } from "./components/VideoToolPage";
 import { FlowApiDocsPage } from "./components/FlowApiDocsPage";
+import { FlowRequestsPage } from "./FlowRequestsPage";
 
 /** Flow video-tools module.
  *
@@ -22,6 +23,7 @@ export const moduleManifest: FrontendModule = {
       path: `flow/${t.slug}`,
       element: <VideoToolPage tool={TOOL_BY_SLUG[t.slug]} />,
     })),
+    { path: "flow/requests", element: <FlowRequestsPage /> },
     { path: "flow/docs", element: <FlowApiDocsPage /> },
   ],
   nav: [
@@ -37,6 +39,15 @@ export const moduleManifest: FrontendModule = {
           label: t.label,
           icon: t.icon,
         })),
+        // "Requests" sits between the tool list and Docs as a stable
+        // operator surface: open this tab + filter by status to see every
+        // failed encode at a glance, retry with one click, download output.
+        {
+          type: "link" as const,
+          to: "/flow/requests",
+          label: "Requests (REQ)",
+          icon: Activity,
+        },
         {
           type: "link" as const,
           to: "/flow/docs",
