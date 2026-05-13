@@ -407,10 +407,11 @@ def _env_file_path(repo: GitRepo) -> str:
 
 @router.get("/repos/{repo_id}/env", response_model=EnvOut)
 async def repo_get_env(
-    repo_id: uuid.UUID, admin: SuperAdminUser, db: DbSession,
+    repo_id: uuid.UUID, admin: AdminUser, db: DbSession,
 ) -> EnvOut:
     """Super_admin only — env files often contain DB passwords, JWT
-    secrets, Cloudflare tokens. Don't let per-domain admins peek."""
+    secrets, Cloudflare tokens. AdminUser alias here resolves to
+    SuperAdminUser (see top-of-file import)."""
     import os
     repo = await db.get(GitRepo, repo_id)
     if not repo:
