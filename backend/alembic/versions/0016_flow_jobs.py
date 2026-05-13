@@ -1,15 +1,15 @@
 """flow_jobs table — native video-processing module
 
-Revision ID: 0011
-Revises: 0010
+Revision ID: 0016
+Revises: 0015
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 
-revision = "0011"
-down_revision = "0010"
+revision = "0016"
+down_revision = "0015"
 branch_labels = None
 depends_on = None
 
