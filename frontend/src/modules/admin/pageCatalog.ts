@@ -2,6 +2,11 @@
 // Grouped by parent menu (matches the sidebar in AppShell) so the admin
 // UI can render group-level "Select all" toggles instead of a flat soup
 // of checkboxes. Keep in sync with router.tsx + AppShell.tsx.
+//
+// Used by:
+//   - AdminRolesPage / AdminDomainsTab — render the page-allowlist UI.
+//   - useDocumentTitle — map a route prefix to its human-readable page
+//     name for the browser tab title.
 
 export interface PageDef {
   path: string;
@@ -29,49 +34,73 @@ export const PAGE_GROUPS: PageGroup[] = [
     items: [
       { path: "/dashboard", label: "Dashboard" },
       { path: "/api-keys", label: "API Keys" },
+      { path: "/billing", label: "Billing" },
+      { path: "/pricing", label: "Pricing" },
+      { path: "/checkout", label: "Checkout" },
+      { path: "/audit-logs", label: "Audit Log" },
+      { path: "/settings", label: "Settings" },
+    ],
+  },
+  {
+    key: "admin",
+    label: "Admin tools",
+    superOnly: true,
+    items: [
+      { path: "/admin", label: "Admin · Hub", adminOnly: true },
+      { path: "/admin/users", label: "Admin · Users", adminOnly: true },
+      { path: "/admin/roles", label: "Admin · Roles", adminOnly: true },
+      { path: "/admin/domains", label: "Admin · Domains", adminOnly: true },
+      { path: "/admin/plans", label: "Admin · Plans", adminOnly: true },
+      { path: "/admin/billing", label: "Admin · Billing", adminOnly: true },
+      { path: "/admin/git", label: "Admin · Git / Deploy", adminOnly: true },
     ],
   },
   {
     key: "grok",
     label: "Quản lý Grok",
     items: [
-      { path: "/profiles", label: "Profiles" },
-      { path: "/jobs", label: "Jobs" },
-      { path: "/api-docs", label: "API Docs (Grok)" },
+      { path: "/profiles", label: "Grok · Profiles" },
+      { path: "/jobs", label: "Grok · Jobs" },
+      { path: "/api-docs", label: "Grok · API Docs" },
     ],
   },
   {
     key: "flow",
     label: "Quản lý Flow",
     items: [
-      { path: "/flow", label: "Flow (toàn nhóm)" },
+      // Granting `/flow` (with no trailing path) is a shortcut that allows
+      // ALL /flow/* routes — the visibility check is prefix-based.
+      { path: "/flow", label: "Flow · Toàn bộ (shortcut)" },
+      { path: "/flow/cut", label: "Flow · Cut Video" },
+      { path: "/flow/merge", label: "Flow · Merge Videos" },
+      { path: "/flow/extract-audio", label: "Flow · Extract Audio" },
+      { path: "/flow/add-audio", label: "Flow · Merge/Replace Audio" },
+      { path: "/flow/speed", label: "Flow · Change Speed" },
+      { path: "/flow/resize", label: "Flow · Resize" },
+      { path: "/flow/crop", label: "Flow · Crop Video" },
+      { path: "/flow/extract-frames", label: "Flow · Extract Frames" },
+      { path: "/flow/requests", label: "Flow · Requests (REQ)" },
+      { path: "/flow/docs", label: "Flow · API Docs" },
     ],
   },
   {
     key: "gateway",
     label: "Gateway Management",
     items: [
-      { path: "/gateway", label: "Gateway (toàn nhóm)" },
+      { path: "/gateway", label: "Gateway · Toàn bộ (shortcut)" },
       { path: "/gateway/dashboard", label: "Gateway · Dashboard", adminOnly: true },
+      { path: "/gateway/overview", label: "Gateway · Overview" },
+      { path: "/gateway/vendors", label: "Gateway · Vendors", adminOnly: true },
+      { path: "/gateway/pools", label: "Gateway · Pools", adminOnly: true },
+      { path: "/gateway/functions", label: "Gateway · Functions", adminOnly: true },
       { path: "/gateway/gateway-keys", label: "Gateway · Gateway Keys", adminOnly: true },
-      { path: "/gateway/requests", label: "Gateway · Requests", adminOnly: true },
+      { path: "/gateway/api-keys", label: "Gateway · API Keys (pool)", adminOnly: true },
+      { path: "/gateway/profiles", label: "Gateway · Profiles" },
+      { path: "/gateway/proxies", label: "Gateway · Proxies" },
+      { path: "/gateway/requests", label: "Gateway · Requests (REQ)", adminOnly: true },
       { path: "/gateway/playground", label: "Gateway · Playground" },
+      { path: "/gateway/settings", label: "Gateway · Settings", adminOnly: true },
       { path: "/gateway/docs", label: "Gateway · API Docs" },
-      // Provider config — readable by per-domain admin, writes are super only.
-      { path: "/gateway/vendors", label: "Gateway · Vendors (read)", adminOnly: true },
-      { path: "/gateway/pools", label: "Gateway · Pools (read)", adminOnly: true },
-      { path: "/gateway/functions", label: "Gateway · Functions (read)", adminOnly: true },
-    ],
-  },
-  {
-    key: "billing",
-    label: "Billing & Settings",
-    items: [
-      { path: "/billing", label: "Billing (user)" },
-      { path: "/pricing", label: "Pricing" },
-      { path: "/checkout", label: "Checkout" },
-      { path: "/audit-logs", label: "Audit Log" },
-      { path: "/settings", label: "Settings" },
     ],
   },
 ];

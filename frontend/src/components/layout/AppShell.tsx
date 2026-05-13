@@ -6,6 +6,7 @@ import { useAuthStore, userCanSeePath } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
 import type { NavEntry, NavLeaf, NavGroup } from "@/app/types";
 import { getAuthedNav } from "@/app/moduleRegistry";
+import { useDocumentTitle } from "@/core/useDocumentTitle";
 
 // Sidebar entries come from the module registry — each module owns its own
 // nav. AppShell just filters by role/domain/feature and renders. The
@@ -14,6 +15,7 @@ import { getAuthedNav } from "@/app/moduleRegistry";
 // module load.
 
 export function AppShell() {
+  useDocumentTitle();
   const { user, clear } = useAuthStore();
   const NAV: NavEntry[] = useMemo(() => getAuthedNav(user?.role), [user?.role]);
   const domainConfig = useDomainStore((s) => s.config);
