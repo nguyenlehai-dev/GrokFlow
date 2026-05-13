@@ -107,8 +107,12 @@ class GrokProvider(Provider):
     NAV_TIMEOUT_MS = 45000
     # Timeouts tuned by media type. Videos take longer to render than images.
     # If a job hasn't produced media in this window, we give up and retry.
-    IMAGE_TIMEOUT_MS = 120000  # 2 min — most images finish in 30-60s
-    VIDEO_TIMEOUT_MS = 240000  # 4 min — Grok video can take 90-180s
+    # Bumped 120→180s / 240→360s after observing prod runs where Grok's
+    # generation queue under shared-account load took ~90-150s for images
+    # and 180-300s for videos. The old timeouts caused premature retries
+    # that compounded the upstream backlog.
+    IMAGE_TIMEOUT_MS = 180000  # 3 min — handles slow generations under load
+    VIDEO_TIMEOUT_MS = 360000  # 6 min — Grok video can take 90-300s
 
     async def run(self, job: JobInput) -> JobResult:
         # Same chat-page flow handles both image generation, image-to-image
