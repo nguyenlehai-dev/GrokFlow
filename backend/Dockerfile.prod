@@ -14,6 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
     libgbm1 libpango-1.0-0 libcairo2 libasound2 libnspr4 \
     fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+# ffmpeg in its own RUN layer so the big graphics-stack layer above stays
+# cacheable across rebuilds — needed for the native Flow video-processing
+# module (app.modules.flow.*).
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
