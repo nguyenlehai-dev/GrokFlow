@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Image as ImageIcon, Video, Sparkles, TrendingUp, Globe, ChevronUp, ChevronDown } from "lucide-react";
+import { Image as ImageIcon, Video, Sparkles, TrendingUp, Globe, ChevronUp, ChevronDown, Scissors, Cpu } from "lucide-react";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
 
 type Period = "all" | "today" | "week" | "month";
 
 interface AppItem { name: string; count: number; }
-interface AppGroup { code: "image" | "video" | "mini_app"; label: string; items: AppItem[]; }
+interface AppGroup {
+  code: "image" | "video" | "flow" | "gateway" | "mini_app";
+  label: string;
+  items: AppItem[];
+  total: number;
+}
 interface RevenuePoint { month: string; amount: number; }
 interface JobTimePoint { day: string; count: number; }
 interface DomainStats {
@@ -62,13 +67,29 @@ const fmtVnd = (n: number) => fmt(Math.round(n)) + "₫";
 export function DashboardPage() {
   const me = useAuthStore((s) => s.user);
   const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
+  const isSuper = me?.role === "super_admin";
   const [period, setPeriod] = useState<Period>("all");
   const [scope, setScope] = useState<"me" | "admin">(isAdmin ? "admin" : "me");
+  // App-stats domain filter. Only super_admin can switch — per-domain admin
+  // is force-scoped server-side, but we still display their domain name so
+  // it's clear what they're looking at.
+  const [appDomain, setAppDomain] = useState<string>("");
+
+  // Domains list for the picker — same query the AuditLogPage uses, cached.
+  const { data: domains } = useQuery({
+    queryKey: ["admin-domains"],
+    queryFn: async () => (await api.get<{ id: string; hostname: string }[]>("/api/admin/domains")).data,
+    enabled: isSuper,
+  });
 
   const endpoint = scope === "admin" ? "/api/dashboard/admin" : "/api/dashboard/me";
   const { data, isLoading, error } = useQuery({
-    queryKey: ["dashboard", scope, period],
-    queryFn: async () => (await api.get<DashboardData>(`${endpoint}?period=${period}`)).data,
+    queryKey: ["dashboard", scope, period, appDomain],
+    queryFn: async () => {
+      const params: Record<string, string> = { period };
+      if (scope === "admin" && appDomain) params.domain_id = appDomain;
+      return (await api.get<DashboardData>(endpoint, { params })).data;
+    },
     refetchInterval: 15000,
   });
 
@@ -150,8 +171,16 @@ export function DashboardPage() {
             <PerDomainSection rows={data.per_domain} period={period} />
           )}
 
-          {/* App stats — 3 columns like reference design */}
-          <AppStatsSection groups={data.app_groups} period={period} onPeriod={setPeriod} />
+          {/* App stats — Grok / Flow / Gateway / Mini-Apps, filterable by domain */}
+          <AppStatsSection
+            groups={data.app_groups}
+            period={period}
+            onPeriod={setPeriod}
+            domains={domains ?? []}
+            selectedDomain={appDomain}
+            onSelectDomain={setAppDomain}
+            showDomainPicker={isSuper && scope === "admin"}
+          />
         </>
       ) : null}
     </div>
@@ -509,57 +538,133 @@ function BarChart({ data }: { data: JobTimePoint[] }) {
 // App stats section — 3 columns
 // ============================================================================
 
-function AppStatsSection({ groups, period, onPeriod }: {
-  groups: AppGroup[]; period: Period; onPeriod: (p: Period) => void;
-}) {
+interface AppStatsProps {
+  groups: AppGroup[];
+  period: Period;
+  onPeriod: (p: Period) => void;
+  domains: { id: string; hostname: string }[];
+  selectedDomain: string;
+  onSelectDomain: (id: string) => void;
+  showDomainPicker: boolean;
+}
+
+function AppStatsSection({
+  groups, period, onPeriod, domains, selectedDomain, onSelectDomain, showDomainPicker,
+}: AppStatsProps) {
+  // Hide empty groups so a tenant with no Flow/Gateway usage doesn't
+  // see two ghost columns. Always show at least the first 3 to preserve
+  // layout intent when the dashboard is empty (post-deploy / new tenant).
+  const visible = groups.filter((g, i) => i < 3 || g.total > 0);
+  const grandTotal = groups.reduce((s, g) => s + g.total, 0);
+
   return (
     <div className="card">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold">Thống kê theo App</h2>
-        <PeriodTabs value={period} onChange={onPeriod} />
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h2 className="font-semibold">Thống kê theo App</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Phân loại {fmt(grandTotal)} job/request theo nguồn — Grok ảnh, Grok video, Flow video tools, Gateway LLM, API keys.
+            {selectedDomain && domains.length > 0 && (
+              <>  Đang lọc theo <strong>{domains.find((d) => d.id === selectedDomain)?.hostname ?? "?"}</strong>.</>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {showDomainPicker && (
+            <select
+              className="input text-sm"
+              value={selectedDomain}
+              onChange={(e) => onSelectDomain(e.target.value)}
+            >
+              <option value="">Tất cả domain</option>
+              {domains.map((d) => (
+                <option key={d.id} value={d.id}>{d.hostname}</option>
+              ))}
+            </select>
+          )}
+          <PeriodTabs value={period} onChange={onPeriod} />
+        </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        {groups.map((g) => (
-          <AppGroupCard key={g.code} group={g} />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        {visible.map((g) => (
+          <AppGroupCard key={g.code} group={g} grandTotal={grandTotal} />
         ))}
       </div>
     </div>
   );
 }
 
-function AppGroupCard({ group }: { group: AppGroup }) {
-  const Icon =
-    group.code === "image" ? ImageIcon : group.code === "video" ? Video : Sparkles;
-  const accentText =
-    group.code === "image" ? "text-cyan-700"
-    : group.code === "video" ? "text-rose-700"
-    : "text-amber-700";
+const APP_VISUAL: Record<AppGroup["code"], { icon: typeof ImageIcon; accent: string; bg: string }> = {
+  image:    { icon: ImageIcon, accent: "text-cyan-700",    bg: "bg-cyan-50" },
+  video:    { icon: Video,     accent: "text-rose-700",    bg: "bg-rose-50" },
+  flow:     { icon: Scissors,  accent: "text-violet-700",  bg: "bg-violet-50" },
+  gateway:  { icon: Cpu,       accent: "text-indigo-700",  bg: "bg-indigo-50" },
+  mini_app: { icon: Sparkles,  accent: "text-amber-700",   bg: "bg-amber-50" },
+};
+
+function AppGroupCard({ group, grandTotal }: { group: AppGroup; grandTotal: number }) {
+  const visual = APP_VISUAL[group.code];
+  const Icon = visual.icon;
+  const sharePct = grandTotal > 0 ? Math.round((group.total / grandTotal) * 100) : 0;
+  // Show top-bar share of total ONLY for non-trivial groups so the eye is
+  // drawn to material contributions, not a single rogue test job.
+
+  const maxInGroup = group.items.length > 0
+    ? Math.max(...group.items.map((i) => i.count))
+    : 1;
 
   return (
-    <div className="border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-        <h3 className={`font-semibold flex items-center gap-2 text-sm ${accentText}`}>
-          <Icon size={16} /> {group.label}
-        </h3>
+    <div className="border border-slate-200 rounded-lg overflow-hidden flex flex-col">
+      <div className={`px-3 py-2 ${visual.bg} border-b border-slate-200`}>
+        <div className="flex items-center justify-between">
+          <h3 className={`font-semibold flex items-center gap-2 text-sm ${visual.accent}`}>
+            <Icon size={16} /> {group.label}
+          </h3>
+          <span className={`text-xs font-mono font-semibold ${visual.accent}`}>
+            {fmt(group.total)}
+            {grandTotal > 0 && (
+              <span className="ml-1 text-[10px] font-normal opacity-70">
+                ({sharePct}%)
+              </span>
+            )}
+          </span>
+        </div>
       </div>
       {group.items.length === 0 ? (
         <p className="px-3 py-6 text-center text-xs text-slate-400">Chưa có dữ liệu.</p>
       ) : (
-        <div className="divide-y divide-slate-100">
-          {group.items.slice(0, 15).map((item) => (
-            <div
-              key={item.name}
-              className="px-3 py-2 flex items-center justify-between hover:bg-slate-50 transition text-sm"
-            >
-              <span className="truncate text-slate-700">{item.name}</span>
-              <span className={`font-mono font-semibold ${accentText}`}>
-                {fmt(item.count)}
-              </span>
-            </div>
-          ))}
-          {group.items.length > 15 && (
+        <div className="divide-y divide-slate-100 flex-1">
+          {group.items.slice(0, 12).map((item) => {
+            // Bar shows the item's count relative to the largest in its group.
+            // Helps eye-spot the dominant model/operation per category.
+            const barPct = (item.count / maxInGroup) * 100;
+            return (
+              <div
+                key={item.name}
+                className="px-3 py-2 hover:bg-slate-50 transition text-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-slate-700 min-w-0">{item.name}</span>
+                  <span className={`font-mono font-semibold flex-shrink-0 ${visual.accent}`}>
+                    {fmt(item.count)}
+                  </span>
+                </div>
+                <div className="mt-1 h-1 w-full bg-slate-100 rounded overflow-hidden">
+                  <div
+                    className={`h-full ${visual.bg} ${visual.accent}`}
+                    style={{
+                      width: `${barPct}%`,
+                      backgroundColor: "currentColor",
+                      opacity: 0.5,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+          {group.items.length > 12 && (
             <div className="px-3 py-2 text-xs text-slate-500 text-center">
-              +{group.items.length - 15} app khác
+              +{group.items.length - 12} mục khác
             </div>
           )}
         </div>

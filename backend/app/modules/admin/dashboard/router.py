@@ -18,8 +18,12 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
+import uuid
+
 from app.core.deps import AdminUser, CurrentUser, DbSession
-from app.models import ApiKey, Domain, Job, Payment, Profile, User
+from app.models import (
+    ApiKey, Domain, FlowJob, GwRequest, GwVendor, Job, Payment, Profile, User,
+)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -32,9 +36,13 @@ class AppItem(BaseModel):
 
 
 class AppGroup(BaseModel):
-    code: Literal["image", "video", "mini_app"]
+    # Codes match Lucide icons on the FE side. New 'flow' + 'gateway' rows
+    # reflect the project's two non-Grok feature areas; without them the
+    # dashboard was Grok-only despite Flow + Gateway being live in prod.
+    code: Literal["image", "video", "flow", "gateway", "mini_app"]
     label: str
     items: list[AppItem]
+    total: int = 0   # convenience sum so FE doesn't re-iterate
 
 
 class RevenuePoint(BaseModel):
@@ -106,14 +114,45 @@ def _period_bounds(period: Period) -> datetime | None:
     return None
 
 
-async def _build(db, period: Period, scope: Literal["me", "admin"], user_id) -> DashboardOut:
+async def _build(
+    db,
+    period: Period,
+    scope: Literal["me", "admin"],
+    user_id,
+    domain_filter: uuid.UUID | None = None,
+) -> DashboardOut:
+    """Build the dashboard payload.
+
+    `domain_filter` is honoured only in the admin scope — it narrows the
+    app_groups + totals to a specific tenant so super_admin can drill into
+    one domain without leaving the page. /me ignores it (user-scoped already).
+    """
     bound = _period_bounds(period)
     is_admin = scope == "admin"
+
+    # Resolve which user_ids live inside the requested domain (if any) so
+    # the Grok job filter — keyed on user_id, not domain_id — can be scoped
+    # without a JOIN per query.
+    domain_user_ids: list[uuid.UUID] | None = None
+    if is_admin and domain_filter is not None:
+        domain_user_ids = list(
+            (
+                await db.execute(
+                    select(User.id).where(User.domain_id == domain_filter)
+                )
+            ).scalars().all()
+        )
+        # Empty domain → no jobs match. Use [None] sentinel so SQL still
+        # produces a valid (empty) result rather than dropping the WHERE.
+        if not domain_user_ids:
+            domain_user_ids = [uuid.UUID("00000000-0000-0000-0000-000000000000")]
 
     # ------------------ Jobs filter ------------------
     job_filters = [] if is_admin else [Job.user_id == user_id]
     if bound is not None:
         job_filters.append(Job.created_at >= bound)
+    if domain_user_ids is not None:
+        job_filters.append(Job.user_id.in_(domain_user_ids))
 
     # ------------------ Totals ------------------
     base_q = select(func.count()).select_from(Job)
@@ -235,24 +274,74 @@ async def _build(db, period: Period, scope: Literal["me", "admin"], user_id) -> 
     ]
     miniapps.sort(key=lambda x: x.count, reverse=True)
 
+    # ------------------ Flow video tools (per-operation breakdown) ------------------
+    flow_filters = [] if is_admin else [FlowJob.user_id == user_id]
+    if bound is not None:
+        flow_filters.append(FlowJob.created_at >= bound)
+    if domain_user_ids is not None:
+        flow_filters.append(FlowJob.user_id.in_(domain_user_ids))
+    flow_q = (
+        select(FlowJob.operation, func.count(FlowJob.id))
+        .where(*flow_filters)
+        .group_by(FlowJob.operation)
+    )
+    flow_items_raw = (await db.execute(flow_q)).all()
+    # Pretty labels for the FE — slug → user-facing name.
+    FLOW_LABEL = {
+        "cut": "Cut Video", "merge": "Merge Videos",
+        "extract-audio": "Extract Audio", "add-audio": "Merge/Replace Audio",
+        "speed": "Change Speed", "resize": "Resize",
+        "crop": "Crop Video", "extract-frames": "Extract Frames",
+    }
+    flow_items = [
+        AppItem(name=FLOW_LABEL.get(op, op or "unknown"), count=int(n or 0))
+        for op, n in flow_items_raw if n
+    ]
+
+    # ------------------ Gateway LLM (per-vendor breakdown) ------------------
+    gw_filters = []
+    if bound is not None:
+        gw_filters.append(GwRequest.created_at >= bound)
+    if is_admin:
+        # Gateway requests carry their own domain_id (copied from the gateway
+        # key at request time) — filter directly without a JOIN.
+        if domain_filter is not None:
+            gw_filters.append(GwRequest.domain_id == domain_filter)
+    else:
+        # Customer view: no per-user gateway scope yet (gateway is admin-only
+        # surface). Return empty for /me to avoid leaking other tenants.
+        gw_filters.append(GwRequest.id == None)  # noqa: E711  — force-empty
+    gw_q = (
+        select(GwVendor.name, func.count(GwRequest.id))
+        .select_from(GwRequest)
+        .outerjoin(GwVendor, GwVendor.id == GwRequest.vendor_id)
+        .where(*gw_filters)
+        .group_by(GwVendor.id, GwVendor.name)
+    )
+    try:
+        gw_rows = (await db.execute(gw_q)).all()
+    except Exception:
+        gw_rows = []
+    gw_items = [
+        AppItem(name=name or "Unknown vendor", count=int(n or 0))
+        for name, n in gw_rows if n
+    ]
+
+    def _grp(code, label, items):
+        sorted_items = sorted(items, key=lambda x: x.count, reverse=True)
+        return AppGroup(
+            code=code, label=label, items=sorted_items,
+            total=sum(i.count for i in sorted_items),
+        )
+
     app_groups = [
-        AppGroup(
-            code="image",
-            label="Ảnh",
-            items=sorted(
-                [AppItem(name=k, count=v) for k, v in image_apps.items()],
-                key=lambda x: x.count, reverse=True,
-            ),
-        ),
-        AppGroup(
-            code="video",
-            label="Video",
-            items=sorted(
-                [AppItem(name=k, count=v) for k, v in video_apps.items()],
-                key=lambda x: x.count, reverse=True,
-            ),
-        ),
-        AppGroup(code="mini_app", label="Mini Apps", items=miniapps),
+        _grp("image", "Ảnh (Grok)",
+             [AppItem(name=k, count=v) for k, v in image_apps.items()]),
+        _grp("video", "Video (Grok)",
+             [AppItem(name=k, count=v) for k, v in video_apps.items()]),
+        _grp("flow", "Flow Tools (FFmpeg)", flow_items),
+        _grp("gateway", "Gateway LLM", gw_items),
+        _grp("mini_app", "API Keys (integrations)", miniapps),
     ]
 
     # ------------------ Per-domain breakdown (admin scope only) ------------------
@@ -414,5 +503,12 @@ async def dashboard_me(
 async def dashboard_admin(
     admin: AdminUser, db: DbSession,
     period: Period = Query(default="all"),
+    domain_id: uuid.UUID | None = Query(
+        default=None,
+        description="Filter app_groups + totals to a specific tenant. "
+                    "Per-domain admin is force-scoped to their own domain.",
+    ),
 ) -> DashboardOut:
-    return await _build(db, period, "admin", admin.id)
+    # Per-domain admin: cannot peek into other tenants — force the filter.
+    effective_domain = admin.domain_id if admin.role != "super_admin" else domain_id
+    return await _build(db, period, "admin", admin.id, domain_filter=effective_domain)
