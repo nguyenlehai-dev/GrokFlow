@@ -1,10 +1,10 @@
-"""One-shot deploy script for the Flow video-tools side-car.
+"""One-shot deploy script for the Flow video-tools (native module).
 
-Run from the developer's laptop (not on the VPS). Connects via SSH,
-uploads a deploy script via SFTP and executes it under sudo. Pulls latest
-code, ensures the FLOW_* env block exists in .env.prod (auto-generating
-secrets if missing), rebuilds the three services that changed and verifies
-the bootstrap key landed.
+Run from the developer's laptop. Connects via SSH, uploads a deploy script
+via SFTP and executes it under sudo. Pulls latest code, retires the legacy
+`flow-api` side-car (if still present), rebuilds backend + frontend,
+applies alembic migrations and verifies FFmpeg is on PATH inside the
+backend container.
 
 Usage:
     python scripts/deploy-flow.py
@@ -15,7 +15,6 @@ Required env (host side, in your shell):
 from __future__ import annotations
 
 import os
-import secrets
 import sys
 import textwrap
 
@@ -40,9 +39,6 @@ def main() -> int:
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(HOST, username=USER, password=PASSWORD, timeout=20)
 
-    flow_key = secrets.token_hex(32)
-    flow_pw = secrets.token_hex(16)
-
     script_body = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -e
@@ -51,45 +47,36 @@ def main() -> int:
         echo "=== git pull ==="
         git pull --rebase
 
-        echo "=== ensure FLOW_* env block ==="
-        if ! grep -q '^FLOW_SECRET_KEY=' .env.prod; then
-          cat >> .env.prod <<'EOF'
-
-# ─── Flow API (added by scripts/deploy-flow.py) ──
-FLOW_SECRET_KEY={flow_key}
-FLOW_BOOTSTRAP_EMAIL=flow-admin@grokflow.local
-FLOW_BOOTSTRAP_USERNAME=flowadmin
-FLOW_BOOTSTRAP_PASSWORD={flow_pw}
-FLOW_MAX_UPLOAD_MB=500
-FLOW_R2_ACCOUNT_ID=
-FLOW_R2_ACCESS_KEY_ID=
-FLOW_R2_SECRET_ACCESS_KEY=
-FLOW_R2_BUCKET_NAME=video-output
-FLOW_R2_PUBLIC_URL=
-EOF
-          echo 'FLOW_* env appended'
-        else
-          echo 'FLOW_* env already present, skipping'
+        echo "=== retire legacy flow-api side-car if present ==="
+        if docker ps -a --format '{{{{.Names}}}}' | grep -q '^grokflow-flow-api-1$'; then
+          docker compose --env-file .env.prod -f docker-compose.intranet.yml \\
+            stop flow-api || true
+          docker compose --env-file .env.prod -f docker-compose.intranet.yml \\
+            rm -f flow-api || true
         fi
 
-        echo "=== build images ==="
+        echo "=== build backend + frontend ==="
         docker compose --env-file .env.prod -f docker-compose.intranet.yml \\
-          build --pull flow-api backend frontend
+          build --pull backend frontend
 
         echo "=== bring up ==="
         docker compose --env-file .env.prod -f docker-compose.intranet.yml \\
-          up -d flow-api backend frontend
+          up -d backend frontend
 
-        echo "=== wait for bootstrap ==="
-        sleep 25
-        docker logs grokflow-flow-api-1 --tail 30 || true
+        echo "=== wait for backend healthy ==="
+        for i in $(seq 1 30); do
+          if docker exec grokflow-backend-1 curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+            echo "backend healthy after ${{i}}s"; break
+          fi
+          sleep 1
+        done
 
-        echo "=== verify api key file ==="
-        docker exec grokflow-flow-api-1 sh -c 'wc -c /app/data/.api-key 2>/dev/null || echo MISSING'
+        echo "=== apply alembic migrations ==="
+        docker exec grokflow-backend-1 alembic upgrade head
 
-        echo "=== verify backend can reach flow-api ==="
-        docker exec grokflow-backend-1 sh -lc 'python -c "import urllib.request; print(urllib.request.urlopen(\\"http://flow-api:8000/health\\", timeout=5).read().decode())"' \\
-          || echo 'backend->flow-api health check failed'
+        echo "=== verify ffmpeg + storage ==="
+        docker exec grokflow-backend-1 sh -lc 'ffmpeg -version | head -1'
+        docker exec grokflow-backend-1 sh -lc 'mkdir -p /app/storage/flow/input /app/storage/flow/output && ls -la /app/storage/flow'
 
         echo "=== final ps ==="
         docker ps --filter name=grokflow --format '{{{{.Names}}}}\\t{{{{.Status}}}}'
@@ -103,7 +90,7 @@ EOF
     sftp.close()
 
     cmd = f"echo {PASSWORD} | sudo -S bash {remote_script}"
-    stdin, stdout, stderr = client.exec_command(cmd, timeout=900, get_pty=True)
+    _, stdout, stderr = client.exec_command(cmd, timeout=1200, get_pty=True)
     print(stdout.read().decode("utf-8", errors="replace"))
     err = stderr.read().decode("utf-8", errors="replace")
     if err.strip():

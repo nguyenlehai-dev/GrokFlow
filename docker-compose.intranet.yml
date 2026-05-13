@@ -88,9 +88,6 @@ services:
       # .conf files here; host nginx includes them via grokflow.conf; a host
       # reloader picks up changes. See deploy/setup-host-nginx.sh.
       - /etc/nginx/grokflow-vhosts:/host_nginx_vhosts
-      # Read-only mount of flow-api's data dir so the backend can pick up the
-      # bootstrapped API key from /app/data/.api-key without manual copy.
-      - flow_api_data:/flow_api_data:ro
     # Allow container to reach host's SSH (deploy/git operations from /admin).
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -102,7 +99,10 @@ services:
       start_period: 30s
     deploy:
       resources:
-        limits: { memory: 768M, cpus: "1.0" }
+        # Bumped from 768M to 1.5G because the Flow module now runs FFmpeg
+        # in-process via BackgroundTasks. One 1080p encode peaks ~600 MB;
+        # leave headroom for concurrent jobs + the normal API request load.
+        limits: { memory: 1536M, cpus: "1.5" }
     logging: *default-logging
 
   worker:
@@ -170,41 +170,6 @@ services:
         limits: { memory: 192M, cpus: "0.25" }
     logging: *default-logging
 
-  flow-api:
-    # Video-processing-service (FFmpeg + FastAPI). Vendored via flow-api/Dockerfile
-    # which clones upstream at build time and overlays a sidecar that adds
-    # local-storage input support so we don't have to provision Cloudflare R2.
-    # Exposed only inside the compose network — public traffic goes through
-    # frontend nginx → /flow-api/ → here.
-    build:
-      context: ./flow-api
-      dockerfile: Dockerfile
-    image: grokflow/flow-api:${TAG:-latest}
-    restart: unless-stopped
-    environment:
-      STORAGE_BACKEND: local
-      SECRET_KEY: ${FLOW_SECRET_KEY:-change-this-flow-secret}
-      DATABASE_URL: sqlite:///./data/app.db
-      MAX_UPLOAD_SIZE_MB: ${FLOW_MAX_UPLOAD_MB:-500}
-      # Bootstrap admin + API key on first boot — backend reads the plaintext
-      # key out of the shared volume so no copy-paste is needed.
-      FLOW_BOOTSTRAP_EMAIL: ${FLOW_BOOTSTRAP_EMAIL:-admin@grokflow.local}
-      FLOW_BOOTSTRAP_USERNAME: ${FLOW_BOOTSTRAP_USERNAME:-flowadmin}
-      FLOW_BOOTSTRAP_PASSWORD: ${FLOW_BOOTSTRAP_PASSWORD:?set in .env.prod}
-      # Optional R2 — leave empty to keep local storage. If set, upstream
-      # presigned-URL flow is used and the sidecar local-mode is bypassed.
-      R2_ACCOUNT_ID: ${FLOW_R2_ACCOUNT_ID:-}
-      R2_ACCESS_KEY_ID: ${FLOW_R2_ACCESS_KEY_ID:-}
-      R2_SECRET_ACCESS_KEY: ${FLOW_R2_SECRET_ACCESS_KEY:-}
-      R2_BUCKET_NAME: ${FLOW_R2_BUCKET_NAME:-video-output}
-      R2_PUBLIC_URL: ${FLOW_R2_PUBLIC_URL:-}
-    volumes:
-      - flow_api_data:/app/data
-    deploy:
-      resources:
-        limits: { memory: 1G, cpus: "1.5" }
-    logging: *default-logging
-
   frontend:
     build:
       context: ./frontend
@@ -235,4 +200,3 @@ volumes:
   postgres_data:
   redis_data:
   storage_data:
-  flow_api_data:

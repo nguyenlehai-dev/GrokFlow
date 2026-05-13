@@ -1,110 +1,139 @@
 # Flow video tools — setup runbook
 
-The Flow menu (Cut / Merge / Extract audio / Resize / …) is powered by a
-vendored copy of
-[`nguyenlehai-dev/video-processing-service`](https://github.com/nguyenlehai-dev/video-processing-service),
-deployed as the `flow-api` Docker service alongside the rest of the stack.
+The Flow menu (Cut / Merge / Extract audio / Add audio / Speed / Resize /
+Crop / Extract frames) runs as a native module inside the GrokFlow backend.
 
 ```
-Browser ─▶ frontend(nginx) ─▶ backend ─▶ flow-api ─▶ FFmpeg
-                                 │            │
-                                 │            └─▶ /app/data/{input,output}
-                                 └─ injects X-API-Key from shared volume
+Browser ─▶ frontend(nginx) ─▶ backend (FastAPI + FFmpeg)
+                                     │
+                                     ├─▶ Postgres `flow_jobs` table
+                                     └─▶ storage/flow/{input,output}/
 ```
 
-## What ships in this repo
+No side-car container, no separate database, no separate auth surface — the
+module mirrors the FE structure (`frontend/src/modules/flow/`) and reuses
+GrokFlow's existing JWT + Postgres + storage volume.
+
+## Files that ship the feature
 
 | Path | Purpose |
 |---|---|
-| `flow-api/Dockerfile` | Builds the side-car image. `git clone`s upstream at build time. |
-| `flow-api/sidecar.py` | Monkey-patches upstream to support local-filesystem input (no R2 needed). Adds `/api/v1/video/jobs/init-local`. |
-| `flow-api/bootstrap.py` | First-boot: creates admin user + API key, writes key to `/app/data/.api-key`. |
-| `flow-api/entrypoint.sh` | Runs bootstrap then `uvicorn sidecar:app`. |
-| `backend/app/modules/flow/router.py` | Thin proxy under `/api/flow/*` — hides X-API-Key from the browser and tags jobs with the GrokFlow user id. |
-| `frontend/src/modules/flow/` | UI: one declarative tool registry + one shared page component. |
+| [backend/app/modules/flow/router.py](../backend/app/modules/flow/router.py) | HTTP surface `/api/flow/*` — upload, run, list, retry, download, health. |
+| [backend/app/modules/flow/service.py](../backend/app/modules/flow/service.py) | Per-tool FFmpeg recipes + the shared job-lifecycle wrapper. |
+| [backend/app/modules/flow/ffmpeg.py](../backend/app/modules/flow/ffmpeg.py) | Subprocess shim around `ffmpeg` / `ffprobe`. |
+| [backend/app/modules/flow/schemas.py](../backend/app/modules/flow/schemas.py) | Pydantic DTOs. |
+| [backend/app/models/__init__.py](../backend/app/models/__init__.py) | `FlowJob` SQLAlchemy model. |
+| [backend/alembic/versions/0011_flow_jobs.py](../backend/alembic/versions/0011_flow_jobs.py) | DDL migration. |
+| [frontend/src/modules/flow/](../frontend/src/modules/flow/) | FE side — tools registry, workspace page, API docs page. |
+| [backend/Dockerfile.prod](../backend/Dockerfile.prod) | Adds `ffmpeg` to the apt-get install line. |
 
 ## First-time setup (VPS)
 
-1. Fill in the new env vars (see [`.env.prod.example`](../.env.prod.example) — the
-   `FLOW_*` block):
+```bash
+cd /home/vpsroot/grokflow
+git pull
+docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+  build --pull backend frontend
+docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+  up -d backend frontend
+docker exec grokflow-backend-1 alembic upgrade head
+```
 
-   ```env
-   FLOW_SECRET_KEY=<openssl rand -hex 32>
-   FLOW_BOOTSTRAP_EMAIL=flow-admin@grokflow.local
-   FLOW_BOOTSTRAP_USERNAME=flowadmin
-   FLOW_BOOTSTRAP_PASSWORD=<openssl rand -hex 16>
-   FLOW_MAX_UPLOAD_MB=500
-   ```
+Smoke-test:
 
-   Leave the `FLOW_R2_*` block empty unless you want output served from
-   Cloudflare R2 (local mode is fine for VPS-only deploys; outputs are
-   served via nginx at `/flow-output/<filename>`).
+```bash
+docker exec grokflow-backend-1 ffmpeg -version | head -1
+docker exec grokflow-backend-1 sh -lc 'ls /app/storage/flow || mkdir -p /app/storage/flow/{input,output}'
+curl -s http://localhost:8000/health
+```
 
-2. Pull the latest code on the VPS and (re)build:
+Open `https://flowgrok.vpspanel.io.vn/flow/cut` and run a short clip.
 
-   ```bash
-   cd /home/vpsroot/grokflow
-   git pull
-   docker compose --env-file .env.prod -f docker-compose.intranet.yml up -d --build flow-api backend frontend
-   ```
+## API surface (mirrors the FE shape)
 
-   The first build pulls FFmpeg + clones upstream — expect 2–4 minutes.
+| Method | Endpoint | Notes |
+|---|---|---|
+| POST | `/api/flow/upload` | multipart files + `tool_name` → `job_id` |
+| POST | `/api/flow/upload-url` | 501 (URL bypass was R2-only — removed) |
+| POST | `/api/flow/run/{tool}` | form fields per tool, kicks off BackgroundTask |
+| GET | `/api/flow/jobs/{id}` | polled every 2 s by the FE |
+| GET | `/api/flow/jobs` | paginated list of the caller's jobs |
+| POST | `/api/flow/jobs/{id}/retry` | replays a failed/completed job |
+| GET | `/api/flow/download/{filename}` | streams output bytes (aliased via nginx `/flow-output/`) |
+| GET | `/api/flow/health` | `{status: "healthy", backend: "native"}` |
 
-3. Verify bootstrap completed:
+## Storage
 
-   ```bash
-   docker exec grokflow-flow-api-1 cat /app/data/.api-key | head -c 20
-   docker logs grokflow-flow-api-1 --tail 30 | grep bootstrap
-   ```
+```
+/app/storage/flow/
+  ├─ input/<job_id>/<filename>
+  └─ output/<job_id>/<job_id>_<operation>.<ext>
+```
 
-4. Open `https://flowgrok.vpspanel.io.vn/flow/cut` and try a small clip.
+- The `<job_id>_<...>` prefix on output filenames is what `download/{name}`
+  uses to reject path traversal — files outside `output/<id-prefix>/` are
+  unreachable by URL.
+- Inputs are auto-deleted once a job completes. To preserve them for retry
+  without re-upload, comment the `shutil.rmtree(input_dir(...))` call near
+  the bottom of `service._process()`.
 
-## Storage backends
+## Adding a new tool
 
-### Local (default)
+1. Append a `ToolDef` entry in `frontend/src/modules/flow/tools.ts` (slug,
+   icon, fields, drop-zone shape).
+2. Add the slug to `KNOWN_TOOLS` in `backend/app/modules/flow/router.py`.
+3. Write a `process_<slug>(...)` function in `service.py` — the existing
+   ones are 10-20 lines each.
+4. Wire it into `_spawn_task()` in `router.py`.
 
-- Input files land at `/app/data/input/<job_id>/<filename>` inside the
-  `flow_api_data` Docker volume.
-- Output files land at `/app/data/output/<operation>_<short>.mp4`.
-- Public download URL: `https://your-domain/flow-output/<file>` — served by
-  nginx (`location /flow-output/` in `frontend/nginx.conf`).
-- Quota: bounded by the VPS disk. Run `docker exec grokflow-flow-api-1 du -sh /app/data` to inspect.
-
-### Cloudflare R2 (optional)
-
-Set the `FLOW_R2_*` block in `.env.prod` and restart `flow-api`. The
-sidecar detects R2 mode and falls back to upstream's presigned-URL upload
-flow — direct from browser to R2, no extra server bandwidth.
-
-Bucket policy: allow `PutObject` from R2 access key only; expose a
-public-read sub-path or a Cloudflare Worker for download URLs.
+No new model, no new migration, no FE plumbing changes.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `503 flow_api_unavailable` from `/api/flow/*` | Bootstrap key missing | `docker logs grokflow-flow-api-1 \| grep bootstrap`. If user already exists from a prior run, manually fetch the key from the DB and put it into `FLOW_API_KEY` env on the backend. |
-| Upload returns 413 | `client_max_body_size` lower than the file | Bump in `frontend/nginx.conf` and `FLOW_MAX_UPLOAD_MB`. |
-| Job stuck at `processing` forever | FFmpeg timeout (10 min hardcoded upstream) | Split input into smaller chunks; long-form rendering is not the design goal here. |
-| Job `failed` with "Local input not found" | Container restart wiped the `flow_api_data` volume | Verify the named volume in compose; never `docker compose down -v` in production. |
-| Output 404 at `/flow-output/...` | nginx isn't proxying to flow-api | Reload nginx config: `docker exec grokflow-frontend-1 nginx -s reload`. |
+| Upload returns 413 | nginx `client_max_body_size` < file | Bump in `frontend/nginx.conf` (currently 600m). |
+| Job stuck at `processing` forever | FFmpeg timeout (10 min) | Split input into smaller chunks. Tweak `FFMPEG_TIMEOUT_S` in `ffmpeg.py` if needed. |
+| Job `failed` "input file missing" | Input dir wiped (volume reset) | Re-upload — input files are cleaned after each successful run. |
+| Output 404 at `/flow-output/...` | Filename doesn't match `<job_id>_*` shape | Check `download/{filename}` log — should be the FE's `output_url` value verbatim. |
 
 ## Resource expectations
 
-For the spec being discussed (2 vCPU / 8 GB / 40 GB NVMe):
+For the 2 vCPU / 8 GB / 40 GB NVMe VPS:
 
-- Idle: ~150 MB RAM for flow-api (FastAPI + SQLite).
-- Per active job (cut/resize 1080p): ~400–700 MB RAM during ffmpeg, one
-  full CPU core. So 2 concurrent jobs ≈ full CPU + 1.5 GB RAM.
-- Storage: budget ~3 GB temp + 5–10 GB persistent output history before
-  you start pruning. Run `docker exec grokflow-flow-api-1 sh -c 'find /app/data/output -mtime +14 -delete'` as a weekly cron.
+- One concurrent 1080p encode: ~600-800 MB RAM, one full vCPU.
+- 2 concurrent encodes is the safe ceiling (backend container is capped at
+  1.5 GB; gunicorn worker count caps how many tasks can spawn).
+- Storage: budget ~3 GB temp + 5-10 GB output retention. Prune with:
+  ```bash
+  docker exec grokflow-backend-1 \
+    find /app/storage/flow/output -mtime +14 -delete
+  ```
 
-## Future work
+## What was removed
 
-- Real per-user ownership table (`flow_jobs(grokflow_user_id, flow_api_job_id)`)
-  for strict multi-tenant isolation. Today the proxy tags `params._owner`
-  but the underlying flow-api row is owned by the shared admin user.
-- Webhook notification when a job completes — flow-api has no callback
-  hook today; the FE just polls every 2 s.
-- Migrate the SQLite to a small Postgres schema so the FE can list "all my
-  videos" across browser sessions.
+The previous implementation used a separate `flow-api` container vendored
+from [`nguyenlehai-dev/video-processing-service`](https://github.com/nguyenlehai-dev/video-processing-service).
+That's been retired:
+
+- `flow-api/` folder deleted.
+- `flow-api` service + `flow_api_data` volume removed from
+  `docker-compose.intranet.yml`.
+- `FLOW_BOOTSTRAP_*` and `FLOW_R2_*` env vars are no-ops now.
+- `/api/flow/upload-url` returns 501 (the URL bypass was R2-specific).
+
+Migration steps if upgrading from the side-car deploy:
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+  stop flow-api
+docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+  rm -f flow-api
+docker volume rm grokflow_flow_api_data   # only after you confirm no
+                                          # in-flight jobs you still care about
+docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+  build --pull backend
+docker compose --env-file .env.prod -f docker-compose.intranet.yml \
+  up -d backend
+docker exec grokflow-backend-1 alembic upgrade head
+```

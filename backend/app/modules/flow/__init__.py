@@ -1,11 +1,13 @@
-"""Flow module — thin reverse proxy in front of the standalone
-`video-processing-service` (deployed as the `flow-api` Docker service).
+"""Flow module — native video-processing (FFmpeg) inside GrokFlow.
 
-The proxy exists so:
-  - GrokFlow JWT remains the only auth the FE has to think about; the
-    flow-api X-API-Key never leaves the backend container.
-  - Job ownership is keyed off the GrokFlow user, not the flow-api admin
-    user that owns every job upstream.
-  - Output URLs can be rewritten to point at our own nginx so we can
-    serve via the GrokFlow domain instead of exposing flow-api directly.
+Previously this module reverse-proxied a separate `flow-api` Docker
+container; that side-car has been retired in favour of running FFmpeg
+directly out of this backend. Same FE shape, simpler ops:
+
+  - One auth surface (GrokFlow JWT — no separate API keys / users)
+  - One DB (Postgres `flow_jobs` table, alembic-managed)
+  - One storage volume (`storage/flow/{input,output}`)
+  - One container (this backend) — `ffmpeg` baked into Dockerfile.prod
+
+See `docs/FLOW-SETUP.md` for the operator runbook.
 """

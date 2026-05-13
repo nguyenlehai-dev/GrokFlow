@@ -1,274 +1,351 @@
-"""HTTP proxy between the GrokFlow FE and the standalone flow-api service.
+"""HTTP surface for the Flow video-processing module.
 
-Architecture:
-  FE --(JWT)--> grokflow-backend /api/flow/* --(X-API-Key)--> flow-api:8000
+The previous incarnation reverse-proxied to a separate `flow-api`
+container; that side-car has been folded into this very backend. The
+endpoint shape is unchanged so the FE didn't need a single edit.
 
-Why proxy and not direct?
-  - Hides the flow-api API key from the browser (would otherwise leak via
-    every multipart upload).
-  - Lets us key job ownership off the GrokFlow user id (the upstream service
-    owns every job under the shared admin user we bootstrap once).
-  - Rewrites local-storage output URLs (`/api/v1/video/download/<name>`) to
-    `/flow-output/<name>` so nginx serves the bytes without the FE knowing
-    the upstream path.
+Endpoints (all mounted under `/api/flow`):
 
-API surface (mirrors the upstream `/api/v1/video/*` shape):
-  POST /api/flow/upload         multipart files + tool_name → job_id
-  POST /api/flow/run/{tool}     form params + job_id → job spawned
-  GET  /api/flow/jobs/{id}      poll status
-  GET  /api/flow/jobs           list current user's jobs
-  POST /api/flow/jobs/{id}/retry
+    POST /upload              multipart files + tool_name → job_id
+    POST /upload-url          (legacy compat — returns 501; URL bypass
+                              required R2, which the native impl no
+                              longer ships)
+    POST /run/{tool}          form params + job_id → BackgroundTask spawned
+    GET  /jobs                paginated list of caller's jobs
+    GET  /jobs/{id}           single job (404 if not yours)
+    POST /jobs/{id}/retry     re-spawn with the same params
+    GET  /download/{name}     stream output file by filename
+    GET  /health              service smoke-test (always ok if backend up)
+
+Background work uses FastAPI's BackgroundTasks (in-process) so we don't
+need an extra worker container. Each task opens its own sync DB session
+because BackgroundTasks runs after the request session is closed.
 """
 from __future__ import annotations
 
+import logging
 import os
-from pathlib import Path
-from typing import Any
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-import httpx
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
+from fastapi.responses import FileResponse
+from sqlalchemy import select
 
-from app.core.deps import CurrentUser
-from app.core.http_client import get_http
+from app.core.deps import CurrentUser, DbSession
+from app.models import FlowJob
+
+from . import service
+from .schemas import (
+    FlowJobListOut,
+    FlowJobOut,
+    UploadByUrlsRequest,
+    UploadResponse,
+)
 
 router = APIRouter(prefix="/api/flow", tags=["flow"])
+logger = logging.getLogger(__name__)
+
+
+# Supported tool slugs — must mirror the FE's `tools.ts` slug field.
+KNOWN_TOOLS: frozenset[str] = frozenset({
+    "cut", "merge", "extract-audio", "add-audio",
+    "speed", "resize", "crop", "extract-frames",
+})
+
+
+def _sanitize_filename(raw: str | None) -> str:
+    """Strip path components from a user-provided filename. Keep the
+    extension though — FFmpeg often needs it to choose a demuxer."""
+    name = os.path.basename(raw or "upload.bin").replace("..", "_")
+    return name or "upload.bin"
 
 
 # ---------------------------------------------------------------------------
-# Configuration — env-driven so the value lives in .env.prod, not source.
+# Upload
 # ---------------------------------------------------------------------------
-FLOW_API_URL = os.getenv("FLOW_API_URL", "http://flow-api:8000")
-FLOW_API_KEY_FILE = os.getenv("FLOW_API_KEY_FILE", "/flow_api_data/.api-key")
-# Allow operator to override with an explicit env var (e.g. for prod R2 mode
-# where the bootstrap user/key isn't on this volume).
-_API_KEY_ENV = os.getenv("FLOW_API_KEY", "").strip()
 
-
-def _load_api_key() -> str:
-    """Read the bootstrapped flow-api key.
-
-    Order of resolution: explicit env > file written by flow-api bootstrap >
-    raise. The result is cached implicitly via httpx header on every request
-    (no module-level cache so the operator can hot-rotate the file without
-    restarting the backend).
-    """
-    if _API_KEY_ENV:
-        return _API_KEY_ENV
-    p = Path(FLOW_API_KEY_FILE)
-    if p.exists():
-        return p.read_text(encoding="utf-8").strip()
-    raise HTTPException(
-        status_code=503,
-        detail={
-            "code": "flow_api_unavailable",
-            "message": (
-                "Flow service is not ready — bootstrap key not found. "
-                "Check `docker logs grokflow-flow-api-1` and ensure "
-                "FLOW_BOOTSTRAP_* env vars are set in .env.prod."
-            ),
-        },
-    )
-
-
-def _upstream_headers() -> dict[str, str]:
-    return {"X-API-Key": _load_api_key()}
-
-
-# ---------------------------------------------------------------------------
-# Job ownership: we lean on the FE to forget about jobs it didn't create
-# (the upstream auth user is shared, so every GrokFlow user technically can
-# see every other user's jobs). For multi-tenant strictness we'd need our
-# own `flow_jobs(grokflow_user_id, flow_job_id)` table; left as TODO.
-#
-# For now we tag each job's `params` with `_owner=<grokflow_user_id>` and
-# filter on read.
-# ---------------------------------------------------------------------------
-def _filter_for_user(job: dict[str, Any], user_id: str) -> dict[str, Any] | None:
-    params = job.get("params") or {}
-    if params.get("_owner") and params["_owner"] != user_id:
-        return None
-    return _rewrite_output(job)
-
-
-def _rewrite_output(job: dict[str, Any]) -> dict[str, Any]:
-    """Rewrite local-storage output URLs to our same-origin /flow-output/ path."""
-    url = job.get("output_url")
-    if isinstance(url, str) and url.startswith("/api/v1/video/download/"):
-        job["output_url"] = url.replace("/api/v1/video/download/", "/flow-output/", 1)
-    return job
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-@router.post("/upload")
+@router.post("/upload", response_model=UploadResponse)
 async def upload(
     user: CurrentUser,
+    db: DbSession,
     tool_name: str = Form(...),
     files: list[UploadFile] = File(...),
-):
-    """Stream multipart files to flow-api's local-mode init endpoint."""
-    client = get_http()
-    multipart: list[tuple[str, tuple[str, bytes, str]]] = []
+) -> UploadResponse:
+    if tool_name not in KNOWN_TOOLS:
+        raise HTTPException(status_code=400, detail=f"unknown tool: {tool_name}")
+    if not files:
+        raise HTTPException(status_code=400, detail="at least one file is required")
+
+    job_id = uuid.uuid4()
+    dest_dir = service.input_dir(job_id)
+
+    input_files: list[dict] = []
     for f in files:
-        data = await f.read()
-        multipart.append(
-            ("files", (f.filename or "upload.bin", data, f.content_type or "application/octet-stream"))
-        )
+        safe_name = _sanitize_filename(f.filename)
+        dest = dest_dir / safe_name
+        with dest.open("wb") as out:
+            # Stream in 1 MiB chunks — anything larger doesn't help on disk
+            # write throughput and pins more RAM than necessary.
+            while chunk := await f.read(1024 * 1024):
+                out.write(chunk)
+        input_files.append({
+            "filename": safe_name,
+            "object_key": f"{job_id}/{safe_name}",
+        })
 
-    r = await client.post(
-        f"{FLOW_API_URL}/api/v1/video/jobs/init-local",
-        params={"tool_name": tool_name},
-        headers=_upstream_headers(),
-        files=multipart,
-        timeout=600.0,
+    job = FlowJob(
+        id=job_id,
+        user_id=user.id,
+        operation=tool_name,
+        status="uploading",
+        progress=Decimal("100"),  # upload-finish == 100% of the upload phase
+        input_files=input_files,
     )
-    if r.status_code >= 400:
-        raise HTTPException(status_code=r.status_code, detail=r.text)
-    return r.json()
+    db.add(job)
+    await db.commit()
 
-
-class UploadUrlsRequest(BaseModel):
-    tool_name: str
-    urls: list[str]
+    return UploadResponse(
+        job_id=job_id,
+        input_files=[{"filename": f["filename"], "object_key": f["object_key"]} for f in input_files],
+        backend="local",
+    )
 
 
 @router.post("/upload-url")
-async def upload_by_urls(payload: UploadUrlsRequest, user: CurrentUser):
-    """Skip the multipart upload step by handing flow-api a list of URLs.
-
-    Only useful when the upstream service is in R2 mode (presigned-URL flow)
-    OR the URLs match the upstream's bypass-list (r2.dev / plxeditor.com /
-    plenxai.com). Local-storage mode flow-api will return 400."""
-    if not payload.urls:
-        raise HTTPException(status_code=400, detail="At least one URL is required")
-
-    client = get_http()
-    r = await client.post(
-        f"{FLOW_API_URL}/api/v1/video/jobs/init",
-        headers={**_upstream_headers(), "Content-Type": "application/json"},
-        json={"tool_name": payload.tool_name, "filenames": payload.urls},
-        timeout=30.0,
+async def upload_by_urls(payload: UploadByUrlsRequest, user: CurrentUser):
+    """Legacy compat shim — the side-car supported pre-hosted R2/Cloudflare
+    URLs via a presigned-PUT bypass. The native FFmpeg path runs locally and
+    has no equivalent, so we 501 here and the FE falls back to multipart."""
+    _ = payload, user
+    raise HTTPException(
+        status_code=501,
+        detail="URL bypass is no longer supported — please upload the file directly",
     )
-    if r.status_code >= 400:
-        raise HTTPException(status_code=r.status_code, detail=r.text)
-    data = r.json()
-    # Upstream returns `object_keys` for direct-bypass URLs but no `input_files`
-    # — synthesise a uniform shape so the FE doesn't branch on response type.
-    return {
-        "job_id": data["job_id"],
-        "input_files": [
-            {"filename": url.rsplit("/", 1)[-1], "object_key": key}
-            for url, key in zip(payload.urls, data.get("object_keys", []), strict=False)
-        ],
-        "backend": "r2",
-    }
 
 
-@router.post("/run/{tool}")
-async def run_tool(tool: str, user: CurrentUser, request: Request):
-    """Forward form-data to /api/v1/video/<tool>. Tags job params with owner."""
-    if tool not in {
-        "cut", "merge", "add-audio", "extract-audio",
-        "speed", "crop", "resize", "extract-frames",
-    }:
+# ---------------------------------------------------------------------------
+# Run a tool
+# ---------------------------------------------------------------------------
+
+@router.post("/run/{tool}", response_model=FlowJobOut)
+async def run_tool(
+    tool: str,
+    user: CurrentUser,
+    db: DbSession,
+    background: BackgroundTasks,
+    job_id: uuid.UUID = Form(...),
+    # All tool-specific params live behind `Form(None)` so we can accept
+    # them in a uniform multipart body. Unset values fall through to the
+    # service-level defaults.
+    start_time: str | None = Form(None),
+    end_time: str | None = Form(None),
+    format: str | None = Form(None),
+    replace: bool | None = Form(None),
+    speed: float | None = Form(None),
+    adjust_audio: bool | None = Form(None),
+    width: int | None = Form(None),
+    height: int | None = Form(None),
+    maintain_aspect: bool | None = Form(None),
+    x: int | None = Form(None),
+    y: int | None = Form(None),
+    first_frame: bool | None = Form(None),
+    last_frame: bool | None = Form(None),
+    timestamp: float | None = Form(None),
+) -> FlowJobOut:
+    if tool not in KNOWN_TOOLS:
         raise HTTPException(status_code=404, detail="unknown tool")
 
-    form = dict(await request.form())
-    job_id = form.get("job_id")
-    if not job_id:
-        raise HTTPException(status_code=400, detail="job_id is required")
-
-    client = get_http()
-    r = await client.post(
-        f"{FLOW_API_URL}/api/v1/video/{tool}",
-        headers=_upstream_headers(),
-        data=form,
-        timeout=60.0,
-    )
-    if r.status_code >= 400:
-        return JSONResponse(status_code=r.status_code, content={"detail": r.text})
-
-    # Tag ownership: read job back, write owner into params, push update.
-    # We do this best-effort — failing here would orphan a running job, so
-    # treat the upstream response as authoritative and only log failures.
-    try:
-        get_resp = await client.get(
-            f"{FLOW_API_URL}/api/v1/video/jobs/{job_id}",
-            headers=_upstream_headers(),
-            timeout=10.0,
+    job = await service.get_user_job(db, user.id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.operation != tool:
+        raise HTTPException(
+            status_code=400,
+            detail=f"job was created for {job.operation}, not {tool}",
         )
-        if get_resp.status_code == 200:
-            params = get_resp.json().get("params") or {}
-            params["_owner"] = user.id
-            # No public "patch job" route exists upstream — owner tag rides
-            # on the next status update or stays out of band. For now we
-            # just record it locally via the response.
-    except httpx.HTTPError:
-        pass
 
-    return r.json()
+    # Persist the chosen params so retries can replay them without the FE
+    # having to re-send.
+    params = {
+        k: v for k, v in {
+            "start_time": start_time, "end_time": end_time,
+            "format": format, "replace": replace,
+            "speed": speed, "adjust_audio": adjust_audio,
+            "width": width, "height": height, "maintain_aspect": maintain_aspect,
+            "x": x, "y": y,
+            "first_frame": first_frame, "last_frame": last_frame, "timestamp": timestamp,
+        }.items() if v is not None
+    }
+    job.params = params
+    job.status = "pending"
+    job.progress = Decimal("0")
+    job.error_message = None
+    job.output_url = None
+    job.output_filename = None
+    job.file_size = None
+    job.duration = None
+    job.started_at = None
+    job.completed_at = None
+    await db.commit()
+    await db.refresh(job)
+
+    _spawn_task(background, tool, job.id, params)
+    return FlowJobOut.model_validate(job)
 
 
-@router.get("/jobs/{job_id}")
-async def get_job(job_id: str, user: CurrentUser):
-    client = get_http()
-    r = await client.get(
-        f"{FLOW_API_URL}/api/v1/video/jobs/{job_id}",
-        headers=_upstream_headers(),
-        timeout=10.0,
-    )
-    if r.status_code == 404:
+def _spawn_task(background: BackgroundTasks, tool: str, job_id: uuid.UUID, params: dict) -> None:
+    """Dispatch to the right service.process_* with the right args.
+    Centralised so /run and /retry share the same routing logic."""
+    if tool == "cut":
+        background.add_task(
+            service.process_cut, job_id,
+            params.get("start_time") or "00:00:00",
+            params.get("end_time") or "00:00:10",
+        )
+    elif tool == "merge":
+        background.add_task(service.process_merge, job_id)
+    elif tool == "extract-audio":
+        background.add_task(
+            service.process_extract_audio, job_id, params.get("format") or "mp3",
+        )
+    elif tool == "add-audio":
+        background.add_task(
+            service.process_add_audio, job_id, bool(params.get("replace") or False),
+        )
+    elif tool == "speed":
+        background.add_task(
+            service.process_speed, job_id,
+            float(params.get("speed") or 1.0),
+            bool(params.get("adjust_audio") if params.get("adjust_audio") is not None else True),
+        )
+    elif tool == "resize":
+        background.add_task(
+            service.process_resize, job_id,
+            int(params.get("width") or 1280),
+            int(params.get("height") or 720),
+            bool(params.get("maintain_aspect") if params.get("maintain_aspect") is not None else True),
+        )
+    elif tool == "crop":
+        background.add_task(
+            service.process_crop, job_id,
+            int(params.get("width") or 640),
+            int(params.get("height") or 360),
+            int(params.get("x") or 0),
+            int(params.get("y") or 0),
+        )
+    elif tool == "extract-frames":
+        background.add_task(
+            service.process_extract_frames, job_id,
+            bool(params.get("first_frame") or False),
+            bool(params.get("last_frame") or False),
+            float(params["timestamp"]) if params.get("timestamp") is not None else None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Read
+# ---------------------------------------------------------------------------
+
+@router.get("/jobs/{job_id}", response_model=FlowJobOut)
+async def get_job(job_id: uuid.UUID, user: CurrentUser, db: DbSession) -> FlowJobOut:
+    job = await service.get_user_job(db, user.id, job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="job not found")
-    if r.status_code >= 400:
-        raise HTTPException(status_code=r.status_code, detail=r.text)
-    job = _filter_for_user(r.json(), user.id)
-    if job is None:
+    return FlowJobOut.model_validate(job)
+
+
+@router.get("/jobs", response_model=FlowJobListOut)
+async def list_jobs(
+    user: CurrentUser, db: DbSession, skip: int = 0, limit: int = 50,
+) -> FlowJobListOut:
+    limit = max(1, min(limit, 100))
+    rows = (
+        await db.execute(
+            select(FlowJob)
+            .where(FlowJob.user_id == user.id)
+            .order_by(FlowJob.created_at.desc())
+            .offset(skip)
+            .limit(limit),
+        )
+    ).scalars().all()
+    return FlowJobListOut(
+        jobs=[FlowJobOut.model_validate(r) for r in rows],
+        total=len(rows),
+    )
+
+
+@router.post("/jobs/{job_id}/retry", response_model=FlowJobOut)
+async def retry_job(
+    job_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    background: BackgroundTasks,
+) -> FlowJobOut:
+    job = await service.get_user_job(db, user.id, job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="job not found")
-    return job
+    if job.status not in {"failed", "completed"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"only failed/completed jobs can be retried (current: {job.status})",
+        )
+    if not job.params or not job.input_files:
+        raise HTTPException(
+            status_code=400,
+            detail="job has no params/inputs to replay — re-upload required",
+        )
+
+    job.status = "pending"
+    job.progress = Decimal("0")
+    job.error_message = None
+    job.output_url = None
+    job.output_filename = None
+    job.file_size = None
+    job.duration = None
+    job.started_at = None
+    job.completed_at = None
+    await db.commit()
+    await db.refresh(job)
+
+    _spawn_task(background, job.operation, job.id, job.params)
+    return FlowJobOut.model_validate(job)
 
 
-@router.get("/jobs")
-async def list_jobs(user: CurrentUser, skip: int = 0, limit: int = 50):
-    client = get_http()
-    r = await client.get(
-        f"{FLOW_API_URL}/api/v1/video/jobs",
-        headers=_upstream_headers(),
-        params={"skip": skip, "limit": limit},
-        timeout=10.0,
-    )
-    if r.status_code >= 400:
-        raise HTTPException(status_code=r.status_code, detail=r.text)
-    data = r.json()
-    jobs = []
-    for j in data.get("jobs") or []:
-        out = _filter_for_user(j, user.id)
-        if out is not None:
-            jobs.append(out)
-    return {"jobs": jobs, "total": len(jobs)}
+# ---------------------------------------------------------------------------
+# File download (used by /flow-output/<name> nginx alias too)
+# ---------------------------------------------------------------------------
+
+@router.get("/download/{filename}")
+async def download(filename: str):
+    """Stream an output file by its public filename.
+
+    Filenames embed the job_id (see service.output_file_path) so we don't
+    have to look up the job row to authorise — anyone with the link can
+    download (link-as-credential pattern, fine for this use case). Path
+    traversal is rejected by the name validator."""
+    path = service.output_file_path(filename)
+    if not path:
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(path, filename=filename, media_type="application/octet-stream")
 
 
-@router.post("/jobs/{job_id}/retry")
-async def retry_job(job_id: str, user: CurrentUser):
-    client = get_http()
-    r = await client.post(
-        f"{FLOW_API_URL}/api/v1/video/jobs/{job_id}/retry",
-        headers=_upstream_headers(),
-        timeout=10.0,
-    )
-    if r.status_code >= 400:
-        raise HTTPException(status_code=r.status_code, detail=r.text)
-    return _rewrite_output(r.json())
-
+# ---------------------------------------------------------------------------
+# Misc
+# ---------------------------------------------------------------------------
 
 @router.get("/health")
 async def health(user: CurrentUser):
-    """Surface flow-api /health through our auth so the FE can show status."""
-    client = get_http()
-    try:
-        r = await client.get(f"{FLOW_API_URL}/health", timeout=5.0)
-        return r.json()
-    except httpx.HTTPError as exc:
-        return {"status": "down", "error": str(exc)}
+    """Smoke-test that the Flow path is wired. FE's System Auth panel
+    used to ping this against the side-car — now it's just an in-process
+    check."""
+    _ = user  # auth-required so anonymous traffic can't crawl flow state
+    return {"status": "healthy", "backend": "native", "version": "1.0.0"}
