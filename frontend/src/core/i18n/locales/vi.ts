@@ -1,9 +1,18 @@
-/** Vietnamese — default locale. Mirrors en.ts key set so a missing
- *  key in either file is obvious in code review. Only the ~50 top-of-app
+/** Vietnamese — default locale. Mirrors en.ts key set so a missing key
+ *  in either file is obvious in code review. Only the ~50 top-of-app
  *  strings are wrapped today; rest of the UI stays Vietnamese-hardcoded
  *  until phase 2 finishes wrapping.
+ *
+ *  Typed as a recursive Record<string, string|Translations> via the
+ *  Translations helper rather than `as const` — `as const` froze every
+ *  value into a literal type which made en.ts un-assignable since its
+ *  English strings don't match the Vietnamese literal types.
  */
-export const vi = {
+export interface Translations {
+  [key: string]: string | Translations;
+}
+
+export const vi: Translations = {
   nav: {
     dashboard: "Dashboard",
     api_keys: "API Keys",
@@ -56,6 +65,7 @@ export const vi = {
     apply: "Áp dụng",
     clear: "Xóa lọc",
   },
-} as const;
+};
 
-export type TranslationKeys = typeof vi;
+// Back-compat alias for the previous typeof export.
+export type TranslationKeys = Translations;
