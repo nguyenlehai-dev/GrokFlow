@@ -61,6 +61,20 @@ export async function uploadInputs(
   return r.data;
 }
 
+/** Bypass multipart upload by handing the backend a list of pre-hosted URLs
+ *  (R2 / plxeditor.com / plenxai.com). Only works when STORAGE_BACKEND=r2
+ *  upstream — local-mode flow-api will reject. */
+export async function uploadByUrls(
+  toolName: string,
+  urls: string[],
+): Promise<UploadResponse> {
+  const r = await flowApi.post<UploadResponse>("/api/flow/upload-url", {
+    tool_name: toolName,
+    urls,
+  });
+  return r.data;
+}
+
 export async function runTool(
   tool: string,
   jobId: string,

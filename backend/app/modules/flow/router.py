@@ -28,6 +28,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.core.deps import CurrentUser
 from app.core.http_client import get_http
@@ -127,6 +128,43 @@ async def upload(
     if r.status_code >= 400:
         raise HTTPException(status_code=r.status_code, detail=r.text)
     return r.json()
+
+
+class UploadUrlsRequest(BaseModel):
+    tool_name: str
+    urls: list[str]
+
+
+@router.post("/upload-url")
+async def upload_by_urls(payload: UploadUrlsRequest, user: CurrentUser):
+    """Skip the multipart upload step by handing flow-api a list of URLs.
+
+    Only useful when the upstream service is in R2 mode (presigned-URL flow)
+    OR the URLs match the upstream's bypass-list (r2.dev / plxeditor.com /
+    plenxai.com). Local-storage mode flow-api will return 400."""
+    if not payload.urls:
+        raise HTTPException(status_code=400, detail="At least one URL is required")
+
+    client = get_http()
+    r = await client.post(
+        f"{FLOW_API_URL}/api/v1/video/jobs/init",
+        headers={**_upstream_headers(), "Content-Type": "application/json"},
+        json={"tool_name": payload.tool_name, "filenames": payload.urls},
+        timeout=30.0,
+    )
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    data = r.json()
+    # Upstream returns `object_keys` for direct-bypass URLs but no `input_files`
+    # — synthesise a uniform shape so the FE doesn't branch on response type.
+    return {
+        "job_id": data["job_id"],
+        "input_files": [
+            {"filename": url.rsplit("/", 1)[-1], "object_key": key}
+            for url, key in zip(payload.urls, data.get("object_keys", []), strict=False)
+        ],
+        "backend": "r2",
+    }
 
 
 @router.post("/run/{tool}")
