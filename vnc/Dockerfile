@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium chromium-sandbox \
-    xvfb x11vnc autocutsel \
+    xvfb x11vnc \
     novnc websockify \
     supervisor nginx-light \
     fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
@@ -16,6 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd -m -u 1000 -s /bin/bash vncuser \
     && mkdir -p /config /var/log/supervisor /run/nginx /var/lib/nginx/body \
     && chown -R vncuser:vncuser /config /run/nginx /var/lib/nginx /var/log/nginx
+
+# autocutsel in its own tiny layer so the big chromium+xvfb apt download
+# above stays cacheable — adding autocutsel inline would invalidate the
+# 600 MB-of-Debian-packages layer and force a full redownload over the
+# VPS's 10 Mbps international link.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autocutsel \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY supervisord.conf /etc/supervisor/conf.d/grokflow.conf
 COPY entrypoint.sh /entrypoint.sh
