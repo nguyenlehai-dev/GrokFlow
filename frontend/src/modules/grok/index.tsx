@@ -1,11 +1,13 @@
-import { Sparkles, Layers, Workflow, FileText } from "lucide-react";
+import { Sparkles, Layers, Workflow, FileText, Activity } from "lucide-react";
 
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 import type { FrontendModule } from "@/app/types";
 import { lazyPage } from "@/app/lazyPage";
 
 /** Grok automation module — Profiles (browser sessions), Jobs (image/video
- *  generation), and API Docs for the public Grok API.
+ *  generation), API Docs for the public Grok API, plus a Playground that
+ *  gates job submission behind API-key verification (mirrors the Gateway
+ *  Playground UX so operators have one mental model across modules).
  *
  *  All pages lazy-loaded so initial bundle stays small. Future: when the
  *  Grok backend lives in its own repo, set VITE_MODULE_GROK_API and the
@@ -16,9 +18,10 @@ export const moduleManifest: FrontendModule = {
   label: "Quản lý Grok",
   apiBaseUrl: import.meta.env.VITE_MODULE_GROK_API ?? "",
   routes: [
-    { path: "profiles", element: lazyPage(() => import("./ProfilesPage"), "ProfilesPage") },
-    { path: "jobs",     element: lazyPage(() => import("./JobsPage"), "JobsPage") },
-    { path: "api-docs", element: lazyPage(() => import("./ApiDocsPage"), "ApiDocsPage") },
+    { path: "profiles",       element: lazyPage(() => import("./ProfilesPage"), "ProfilesPage") },
+    { path: "jobs",           element: lazyPage(() => import("./JobsPage"), "JobsPage") },
+    { path: "grok/playground", element: lazyPage(() => import("./GrokPlaygroundPage"), "GrokPlaygroundPage") },
+    { path: "api-docs",       element: lazyPage(() => import("./ApiDocsPage"), "ApiDocsPage") },
   ],
   nav: [
     {
@@ -29,6 +32,11 @@ export const moduleManifest: FrontendModule = {
       items: [
         { type: "link", to: "/profiles", label: "Profiles", icon: Layers },
         { type: "link", to: "/jobs", label: "Jobs", icon: Workflow },
+        // Playground sits between Jobs (where async results land) and
+        // API Docs (reference). Same Activity icon as Flow Requests +
+        // Gateway Requests so the "REQ-style entrypoint" pattern is
+        // consistent across modules.
+        { type: "link", to: "/grok/playground", label: "Playground", icon: Activity },
         { type: "link", to: "/api-docs", label: "API Docs", icon: FileText, feature: FEATURE_KEYS.uiApiDocs },
       ],
     },

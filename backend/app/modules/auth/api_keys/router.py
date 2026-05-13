@@ -1,11 +1,12 @@
 import uuid
 from fastapi import APIRouter, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from app.core.deps import CurrentUser, DbSession
 from app.core.exceptions import EntitlementBlocked, InvalidPayload, NotFound, PermissionDenied
-from app.core.security import generate_api_key
-from app.models import ApiKey
+from app.core.security import generate_api_key, hash_api_key
+from app.models import ApiKey, User
 from app.modules.admin.audit import service as audit
 from app.modules.entitlements.service import (
     get_effective_entitlements,
@@ -110,3 +111,52 @@ async def delete_key(key_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Non
         raise PermissionDenied()
     await db.delete(api_key)
     await db.commit()
+
+
+# ─── /verify — used by FE Playground lock modals ────────────────────────
+# Mirrors /api/v1/gateway/gateway-keys/verify shape. Caller pastes the raw
+# key once; FE persists the verification result locally (zustand + localStorage)
+# and uses it as Bearer for subsequent job-creation calls. The endpoint
+# itself is auth-less — anyone with the key can verify it (that's the
+# whole point of a "do you recognise this key" check).
+
+class ApiKeyVerifyRequest(BaseModel):
+    key: str
+
+
+class ApiKeyVerifyResponse(BaseModel):
+    verified: bool
+    label: str | None = None
+    user_email: str | None = None
+    allowed_providers: list[str] | None = None
+    allowed_job_types: list[str] | None = None
+    daily_limit: int | None = None
+    used_today: int | None = None
+
+
+@router.post("/verify", response_model=ApiKeyVerifyResponse)
+async def verify_key(payload: ApiKeyVerifyRequest, db: DbSession) -> ApiKeyVerifyResponse:
+    """Return the key's metadata if it's valid + active; { verified: False }
+    otherwise. We intentionally don't leak existence by returning 404 —
+    same shape as Gateway's verify so the FE can use one mental model."""
+    raw = (payload.key or "").strip()
+    if not raw:
+        return ApiKeyVerifyResponse(verified=False)
+    key_hash = hash_api_key(raw)
+    api_key = (
+        await db.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
+    ).scalar_one_or_none()
+    if not api_key or api_key.status != "active":
+        return ApiKeyVerifyResponse(verified=False)
+    user = await db.get(User, api_key.user_id)
+    if not user or user.status != "active":
+        return ApiKeyVerifyResponse(verified=False)
+    return ApiKeyVerifyResponse(
+        verified=True,
+        label=api_key.name,
+        user_email=user.email,
+        allowed_providers=list(api_key.allowed_providers or []),
+        allowed_job_types=list(api_key.allowed_job_types or []),
+        daily_limit=api_key.daily_limit,
+        used_today=api_key.used_today,
+    )
