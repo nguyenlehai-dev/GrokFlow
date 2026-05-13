@@ -3,6 +3,7 @@ import { Sparkles, Layers, Workflow, FileText, Activity } from "lucide-react";
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 import type { FrontendModule } from "@/app/types";
 import { lazyPage } from "@/app/lazyPage";
+import { KeyGate } from "./KeyGate";
 
 /** Grok automation module — Profiles (browser sessions), Jobs (image/video
  *  generation), API Docs for the public Grok API, plus a Playground that
@@ -19,7 +20,10 @@ export const moduleManifest: FrontendModule = {
   apiBaseUrl: import.meta.env.VITE_MODULE_GROK_API ?? "",
   routes: [
     { path: "profiles",       element: lazyPage(() => import("./ProfilesPage"), "ProfilesPage") },
-    { path: "jobs",           element: lazyPage(() => import("./JobsPage"), "JobsPage") },
+    // /jobs is customer-facing job history — same lock as Playground so
+    // non-admin viewers must verify a Grok API key before seeing job rows.
+    // Admins bypass; domains with require_playground_key=false bypass.
+    { path: "jobs",           element: <KeyGate>{lazyPage(() => import("./JobsPage"), "JobsPage")}</KeyGate> },
     { path: "grok/playground", element: lazyPage(() => import("./GrokPlaygroundPage"), "GrokPlaygroundPage") },
     { path: "api-docs",       element: lazyPage(() => import("./ApiDocsPage"), "ApiDocsPage") },
   ],
