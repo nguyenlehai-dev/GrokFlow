@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from app.core.deps import AdminUser, CurrentUser, DbSession
-from app.models import ApiKey, Job, Payment, Profile, User
+from app.models import ApiKey, Domain, Job, Payment, Profile, User
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -64,6 +64,26 @@ class DashboardTotals(BaseModel):
     revenue_total: float = 0  # VND, paid only
 
 
+class DomainStats(BaseModel):
+    """Per-tenant rollup for the admin dashboard. Each row answers
+    'what did THIS domain create / consume in the chosen period?' —
+    super_admin sees one row per registered domain, sorted by total job
+    count desc by default. Per-domain admin sees only their own row.
+    """
+    domain_id: str | None
+    hostname: str | None
+    users: int
+    jobs_total: int
+    jobs_image: int
+    jobs_video: int
+    jobs_failed: int
+    jobs_success: int
+    profiles: int
+    api_keys: int
+    revenue: float
+    last_activity: str | None       # ISO datetime of last job created_at
+
+
 class DashboardOut(BaseModel):
     period: Period
     scope: Literal["me", "admin"]
@@ -71,6 +91,7 @@ class DashboardOut(BaseModel):
     app_groups: list[AppGroup]
     revenue: list[RevenuePoint]   # last 12 months
     jobs_timeseries: list[JobTimePoint]  # last 30 days
+    per_domain: list[DomainStats] = []   # admin view only — empty on /me
 
 
 def _period_bounds(period: Period) -> datetime | None:
@@ -234,9 +255,15 @@ async def _build(db, period: Period, scope: Literal["me", "admin"], user_id) -> 
         AppGroup(code="mini_app", label="Mini Apps", items=miniapps),
     ]
 
+    # ------------------ Per-domain breakdown (admin scope only) ------------------
+    per_domain: list[DomainStats] = []
+    if is_admin:
+        per_domain = await _build_per_domain(db, bound)
+
     return DashboardOut(
         period=period,
         scope=scope,
+        per_domain=per_domain,
         totals=DashboardTotals(
             jobs_total=jobs_total,
             jobs_today=jobs_today,
@@ -257,6 +284,122 @@ async def _build(db, period: Period, scope: Literal["me", "admin"], user_id) -> 
         revenue=revenue,
         jobs_timeseries=jobs_timeseries,
     )
+
+
+async def _build_per_domain(db, bound: datetime | None) -> list[DomainStats]:
+    """Aggregate every tenant domain's activity for the dashboard table.
+
+    One SQL roundtrip per axis instead of per-domain (5 queries total
+    regardless of tenant count) — important because this endpoint is
+    polled every 15s by the FE.
+
+    Axes pulled:
+      - jobs by status by domain
+      - profiles by domain (via Profile.user → User.domain_id)
+      - api_keys by domain
+      - users by domain
+      - revenue (sum paid Payment.amount) by domain
+      - last_activity = max(Job.created_at) per domain
+    """
+    # Map domain_id → row template (start empty, fill axis-by-axis).
+    domains = (await db.execute(select(Domain))).scalars().all()
+    bucket: dict[str, DomainStats] = {}
+    for d in domains:
+        bucket[str(d.id)] = DomainStats(
+            domain_id=str(d.id),
+            hostname=d.hostname,
+            users=0, jobs_total=0, jobs_image=0, jobs_video=0,
+            jobs_failed=0, jobs_success=0, profiles=0, api_keys=0,
+            revenue=0.0, last_activity=None,
+        )
+    # "(no domain)" bucket for orphan rows where User.domain_id is NULL.
+    NO_DOMAIN = "__none__"
+    bucket[NO_DOMAIN] = DomainStats(
+        domain_id=None, hostname=None,
+        users=0, jobs_total=0, jobs_image=0, jobs_video=0,
+        jobs_failed=0, jobs_success=0, profiles=0, api_keys=0,
+        revenue=0.0, last_activity=None,
+    )
+
+    def key_for(domain_id) -> str:
+        return str(domain_id) if domain_id else NO_DOMAIN
+
+    # Jobs aggregate
+    job_filter = [Job.created_at >= bound] if bound is not None else []
+    job_q = (
+        select(
+            User.domain_id,
+            Job.job_type,
+            Job.status,
+            func.count(Job.id).label("n"),
+            func.max(Job.created_at).label("last_at"),
+        )
+        .join(User, User.id == Job.user_id)
+        .where(*job_filter)
+        .group_by(User.domain_id, Job.job_type, Job.status)
+    )
+    for domain_id, job_type, status, n, last_at in (await db.execute(job_q)).all():
+        slot = bucket.setdefault(key_for(domain_id), bucket[NO_DOMAIN])
+        slot.jobs_total += n or 0
+        if job_type == "image":
+            slot.jobs_image += n or 0
+        elif job_type == "video":
+            slot.jobs_video += n or 0
+        if status == "success":
+            slot.jobs_success += n or 0
+        elif status == "failed":
+            slot.jobs_failed += n or 0
+        if last_at and (not slot.last_activity or last_at.isoformat() > slot.last_activity):
+            slot.last_activity = last_at.isoformat()
+
+    # Users per domain
+    user_q = (
+        select(User.domain_id, func.count(User.id))
+        .group_by(User.domain_id)
+    )
+    for domain_id, n in (await db.execute(user_q)).all():
+        bucket[key_for(domain_id)].users = int(n or 0)
+
+    # Profiles per domain
+    prof_q = (
+        select(User.domain_id, func.count(Profile.id))
+        .join(User, User.id == Profile.user_id)
+        .group_by(User.domain_id)
+    )
+    for domain_id, n in (await db.execute(prof_q)).all():
+        bucket[key_for(domain_id)].profiles = int(n or 0)
+
+    # API keys per domain
+    key_q = (
+        select(User.domain_id, func.count(ApiKey.id))
+        .join(User, User.id == ApiKey.user_id)
+        .group_by(User.domain_id)
+    )
+    for domain_id, n in (await db.execute(key_q)).all():
+        bucket[key_for(domain_id)].api_keys = int(n or 0)
+
+    # Revenue per domain (paid only, in chosen period if bound)
+    pay_filter = [Payment.status == "success"]
+    if bound is not None:
+        pay_filter.append(Payment.paid_at >= bound)
+    pay_q = (
+        select(User.domain_id, func.sum(Payment.amount))
+        .join(User, User.id == Payment.user_id)
+        .where(*pay_filter)
+        .group_by(User.domain_id)
+    )
+    for domain_id, total in (await db.execute(pay_q)).all():
+        bucket[key_for(domain_id)].revenue = float(total or 0)
+
+    # Drop the orphan bucket if it has nothing; otherwise keep it at the bottom.
+    orphan = bucket.pop(NO_DOMAIN)
+    rows = list(bucket.values())
+    if orphan.users or orphan.jobs_total or orphan.profiles or orphan.api_keys:
+        rows.append(orphan)
+
+    # Sort by jobs_total desc — busiest tenant first.
+    rows.sort(key=lambda r: (-r.jobs_total, -(r.revenue or 0)))
+    return rows
 
 
 @router.get("/me", response_model=DashboardOut)
