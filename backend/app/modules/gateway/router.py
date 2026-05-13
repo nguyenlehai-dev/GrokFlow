@@ -810,6 +810,23 @@ async def execute_function(
     )
 
     used_key = await db.get(GwPoolApiKey, req.pool_key_id) if req.pool_key_id else None
+    # Audit the gateway call so the per-domain audit-logs tab surfaces
+    # LLM activity. caller.user_id may be None for gateway-key callers (no
+    # JWT user); the row stays attached to the domain via metadata.
+    await audit.log_action(
+        db,
+        user_id=getattr(caller, "user_id", None),
+        action="gateway_execute",
+        target_type="gw_request", target_id=req.id,
+        metadata={
+            "function": function_code,
+            "vendor": vendor.code if vendor else None,
+            "model": payload.model,
+            "status": req.status,
+            "domain_id": str(caller.domain_id) if caller.domain_id else None,
+        },
+    )
+    await db.commit()
     return s.ExecuteResponse(
         request_id=req.id, gw_id=gw_id, status=req.status,
         pool_key_name=used_key.name if used_key else None,

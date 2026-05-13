@@ -42,6 +42,7 @@ from sqlalchemy import select
 
 from app.core.deps import CurrentUser, DbSession
 from app.models import FlowJob
+from app.modules.admin.audit import service as audit
 
 from . import service
 from .schemas import (
@@ -101,6 +102,21 @@ async def upload(
             "filename": safe_name,
             "object_key": f"{job_id}/{safe_name}",
         })
+
+    # Audit per upload — the FE upload step is the user-initiated moment;
+    # /run/{tool} that follows just attaches params + spawns BackgroundTask.
+    # Logging here means the audit row exists even if the user abandons
+    # before submitting, and the per-domain audit-logs tab shows real
+    # Flow activity instead of being silent.
+    await audit.log_action(
+        db, user_id=user.id, action="flow_upload",
+        target_type="flow_job", target_id=job_id,
+        metadata={
+            "tool": tool_name,
+            "file_count": len(files),
+            "total_bytes": sum((f.size or 0) for f in files),
+        },
+    )
 
     job = FlowJob(
         id=job_id,
@@ -195,6 +211,11 @@ async def run_tool(
     job.duration = None
     job.started_at = None
     job.completed_at = None
+    await audit.log_action(
+        db, user_id=user.id, action="flow_run",
+        target_type="flow_job", target_id=job.id,
+        metadata={"tool": tool, **{k: v for k, v in params.items() if v is not None}},
+    )
     await db.commit()
     await db.refresh(job)
 

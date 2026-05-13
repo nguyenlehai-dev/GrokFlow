@@ -47,7 +47,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from app.core.database import SessionLocal
 from app.models import (
-    Domain, FlowJob, GwRequest, GwVendor, Job, User,
+    AuditLog, Domain, FlowJob, GwRequest, GwVendor, Job, User,
 )
 from app.core.security import hash_password
 
@@ -63,17 +63,25 @@ GW_VENDORS_HINT = ["openai", "anthropic", "gemini", "replicate"]
 
 async def cleanup(db):
     """Delete every row tagged for this hostname. Idempotent."""
-    # Jobs: match by prompt prefix
     res = await db.execute(delete(Job).where(Job.prompt.like(f"{TAG}%")))
     n_jobs = res.rowcount or 0
-    # FlowJobs: match by error_message marker
     res = await db.execute(delete(FlowJob).where(FlowJob.error_message == f"SEED:{HOSTNAME}"))
     n_flow = res.rowcount or 0
-    # GwRequests: match by gw_id prefix
     res = await db.execute(delete(GwRequest).where(GwRequest.gw_id.like(f"seed_{HOSTNAME}_%")))
     n_gw = res.rowcount or 0
+    # AuditLog rows from the seed are tagged via metadata.seed_for == HOSTNAME.
+    # Use the JSONB containment operator @> through SQLAlchemy's contains().
+    from sqlalchemy import cast, text
+    res = await db.execute(
+        delete(AuditLog).where(
+            AuditLog.audit_metadata.cast(text("jsonb")).contains(
+                {"seed_for": HOSTNAME}
+            )
+        )
+    )
+    n_audit = res.rowcount or 0
     await db.commit()
-    print(f"cleanup: removed {n_jobs} jobs, {n_flow} flow_jobs, {n_gw} gw_requests")
+    print(f"cleanup: removed {n_jobs} jobs, {n_flow} flow_jobs, {n_gw} gw_requests, {n_audit} audit_logs")
 
 
 async def ensure_domain(db) -> Domain:
@@ -208,6 +216,42 @@ async def seed_gw_requests(db, domain: Domain, n: int):
     print(f"seeded {n} gw_requests (vendors={'real' if vendors else 'null'})")
 
 
+async def seed_audit_logs(db, user: User, n: int):
+    """Inject audit_log rows so /audit-logs per-domain tab has data.
+    Mirrors the actions the live audit hooks (newly added in grok/flow/
+    gateway routers) would emit, so the dashboard preview matches what
+    real traffic will produce going forward.
+    """
+    now = datetime.now(timezone.utc)
+    actions = [
+        ("grok_job_created", "job", {"provider": "grok", "job_type": "image"}),
+        ("grok_job_created", "job", {"provider": "grok", "job_type": "video"}),
+        ("flow_upload",      "flow_job", {"tool": "cut", "file_count": 1}),
+        ("flow_run",         "flow_job", {"tool": "resize", "width": 1280, "height": 720}),
+        ("gateway_execute",  "gw_request", {"function": "chat", "vendor": "openai", "model": "gpt-4o-mini"}),
+        ("login",            None, {"ip": "203.0.113.1"}),
+        ("checkout_started", "subscription", {"plan": "pro", "cycle": "monthly"}),
+        ("profile_domains_set", "profile", {"domain_ids": ["seeded"]}),
+    ]
+    created = 0
+    for i in range(n):
+        action, target_type, meta = random.choice(actions)
+        # Stamp the seed marker so cleanup can find these rows.
+        meta = {**meta, "seed_for": HOSTNAME}
+        db.add(AuditLog(
+            user_id=user.id,
+            action=action,
+            target_type=target_type,
+            target_id=uuid.uuid4() if target_type else None,
+            ip_address="203.0.113.{}".format(random.randint(1, 254)),
+            audit_metadata=meta,
+            created_at=now - timedelta(hours=random.randint(0, 48),
+                                       minutes=random.randint(0, 59)),
+        ))
+        created += 1
+    print(f"seeded {created} audit_log rows")
+
+
 async def main():
     async with SessionLocal() as db:
         if MODE == "cleanup":
@@ -218,11 +262,12 @@ async def main():
         await seed_grok_jobs(db, user, n_image=12, n_video=6)
         await seed_flow_jobs(db, user, n=10)
         await seed_gw_requests(db, domain, n=8)
+        await seed_audit_logs(db, user, n=20)
         await db.commit()
         print("--- summary ---")
         print(f"  domain:  {domain.hostname} ({domain.id})")
         print(f"  user:    {user.email} ({user.id})")
-        print(f"  total seeded: 18 grok jobs + 10 flow_jobs + 8 gw_requests")
+        print(f"  total seeded: 18 grok jobs + 10 flow_jobs + 8 gw_requests + 20 audit_logs")
         print(f"  cleanup: python scripts/seed-domain-jobs.py --hostname {HOSTNAME} --cleanup")
 
 asyncio.run(main())

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
 from app.models import Job, JobLog, Profile, ProfileDomainAssignment, User
+from app.modules.admin.audit import service as audit
 
 
 async def _resolve_profile_for_job(
@@ -152,6 +153,19 @@ async def create_job(
     await db.flush()
     db.add(JobLog(job_id=job.id, level="info",
                   message=f"Job queued (profile={profile.name})"))
+    # Audit so the /audit-logs page per-domain tab surfaces Grok activity.
+    # Truncate the prompt to keep secrets / huge inputs out of audit_metadata.
+    await audit.log_action(
+        db, user_id=user_id, action="grok_job_created",
+        target_type="job", target_id=job.id,
+        metadata={
+            "provider": provider,
+            "job_type": job_type,
+            "profile": profile.name,
+            "profile_id": str(profile.id),
+            "prompt_preview": (prompt or "")[:120],
+        },
+    )
     await db.commit()
     await db.refresh(job)
     return job
