@@ -130,14 +130,46 @@ class GrokProvider(Provider):
         msg = " ".join(str(a) for a in args)
         print(f"[grok][{tag}] {msg}", flush=True)
 
+    def _ensure_vnc_running(self, job: JobInput) -> dict | None:
+        """Idempotent spawn — returns the VNC info dict on success, None if the
+        container couldn't be brought up in time. The actual cookies live in
+        the bind-mounted /config volume so re-spawning is safe: Chromium picks
+        up the same session that the admin's Auto-login established.
+
+        Without this, a job that hits a profile whose VNC container was reaped
+        by idle-cleanup (default 2h) fails with `cookie_expired`. With it the
+        system is self-healing — the admin's manual Auto-login only needs to
+        run once per profile, ever.
+        """
+        profile_id = self._profile_id_from_path(job.profile_path)
+        info = vnc_manager.get_for_profile(profile_id)
+        if info and info.get("running"):
+            return info
+        # Not running — spawn. start_for_profile is idempotent (returns the
+        # existing container if a race put one up between our check and call)
+        # and blocks until novnc + CDP are ready (up to 60s).
+        self._log(profile_id[:8], "VNC not running — spawning…")
+        try:
+            spawned = vnc_manager.start_for_profile(
+                profile_id, job.profile_path, self.GROK_HOME,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log(profile_id[:8], f"VNC spawn failed: {exc!r}")
+            return None
+        if not spawned.get("ready"):
+            self._log(profile_id[:8], "VNC spawned but not ready in time")
+            return None
+        # Re-query to get the canonical info shape (cdp_endpoint etc.)
+        return vnc_manager.get_for_profile(profile_id)
+
     async def _run_image(self, job: JobInput) -> JobResult:
         profile_id = self._profile_id_from_path(job.profile_path)
         tag = f"{job.job_type[:3]}:{profile_id[:8]}"
-        info = vnc_manager.get_for_profile(profile_id)
-        if not info or not info.get("running"):
+        info = self._ensure_vnc_running(job)
+        if not info:
             return JobResult(
                 success=False, error_code="cookie_expired",
-                error_message="VNC browser not running. Admin must Auto-login this profile first.",
+                error_message="VNC browser not running and auto-spawn failed. Admin must Auto-login this profile first.",
             )
 
         cdp_endpoint = info["cdp_endpoint"]  # e.g. http://grokflow-vnc-xxx:9223
