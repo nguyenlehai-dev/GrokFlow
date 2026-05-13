@@ -1,0 +1,91 @@
+# Mac M1 8GB resource overrides + cloudflared tunnel.
+#
+# Use alongside the base intranet compose:
+#   docker compose --env-file .env.prod \
+#     -f docker-compose.intranet.yml \
+#     -f docker-compose.mac.yml \
+#     up -d
+#
+# Total container memory cap ~2.7GB → fits Docker Desktop's default 5GB
+# VM + leaves ~4GB for macOS + native apps on an 8GB Mac. See
+# docs/MIGRATE-TO-MAC.md for the full migration runbook.
+
+services:
+  postgres:
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB         # Linux prod: 512MB
+      - -c
+      - effective_cache_size=384MB   # Linux prod: 1GB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=40
+      - -c
+      - random_page_cost=1.1
+    deploy:
+      resources:
+        limits: { memory: 768M, cpus: "1.0" }     # was 2G
+
+  redis:
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "128mb"
+      - --maxmemory-policy
+      - allkeys-lru
+    deploy:
+      resources:
+        limits: { memory: 192M, cpus: "0.25" }    # was 512M
+
+  backend:
+    environment:
+      # Single gunicorn worker on Mac — M1 has cores but RAM is the cap.
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}
+      # Halve in-flight cap from prod default of 3.
+      FLOW_MAX_CONCURRENT: ${FLOW_MAX_CONCURRENT:-1}
+    deploy:
+      resources:
+        # FFmpeg encode peaks ~600MB; 1G total covers 1 concurrent encode
+        # + base FastAPI footprint with little headroom. Above this we OOM.
+        limits: { memory: 1G, cpus: "1.5" }       # Linux prod: 1.5G
+
+  worker:
+    environment:
+      # Worker drives at most 2 Chromium tabs concurrently on Mac.
+      WORKER_MAX_IN_FLIGHT: ${WORKER_MAX_IN_FLIGHT:-2}
+    deploy:
+      resources:
+        limits: { memory: 384M, cpus: "0.5" }     # Linux prod: 512M
+
+  idle-cleanup:
+    deploy:
+      resources:
+        limits: { memory: 128M, cpus: "0.1" }     # Linux prod: 192M
+
+  frontend:
+    deploy:
+      resources:
+        limits: { memory: 96M, cpus: "0.1" }      # Linux prod: 128M
+
+  # Cloudflared tunnel runs inside compose so it's lifecycled with the rest
+  # of the stack. The token from .env.prod is the same one the VPS was using
+  # — Cloudflare allows multiple connectors per tunnel so traffic
+  # automatically balances / fails-over between VPS and Mac during the
+  # cutover window. Stop VPS once Mac connector is steady (5-10 min).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set in .env.prod}
+    depends_on:
+      - frontend
+    deploy:
+      resources:
+        limits: { memory: 64M, cpus: "0.1" }
