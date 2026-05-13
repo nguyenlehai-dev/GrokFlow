@@ -6,7 +6,7 @@ from app.core.deps import CurrentUser, DbSession
 from app.core.exceptions import EntitlementBlocked, InvalidPayload, NotFound, PermissionDenied
 from app.core.security import generate_api_key
 from app.models import ApiKey
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 from app.modules.entitlements.service import (
     get_effective_entitlements,
     get_limit,

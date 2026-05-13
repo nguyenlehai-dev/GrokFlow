@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from app.core.deps import CurrentUser, DbSession
 from app.models import User
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 

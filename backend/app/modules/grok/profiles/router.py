@@ -23,7 +23,7 @@ from app.core.exceptions import InvalidCredentials, InvalidPayload, NotFound, Pe
 from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
 from app.models import Profile, User
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 
 
 async def _assert_profile_accessible(

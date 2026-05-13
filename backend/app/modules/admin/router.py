@@ -68,7 +68,7 @@ def _scope_to_admin_domain(q, user_id_column, admin: User):
 
 async def _assert_billing_owner_in_admin_domain(db, admin: User, user_id):
     return await assert_user_in_admin_domain(db, admin, user_id)
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 from app.modules.entitlements.catalog import FEATURES, LIMITS
 from app.modules.entitlements.service import get_effective_entitlements
 
@@ -661,7 +661,7 @@ async def confirm_payment(
 
     Side effects: payment→success, invoice→paid, user.plan_id updated, period set.
     """
-    from app.modules.billing.service import period_end_for_cycle
+    from app.modules.landing.billing.service import period_end_for_cycle
 
     sub = await db.get(Subscription, subscription_id)
     if not sub:
@@ -818,7 +818,7 @@ async def create_invoice_admin(
     payload: AdminInvoiceCreate, admin: AdminUser, db: DbSession,
 ) -> AdminInvoiceOut:
     """Manually issue an invoice (e.g. for cash sales or post-hoc invoicing)."""
-    from app.modules.billing.service import next_invoice_number
+    from app.modules.landing.billing.service import next_invoice_number
 
     if not await db.get(User, payload.user_id):
         raise NotFound("user")

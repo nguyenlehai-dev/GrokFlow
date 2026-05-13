@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.core.deps import CurrentUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound
 from app.models import Invoice, Payment, Plan, Subscription
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 
 from .schemas import (
     BillingSummaryOut,

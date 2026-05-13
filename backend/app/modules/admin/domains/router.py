@@ -15,7 +15,7 @@ from app.core.cache import invalidate, redis_cached
 from app.core.deps import SuperAdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound
 from app.models import Domain
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 from app.services import nginx_sync
 
 

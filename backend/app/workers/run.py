@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import SessionLocal
 from app.core.sanitize import scrub_secrets
 from app.models import Job, JobLog, Profile, User
-from app.modules.files import service as files_service
+from app.modules.grok.files import service as files_service
 from app.providers import JobInput, get_provider
 from app.workers import webhook
 
@@ -188,7 +188,7 @@ async def process_one(db: AsyncSession, job: Job) -> None:
         input_id = opts.get("input_image_file_id")
         if input_id:
             from app.providers.base import InputAttachment
-            from app.modules.files import service as files_service_mod
+            from app.modules.grok.files import service as files_service_mod
             from app.models import File as FileModel
             try:
                 f = await db.get(FileModel, uuid.UUID(input_id))

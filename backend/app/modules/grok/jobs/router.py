@@ -14,7 +14,7 @@ from app.modules.entitlements.service import (
     assert_quota,
     get_effective_entitlements,
 )
-from app.modules.files import service as files_service
+from app.modules.grok.files import service as files_service
 
 from . import service
 from .schemas import JobCreate, JobLogOut, JobOut, JobUpdate

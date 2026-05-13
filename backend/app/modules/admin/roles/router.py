@@ -21,7 +21,7 @@ from sqlalchemy import select
 from app.core.deps import AdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
 from app.models import Domain, Role
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 
 router = APIRouter(prefix="/api/admin/roles", tags=["roles"])
 

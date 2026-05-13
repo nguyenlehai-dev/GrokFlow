@@ -10,8 +10,8 @@ from app.core.deps import ApiKeyPrincipal, DbSession
 from app.core.exceptions import NotFound, PermissionDenied
 from app.core.rate_limit import enforce_api_key_rate_limit
 from app.models import File, Job
-from app.modules.audit import service as audit
-from app.modules.jobs import service as job_service
+from app.modules.admin.audit import service as audit
+from app.modules.grok.jobs import service as job_service
 
 router = APIRouter(prefix="/v1", tags=["public-v1"])
 

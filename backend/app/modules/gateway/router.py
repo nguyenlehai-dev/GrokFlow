@@ -31,7 +31,7 @@ from app.core.security import hash_password, verify_password
 from app.models import (
     GwApiFunction, GwGatewayKey, GwPool, GwPoolApiKey, GwRequest, GwVendor,
 )
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 
 from . import schemas as s
 from .auth import GatewayCaller, require_caller

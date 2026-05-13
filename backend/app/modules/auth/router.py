@@ -6,7 +6,7 @@ from app.core.deps import CurrentUser, DbSession
 from app.core.exceptions import EmailAlreadyRegistered, InvalidCredentials
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import Domain, Plan, Role, User
-from app.modules.audit import service as audit
+from app.modules.admin.audit import service as audit
 from app.modules.entitlements.service import get_effective_entitlements
 
 from .schemas import (
