@@ -18,7 +18,14 @@ export interface NavLeaf {
   superOnly?: boolean;
 }
 
-/** A collapsible group of links in the sidebar. */
+/** A collapsible group of links in the sidebar.
+ *
+ *  `items` is recursive — a group can hold leaves OR sub-groups — so we can
+ *  build a 2-level tree for super_admin (e.g. parent "Web" wrapping the
+ *  Grok/Flow/Gateway groups) without modules having to know about it.
+ *  Module manifests still declare flat groups; the registry wraps them at
+ *  render time based on the caller's role.
+ */
 export interface NavGroup {
   type: "group";
   /** Stable id (used as React key). */
@@ -27,7 +34,7 @@ export interface NavGroup {
   icon: LucideIcon;
   adminOnly?: boolean;
   superOnly?: boolean;
-  items: NavLeaf[];
+  items: NavEntry[];
 }
 
 export type NavEntry = NavLeaf | NavGroup;

@@ -1,4 +1,6 @@
-import type { FrontendModule, NavEntry, ModuleRoute } from "./types";
+import { Globe } from "lucide-react";
+
+import type { FrontendModule, NavEntry, NavGroup, ModuleRoute } from "./types";
 
 import { moduleManifest as admin } from "@/modules/admin";
 import { moduleManifest as auth } from "@/modules/auth";
@@ -44,8 +46,44 @@ export function getPublicRoutes(): ModuleRoute[] {
   return MODULES.filter((m) => PUBLIC_MODULES.has(m.name)).flatMap((m) => m.routes);
 }
 
-/** Flat list of sidebar entries from every authed module, in registration
- *  order. AppShell filters this further by user role + domain. */
-export function getAuthedNav(): NavEntry[] {
-  return MODULES.filter((m) => !PUBLIC_MODULES.has(m.name)).flatMap((m) => m.nav ?? []);
+/** Sidebar nav from every authed module.
+ *
+ *  For super_admin the three product groups (Grok / Flow / Gateway, plus
+ *  any future tools that opt in via `WEB_GROUP_KEYS`) get folded under a
+ *  single top-level "Web" parent so the sidebar stays scannable as more
+ *  modules ship. Other roles see the flat module-order list as before —
+ *  they typically only have access to one or two of those groups anyway,
+ *  so an extra wrapping click adds friction without payoff.
+ *
+ *  Adding a new module to the "Web" bucket: extend WEB_GROUP_KEYS with the
+ *  module's NavGroup key. No changes needed in the module itself. */
+const WEB_GROUP_KEYS = new Set(["grok", "flow", "gateway"]);
+
+export function getAuthedNav(role: string | undefined | null = null): NavEntry[] {
+  const flat = MODULES
+    .filter((m) => !PUBLIC_MODULES.has(m.name))
+    .flatMap((m) => m.nav ?? []);
+
+  if (role !== "super_admin") return flat;
+
+  const webChildren: NavEntry[] = [];
+  const rest: NavEntry[] = [];
+  for (const entry of flat) {
+    if (entry.type === "group" && WEB_GROUP_KEYS.has(entry.key)) {
+      webChildren.push(entry);
+    } else {
+      rest.push(entry);
+    }
+  }
+  if (webChildren.length === 0) return flat;
+
+  const webParent: NavGroup = {
+    type: "group",
+    key: "web",
+    label: "Web",
+    icon: Globe,
+    superOnly: true,
+    items: webChildren,
+  };
+  return [...rest, webParent];
 }

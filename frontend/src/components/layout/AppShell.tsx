@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, LogOut, Menu, X } from "lucide-react";
 
@@ -8,11 +8,14 @@ import type { NavEntry, NavLeaf, NavGroup } from "@/app/types";
 import { getAuthedNav } from "@/app/moduleRegistry";
 
 // Sidebar entries come from the module registry — each module owns its own
-// nav. AppShell just filters by role/domain/feature and renders.
-const NAV: NavEntry[] = getAuthedNav();
+// nav. AppShell just filters by role/domain/feature and renders. The
+// registry returns a different shape for super_admin (Grok/Flow/Gateway
+// wrapped under a "Web" parent) so we resolve NAV at render time, not
+// module load.
 
 export function AppShell() {
   const { user, clear } = useAuthStore();
+  const NAV: NavEntry[] = useMemo(() => getAuthedNav(user?.role), [user?.role]);
   const domainConfig = useDomainStore((s) => s.config);
   const isPageAllowed = useDomainStore((s) => s.isPageAllowed);
   const navigate = useNavigate();
@@ -35,17 +38,22 @@ export function AppShell() {
     return userCanSeePath(user ?? null, n.to, isPageAllowed);
   };
 
-  // Filter groups + their items by visibility. Drop empty groups.
-  const visibleNav: NavEntry[] = NAV.flatMap<NavEntry>((entry) => {
-    if (entry.type === "link") {
-      return canSeeLeaf(entry) ? [entry] : [];
-    }
-    if (entry.superOnly && !isSuper) return [];
-    if (entry.adminOnly && !isAdmin) return [];
-    const items = entry.items.filter(canSeeLeaf);
-    if (items.length === 0) return [];
-    return [{ ...entry, items }];
-  });
+  // Filter groups + their items by visibility. Drop empty groups. Recurses
+  // through nested groups so the "Web" parent (super_admin only) — which
+  // wraps the Grok/Flow/Gateway sub-groups — gets correctly stripped if
+  // none of its children survive the visibility filter.
+  const filterEntries = (entries: NavEntry[]): NavEntry[] =>
+    entries.flatMap<NavEntry>((entry) => {
+      if (entry.type === "link") {
+        return canSeeLeaf(entry) ? [entry] : [];
+      }
+      if (entry.superOnly && !isSuper) return [];
+      if (entry.adminOnly && !isAdmin) return [];
+      const items = filterEntries(entry.items);
+      if (items.length === 0) return [];
+      return [{ ...entry, items }];
+    });
+  const visibleNav: NavEntry[] = filterEntries(NAV);
 
   // Mobile sidebar: hidden by default, slides in over the page when the
   // header hamburger is tapped. Auto-close on route change so the user
@@ -170,13 +178,23 @@ function LeafLink({ item }: { item: NavLeaf }) {
   );
 }
 
+/** Walk a group's items (which may be leaves or nested groups) and check
+ *  whether any leaf inside matches the active path. Used to decide whether
+ *  the group auto-expands so the user lands on their current page already
+ *  visible — works for both 1-level (Grok/Flow/Gateway) and 2-level
+ *  (super_admin's "Web" → Flow → tools) hierarchies. */
+function groupHasActiveLeaf(items: NavEntry[], currentPath: string): boolean {
+  return items.some((it) => {
+    if (it.type === "link") return currentPath.startsWith(it.to);
+    return groupHasActiveLeaf(it.items, currentPath);
+  });
+}
+
 function CollapsibleGroup({
   group, currentPath,
 }: { group: NavGroup; currentPath: string }) {
   const Icon = group.icon;
-  // Auto-expand the group whose item is currently active so the user lands
-  // with their place visible. Otherwise default to collapsed for compactness.
-  const hasActive = group.items.some((it) => currentPath.startsWith(it.to));
+  const hasActive = groupHasActiveLeaf(group.items, currentPath);
   const [open, setOpen] = useState(hasActive);
 
   // Keep in sync if the route changes from elsewhere (e.g. programmatic nav).
@@ -202,9 +220,20 @@ function CollapsibleGroup({
       </button>
       {open && (
         <div className="ml-3 pl-3 border-l border-slate-200 mt-0.5">
-          {group.items.map((item) => (
-            <LeafLink key={item.to} item={item} />
-          ))}
+          {group.items.map((item) =>
+            item.type === "link" ? (
+              <LeafLink key={item.to} item={item} />
+            ) : (
+              // Nested group — recurse. Used by super_admin's "Web" wrapper
+              // around Grok/Flow/Gateway. Indent steps via the parent's
+              // `ml-3 pl-3 border-l` so each level visually nests further.
+              <CollapsibleGroup
+                key={item.key}
+                group={item}
+                currentPath={currentPath}
+              />
+            )
+          )}
         </div>
       )}
     </div>
