@@ -19,6 +19,11 @@ const queryClient = new QueryClient({
       // remount or focus change. Pages that need real-time data (Playground
       // execute results, Jobs in flight) opt back in with staleTime: 0.
       staleTime: 10_000,
+      // Pause every refetchInterval timer when the tab is hidden. Across
+      // ~12 polling pages (Jobs 5s, Profiles 4s, Bell 15s, Dashboard 15s,
+      // Audit 30s, etc.) this cuts background traffic to ~zero when users
+      // park GrokFlow in a tab — single biggest infra-load saver.
+      refetchIntervalInBackground: false,
     },
   },
 });

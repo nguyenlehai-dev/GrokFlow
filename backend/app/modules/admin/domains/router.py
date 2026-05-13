@@ -20,10 +20,11 @@ from app.services import nginx_sync
 
 
 # How long to cache the public /api/domains/config response. Frontend hits
-# this on every page load; the data changes only when an admin edits the
-# domain row. 60s gives ~95% cache hit rate without making admin edits
-# feel stale for too long. Admin CRUD invalidates the cache below anyway.
-DOMAIN_CONFIG_TTL = 60
+# this on every full page load; the data changes only when an admin edits
+# the domain row, and create/update/delete invalidate the cache below.
+# 5 min keeps eviction rare without making admin edits feel stale —
+# invalidation is the source of truth, the TTL is just a safety net.
+DOMAIN_CONFIG_TTL = 300
 
 router = APIRouter(tags=["domains"])
 
@@ -41,6 +42,7 @@ class DomainIn(BaseModel):
     allow_all_pages: bool = False
     allowed_pages: list[str] = Field(default_factory=list)
     brand_name: str | None = None
+    require_playground_key: bool = True
 
 
 class DomainUpdate(BaseModel):
@@ -53,6 +55,7 @@ class DomainUpdate(BaseModel):
     allow_all_pages: bool | None = None
     allowed_pages: list[str] | None = None
     brand_name: str | None = None
+    require_playground_key: bool | None = None
 
 
 class DomainOut(BaseModel):
@@ -67,6 +70,7 @@ class DomainOut(BaseModel):
     allow_all_pages: bool
     allowed_pages: list[str]
     brand_name: str | None
+    require_playground_key: bool
 
     class Config:
         from_attributes = True
@@ -83,6 +87,7 @@ class DomainConfig(BaseModel):
     allow_all_pages: bool
     allowed_pages: list[str]
     brand_name: str | None
+    require_playground_key: bool
 
 
 # ---------------- Admin CRUD ----------------
@@ -109,6 +114,7 @@ async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession)
         allow_all_pages=payload.allow_all_pages,
         allowed_pages=payload.allowed_pages,
         brand_name=payload.brand_name,
+        require_playground_key=payload.require_playground_key,
     )
     db.add(d)
     await db.flush()
@@ -140,6 +146,7 @@ async def update_domain(
     for field in (
         "label", "description", "status", "allow_landing", "allow_register",
         "allow_login", "allow_all_pages", "allowed_pages", "brand_name",
+        "require_playground_key",
     ):
         v = getattr(payload, field)
         if v is not None:
@@ -204,10 +211,12 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
             allow_landing=d.allow_landing, allow_register=d.allow_register,
             allow_login=d.allow_login, allow_all_pages=d.allow_all_pages,
             allowed_pages=d.allowed_pages, brand_name=d.brand_name,
+            require_playground_key=d.require_playground_key,
         )
     # Fail-open default
     return DomainConfig(
         hostname=h, label=h, status="active",
         allow_landing=True, allow_register=True, allow_login=True,
         allow_all_pages=True, allowed_pages=[], brand_name=None,
+        require_playground_key=True,
     )

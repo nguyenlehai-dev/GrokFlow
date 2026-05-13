@@ -384,6 +384,11 @@ class Domain(Base, TimestampMixin):
     allowed_pages: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # Optional override: custom brand name shown in this domain's UI
     brand_name: Mapped[str | None] = mapped_column(String(100))
+    # Whether the Grok Playground on this domain requires a verified API key
+    # (per-domain gate — super_admin can disable it for trusted/internal domains).
+    require_playground_key: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
 
 
 class Role(Base, TimestampMixin):

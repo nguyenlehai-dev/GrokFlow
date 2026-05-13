@@ -11,6 +11,7 @@ export interface DomainConfig {
   allow_all_pages: boolean;
   allowed_pages: string[];
   brand_name: string | null;
+  require_playground_key: boolean;
 }
 
 interface DomainState {
@@ -45,6 +46,7 @@ const DEFAULT: DomainConfig = {
   allow_all_pages: true,
   allowed_pages: [],
   brand_name: null,
+  require_playground_key: true,
 };
 
 export const useDomainStore = create<DomainState>((set, get) => ({

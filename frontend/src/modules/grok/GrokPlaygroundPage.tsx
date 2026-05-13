@@ -4,6 +4,7 @@ import axios from "axios";
 import { Activity, RefreshCw, KeyRound, X, Loader2, ChevronRight } from "lucide-react";
 
 import { useAuthStore } from "@/core/auth/store";
+import { useDomainStore } from "@/core/domain/store";
 import { toast } from "@/components/ui/Toast";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { useGrokKey } from "./grokKeyStore";
@@ -33,8 +34,12 @@ export function GrokPlaygroundPage() {
   const me = useAuthStore((s) => s.user);
   const verified = useGrokKey((s) => s.current);
   const clear = useGrokKey((s) => s.clear);
+  const domainConfig = useDomainStore((s) => s.config);
   const isAdmin = me?.role === "admin" || me?.role === "super_admin";
-  const locked = !isAdmin && !verified;
+  // Domain-level gate: super_admin can disable the API-key requirement
+  // per domain. Default is `true` (locked) so opting out is explicit.
+  const gateRequired = domainConfig?.require_playground_key ?? true;
+  const locked = gateRequired && !isAdmin && !verified;
 
   return (
     <div className="relative space-y-4">

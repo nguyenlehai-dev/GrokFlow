@@ -17,6 +17,7 @@ interface Domain {
   allow_all_pages: boolean;
   allowed_pages: string[];
   brand_name: string | null;
+  require_playground_key: boolean;
 }
 
 // PAGE_GROUPS is imported from pageCatalog.ts — keeps the menu hierarchy in
@@ -173,6 +174,7 @@ function DomainEditorModal({
   const [allowAllPages, setAllowAllPages] = useState(domain?.allow_all_pages ?? false);
   const [allowedPages, setAllowedPages] = useState<string[]>(domain?.allowed_pages ?? []);
   const [brandName, setBrandName] = useState(domain?.brand_name ?? "");
+  const [requirePlaygroundKey, setRequirePlaygroundKey] = useState(domain?.require_playground_key ?? true);
 
   const togglePage = (path: string) => {
     setAllowedPages((prev) =>
@@ -188,6 +190,7 @@ function DomainEditorModal({
         allow_login: allowLogin, allow_all_pages: allowAllPages,
         allowed_pages: allowedPages,
         brand_name: brandName || null,
+        require_playground_key: requirePlaygroundKey,
       };
       if (isCreate) payload.hostname = hostname;
       return isCreate
@@ -257,6 +260,16 @@ function DomainEditorModal({
               placeholder="VD: Khách AI Studio" />
           </div>
         </div>
+
+        <section className="border-t pt-3 space-y-2">
+          <h3 className="text-sm font-semibold">Cổng Playground</h3>
+          <Checkbox checked={requirePlaygroundKey} onChange={setRequirePlaygroundKey}>
+            <strong>Bắt buộc verify API key</strong> trước khi vào Grok Playground
+            <span className="block text-xs text-slate-500">
+              Bật: user phải dán hoặc generate key, verify mới được submit job. Tắt: vào thẳng (dùng JWT).
+            </span>
+          </Checkbox>
+        </section>
 
         <section className="border-t pt-3 space-y-2">
           <h3 className="text-sm font-semibold">Trang public</h3>

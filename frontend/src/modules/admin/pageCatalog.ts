@@ -61,6 +61,7 @@ export const PAGE_GROUPS: PageGroup[] = [
     items: [
       { path: "/profiles", label: "Grok · Profiles" },
       { path: "/jobs", label: "Grok · Jobs" },
+      { path: "/grok/playground", label: "Grok · Playground" },
       { path: "/api-docs", label: "Grok · API Docs" },
     ],
   },
