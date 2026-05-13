@@ -381,6 +381,105 @@ async def repo_deploy(
     return await _do_deploy(repo, payload)
 
 
+# ---------------- .env editor ----------------
+# Lives next to deploy so the admin can edit env BEFORE bumping a build.
+# The file path is `<repo.local_path>/<repo.env_file or '.env.prod'>` —
+# repo.env_file falls back to '.env.prod' for backward compat with rows
+# created before the field existed.
+
+class EnvOut(BaseModel):
+    path: str
+    env: str
+
+
+class EnvUpdate(BaseModel):
+    content: str
+
+
+def _env_file_path(repo: GitRepo) -> str:
+    """Resolve the env file path. Falls back to '.env.prod' to match what
+    docker compose --env-file uses by convention in this project."""
+    import os
+    from pathlib import Path
+    fname = repo.env_file or ".env.prod"
+    return str(Path(repo.local_path) / fname)
+
+
+@router.get("/repos/{repo_id}/env", response_model=EnvOut)
+async def repo_get_env(
+    repo_id: uuid.UUID, admin: SuperAdminUser, db: DbSession,
+) -> EnvOut:
+    """Super_admin only — env files often contain DB passwords, JWT
+    secrets, Cloudflare tokens. Don't let per-domain admins peek."""
+    import os
+    repo = await db.get(GitRepo, repo_id)
+    if not repo:
+        raise NotFound("git_repo")
+    path = _env_file_path(repo)
+    try:
+        # Backend container is inside Docker; the env file lives on the
+        # host. The deploy ssh path already mounts /home/vpsroot via the
+        # entrypoint volume bind. If not accessible, ssh-cat as fallback.
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+        else:
+            # Fallback: ssh + cat — _ssh_run exists for deploy commands.
+            cmd = f"cat {path} 2>/dev/null || echo '# (file missing)'"
+            content = await _ssh_run(cmd)
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidPayload(f"Không đọc được {path}: {exc}")
+    return EnvOut(path=path, env=content)
+
+
+@router.put("/repos/{repo_id}/env", response_model=EnvOut)
+async def repo_set_env(
+    repo_id: uuid.UUID, payload: EnvUpdate,
+    admin: AdminUser, db: DbSession,
+) -> EnvOut:
+    import os
+    repo = await db.get(GitRepo, repo_id)
+    if not repo:
+        raise NotFound("git_repo")
+    path = _env_file_path(repo)
+
+    # Validate: line-based key=value, no leading control chars. Keep it
+    # generous (allow # comments + blank lines) — admin owns the format.
+    lines = (payload.content or "").splitlines()
+    for i, line in enumerate(lines, 1):
+        if line and not line.startswith("#") and "=" not in line:
+            raise InvalidPayload(f"Dòng {i} không phải định dạng KEY=VALUE: {line[:60]}")
+
+    try:
+        if os.path.exists(os.path.dirname(path)):
+            # Direct write — faster + atomic via os.replace.
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                f.write(payload.content)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+        else:
+            # Cross-container path — write via SSH + tee. Quoting via
+            # base64 sidesteps shell escaping for $-bearing secrets.
+            import base64
+            b64 = base64.b64encode(payload.content.encode("utf-8")).decode("ascii")
+            cmd = (
+                f"echo {b64} | base64 -d > {path}.tmp && "
+                f"chmod 600 {path}.tmp && mv {path}.tmp {path}"
+            )
+            await _ssh_run(cmd)
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidPayload(f"Không ghi được {path}: {exc}")
+
+    await audit.log_action(
+        db, user_id=admin.id, action="git_repo_env_updated",
+        target_type="git_repo", target_id=repo.id,
+        metadata={"path": path, "bytes": len(payload.content)},
+    )
+    await db.commit()
+    return EnvOut(path=path, env=payload.content)
+
+
 # ---------------- Legacy single-repo endpoints (resolve to first repo) ----------------
 
 

@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
 import { toast } from "@/components/ui/Toast";
+import { setLocale } from "@/core/i18n";
 
 /** Tabbed settings page — each tab is a small functional area.
  *
@@ -194,9 +195,12 @@ function LocaleTab() {
   const current = pick ?? data?.locale ?? "vi";
   const save = useMutation({
     mutationFn: (locale: string) => api.put("/api/settings/locale", { locale }),
-    onSuccess: () => {
+    onSuccess: (_data, locale) => {
       qc.invalidateQueries({ queryKey: ["settings-locale"] });
       qc.invalidateQueries({ queryKey: ["me"] });
+      // Switch i18next immediately so the user sees the locale change
+      // without an explicit refresh — at least for the wrapped strings.
+      setLocale(locale);
       toast("Đã lưu ngôn ngữ. Refresh để áp dụng toàn bộ UI.", "success");
     },
   });

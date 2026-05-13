@@ -5,9 +5,23 @@ import { ChevronDown, LogOut, Menu, X } from "lucide-react";
 import { useAuthStore, userCanSeePath } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
 import type { NavEntry, NavLeaf, NavGroup } from "@/app/types";
+import { useTranslation } from "react-i18next";
+
 import { getAuthedNav } from "@/app/moduleRegistry";
 import { useDocumentTitle } from "@/core/useDocumentTitle";
 import { NotificationBell } from "./NotificationBell";
+
+/** Map nav-group key → i18n key under "nav.<x>". Falls back to the static
+ *  label if there's no translation key (e.g. for module-specific items
+ *  that haven't been wrapped yet). Wrapping more nav entries is a one-line
+ *  addition in vi.ts/en.ts + this map. */
+const NAV_KEY_I18N: Record<string, string> = {
+  auth: "nav.auth",
+  web: "nav.web",
+  grok: "nav.grok",
+  flow: "nav.flow",
+  gateway: "nav.gateway",
+};
 
 // Sidebar entries come from the module registry — each module owns its own
 // nav. AppShell just filters by role/domain/feature and renders. The
@@ -19,6 +33,15 @@ export function AppShell() {
   useDocumentTitle();
   const { user, clear } = useAuthStore();
   const NAV: NavEntry[] = useMemo(() => getAuthedNav(user?.role), [user?.role]);
+
+  // Sync i18next with the user's saved locale once /me has populated.
+  // Doing it here (not in main.tsx) means the LanguageDetector default
+  // applies for unauthed pages, then this kicks in after login.
+  useEffect(() => {
+    if (user?.locale) {
+      void import("@/core/i18n").then((m) => m.setLocale(user.locale!));
+    }
+  }, [user?.locale]);
   const domainConfig = useDomainStore((s) => s.config);
   const isPageAllowed = useDomainStore((s) => s.isPageAllowed);
   const navigate = useNavigate();
@@ -199,9 +222,13 @@ function groupHasActiveLeaf(items: NavEntry[], currentPath: string): boolean {
 function CollapsibleGroup({
   group, currentPath,
 }: { group: NavGroup; currentPath: string }) {
+  const { t } = useTranslation();
   const Icon = group.icon;
   const hasActive = groupHasActiveLeaf(group.items, currentPath);
   const [open, setOpen] = useState(hasActive);
+  const i18nKey = NAV_KEY_I18N[group.key];
+  // i18nKey present → translate; else fall through to the static label.
+  const label = i18nKey ? t(i18nKey, group.label) : group.label;
 
   // Keep in sync if the route changes from elsewhere (e.g. programmatic nav).
   useEffect(() => {
@@ -218,7 +245,7 @@ function CollapsibleGroup({
         }`}
       >
         <Icon size={16} />
-        <span className="flex-1 text-left">{group.label}</span>
+        <span className="flex-1 text-left">{label}</span>
         <ChevronDown
           size={14}
           className={`transition-transform ${open ? "rotate-0" : "-rotate-90"}`}

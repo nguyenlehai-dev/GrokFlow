@@ -149,12 +149,15 @@ function Inner() {
 // Repo panel — status + deploy for one repo
 // ============================================================================
 
+type RepoSubTab = "status" | "deploy" | "containers" | "history" | "env";
+
 function RepoPanel({ repoId }: { repoId: string }) {
   const qc = useQueryClient();
   const [pull, setPull] = useState(true);
   const [rebuild, setRebuild] = useState(true);
   const [selectedServices, setSelectedServices] = useState<string[] | null>(null);
   const [lastResult, setLastResult] = useState<DeployResult | null>(null);
+  const [subTab, setSubTab] = useState<RepoSubTab>("status");
 
   const { data: status, isLoading, refetch } = useQuery({
     queryKey: ["git-status", repoId],
@@ -200,6 +203,17 @@ function RepoPanel({ repoId }: { repoId: string }) {
     ? status.repo.services
     : ["backend", "frontend", "worker", "idle-cleanup"];
 
+  // Sub-tab strip — sits between the repo-level tab strip above and the
+  // sectioned content below. Keeps the vertical stack scannable as each
+  // repo grows more diagnostics.
+  const SUBTABS: { key: RepoSubTab; label: string }[] = [
+    { key: "status",     label: "Trạng thái" },
+    { key: "deploy",     label: "Deploy" },
+    { key: "containers", label: "Containers" },
+    { key: "history",    label: "Lịch sử" },
+    { key: "env",        label: "Env" },
+  ];
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -218,6 +232,26 @@ function RepoPanel({ repoId }: { repoId: string }) {
         </button>
       </div>
 
+      {/* Sub-tab strip */}
+      <div className="flex gap-1 border-b border-slate-200">
+        {SUBTABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setSubTab(t.key)}
+            className={`relative px-3 py-1.5 text-sm font-medium transition ${
+              subTab === t.key ? "text-brand-700" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {t.label}
+            {subTab === t.key && (
+              <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-brand-600" aria-hidden />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {subTab === "status" && (<>
       {/* Status banner */}
       <div
         className={`card flex items-start gap-3 ${
@@ -255,7 +289,9 @@ function RepoPanel({ repoId }: { repoId: string }) {
         <CommitCard title="Commit đang chạy trên VPS" commit={status.current_commit} />
         <CommitCard title="Commit mới nhất trên GitHub" commit={status.remote_latest} />
       </div>
+      </>)}
 
+      {subTab === "deploy" && (<>
       {/* Deploy controls */}
       <section className="card space-y-3">
         <h2 className="font-semibold flex items-center gap-2">
@@ -331,7 +367,9 @@ function RepoPanel({ repoId }: { repoId: string }) {
           </pre>
         </section>
       )}
+      </>)}
 
+      {subTab === "containers" && (<>
       {/* Containers */}
       <section className="card space-y-2">
         <h2 className="font-semibold flex items-center gap-2">
@@ -371,26 +409,93 @@ function RepoPanel({ repoId }: { repoId: string }) {
           </table>
         </div>
       </section>
+      </>)}
 
-      {/* Recent commits */}
-      <section className="card space-y-2">
-        <h2 className="font-semibold flex items-center gap-2">
-          <GitCommit size={16} /> 10 commit gần nhất
-        </h2>
-        <div className="space-y-1">
-          {status.recent_commits.map((c) => (
-            <div key={c.hash} className="border border-slate-200 rounded px-3 py-2 text-sm hover:bg-slate-50">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <code className="font-mono text-xs text-amber-700">{c.short}</code>
-                <span className="text-xs text-slate-500">{c.date}</span>
+      {subTab === "history" && (
+        <section className="card space-y-2">
+          <h2 className="font-semibold flex items-center gap-2">
+            <GitCommit size={16} /> 10 commit gần nhất
+          </h2>
+          <div className="space-y-1">
+            {status.recent_commits.map((c) => (
+              <div key={c.hash} className="border border-slate-200 rounded px-3 py-2 text-sm hover:bg-slate-50">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <code className="font-mono text-xs text-amber-700">{c.short}</code>
+                  <span className="text-xs text-slate-500">{c.date}</span>
+                </div>
+                <div className="text-slate-800 mt-0.5 truncate">{c.message}</div>
+                <div className="text-xs text-slate-500">{c.author}</div>
               </div>
-              <div className="text-slate-800 mt-0.5 truncate">{c.message}</div>
-              <div className="text-xs text-slate-500">{c.author}</div>
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {subTab === "env" && <RepoEnvTab repoId={repoId} />}
     </div>
+  );
+}
+
+// ─── Env editor tab — GET/PUT /api/admin/git/repos/{id}/env ────────────
+function RepoEnvTab({ repoId }: { repoId: string }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["git-env", repoId],
+    queryFn: async () =>
+      (await api.get<{ env: string; path: string }>(`/api/admin/git/repos/${repoId}/env`)).data,
+  });
+  const [draft, setDraft] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (content: string) =>
+      api.put(`/api/admin/git/repos/${repoId}/env`, { content }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["git-env", repoId] });
+      setDraft(null);
+      toast("Đã lưu .env. Restart container để áp dụng.", "success");
+    },
+    onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Lỗi lưu .env", "error"),
+  });
+
+  if (isLoading || !data) return <p className="text-slate-500">Đang tải .env...</p>;
+  const current = draft ?? data.env;
+  return (
+    <section className="card space-y-3">
+      <header className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="font-semibold">Environment variables</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            File: <code className="font-mono">{data.path}</code>. Sửa rồi <strong>Lưu</strong>;
+            container đang chạy KHÔNG tự reload — phải tab Deploy bấm "Deploy now" để pick up.
+          </p>
+        </div>
+        {draft !== null && (
+          <button
+            className="btn-ghost text-xs"
+            onClick={() => setDraft(null)}
+          >
+            Hủy thay đổi
+          </button>
+        )}
+      </header>
+      <textarea
+        className="w-full h-96 font-mono text-xs p-3 bg-slate-900 text-slate-100 rounded border border-slate-700 outline-none focus:border-violet-500"
+        value={current}
+        onChange={(e) => setDraft(e.target.value)}
+        spellCheck={false}
+      />
+      <div className="flex justify-between items-center">
+        <span className="text-xs text-slate-500">
+          {current.split("\n").filter((l) => l && !l.startsWith("#")).length} dòng có giá trị
+        </span>
+        <button
+          className="btn-primary"
+          disabled={draft === null || save.isPending}
+          onClick={() => draft !== null && save.mutate(draft)}
+        >
+          {save.isPending ? "Đang lưu..." : "Lưu .env"}
+        </button>
+      </div>
+    </section>
   );
 }
 

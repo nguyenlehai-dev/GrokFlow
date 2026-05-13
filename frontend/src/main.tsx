@@ -6,6 +6,7 @@ import { RouterProvider } from "react-router-dom";
 import { router } from "@/app/router";
 import { ToastContainer } from "@/components/ui/Toast";
 import { useDomainStore } from "@/core/domain/store";
+import "@/core/i18n";  // side-effect: initializes i18next (auto-detects locale)
 import "@/index.css";
 
 const queryClient = new QueryClient({

@@ -29,6 +29,9 @@ interface User {
   // null = no restriction (super_admin or legacy unscoped user).
   effective_allowed_pages?: string[] | null;
   entitlements?: Entitlements;
+  // UI preferences echoed back from /api/auth/me.
+  locale?: string | null;
+  notification_prefs?: Record<string, { email: boolean; in_app: boolean }> | null;
 }
 
 interface AuthState {

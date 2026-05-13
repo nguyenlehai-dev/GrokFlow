@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import SessionLocal
 from app.core.sanitize import scrub_secrets
 from app.models import Job, JobLog, Profile, User
+from app.modules.admin.notifications import service as notif
 from app.modules.grok.files import service as files_service
 from app.providers import JobInput, get_provider
 from app.workers import webhook
@@ -284,6 +285,13 @@ async def process_one(db: AsyncSession, job: Job) -> None:
             job.completed_at = datetime.now(timezone.utc)
             db.add(JobLog(job_id=job.id, level="info",
                           message=f"Job success: {len(saved_ids)} file(s), {total_bytes} bytes"))
+            await notif.log_notification_async(
+                db, user_id=job.user_id, kind="job_completed",
+                title=f"Grok {job.job_type} hoàn tất",
+                body=(job.prompt or "")[:120],
+                target_url=f"/grok/jobs/{job.id}",
+                severity="success",
+            )
         else:
             error_code = result.error_code or "unknown_error"
             # Scrub before storing — vendor errors can include URLs with
@@ -313,6 +321,13 @@ async def process_one(db: AsyncSession, job: Job) -> None:
             else:
                 job.status = "failed"
                 job.completed_at = datetime.now(timezone.utc)
+                await notif.log_notification_async(
+                    db, user_id=job.user_id, kind="job_failed",
+                    title=f"Grok {job.job_type} lỗi",
+                    body=(job.error_message or "")[:160],
+                    target_url=f"/grok/jobs/{job.id}",
+                    severity="error",
+                )
 
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models import FlowJob
+from app.modules.admin.notifications import service as notif
 
 from .ffmpeg import FfmpegError, probe_duration, run_ffmpeg
 
@@ -204,8 +205,13 @@ def _process(job_id: uuid.UUID, recipe) -> None:
                 completed_at=datetime.now(timezone.utc),
                 error_message=None,
             )
-            # Clean up input dir — output is published, inputs are dead weight.
-            # Comment out if you want retry-from-inputs to work without re-upload.
+            notif.log_notification_sync(
+                user_id=job.user_id, kind="flow_completed",
+                title=f"Flow {job.operation} hoàn tất",
+                body=f"Output: {fname} ({size // 1024} KB)",
+                target_url="/flow/requests",
+                severity="success",
+            )
             try:
                 shutil.rmtree(input_dir(job_id), ignore_errors=True)
             except Exception:  # noqa: BLE001
@@ -220,6 +226,13 @@ def _process(job_id: uuid.UUID, recipe) -> None:
                 duration=round(time.time() - started, 3),
                 completed_at=datetime.now(timezone.utc),
             )
+            notif.log_notification_sync(
+                user_id=job.user_id, kind="job_failed",
+                title=f"Flow {job.operation} lỗi",
+                body=str(exc)[:160],
+                target_url="/flow/requests",
+                severity="error",
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("flow %s crashed", job_id)
             _sync_update(
@@ -228,6 +241,13 @@ def _process(job_id: uuid.UUID, recipe) -> None:
                 error_message=f"internal error: {exc}",
                 duration=round(time.time() - started, 3),
                 completed_at=datetime.now(timezone.utc),
+            )
+            notif.log_notification_sync(
+                user_id=job.user_id, kind="job_failed",
+                title=f"Flow {job.operation} crash",
+                body=f"internal error: {exc}",
+                target_url="/flow/requests",
+                severity="error",
             )
 
 
