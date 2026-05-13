@@ -7,6 +7,7 @@ import {
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
 import type { FrontendModule } from "@/app/types";
 import { lazyPage } from "@/app/lazyPage";
+import { DashboardSwitch } from "./DashboardSwitch";
 
 /** Admin & back-office module — everything authed but not a product:
  *    - Dashboard, API Keys, user-side Billing/Checkout, Audit Log, Settings
@@ -18,7 +19,9 @@ export const moduleManifest: FrontendModule = {
   name: "admin",
   label: "Admin & Back-office",
   routes: [
-    { path: "dashboard",   element: lazyPage(() => import("./DashboardPage"), "DashboardPage") },
+    // DashboardSwitch picks SystemDashboard for super_admin, TenantDashboard
+    // for everyone else. Each variant lazy-loads independently.
+    { path: "dashboard",   element: <DashboardSwitch /> },
     { path: "api-keys",    element: lazyPage(() => import("./ApiKeysPage"), "ApiKeysPage") },
     { path: "billing",     element: lazyPage(() => import("./BillingPage"), "BillingPage") },
     { path: "checkout/:plan_code", element: lazyPage(() => import("./CheckoutPage"), "CheckoutPage") },
