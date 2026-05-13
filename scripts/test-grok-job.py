@@ -39,6 +39,8 @@ def parse_args():
                     help="GrokFlow user to attribute the job to")
     ap.add_argument("--prompt", default="A serene japanese garden at dusk, watercolor style",
                     help="The image-gen prompt")
+    ap.add_argument("--profile-id", default=None,
+                    help="Pin to a specific profile (skip auto-pick rotation)")
     ap.add_argument("--aspect", default="1:1", help="aspect ratio (1:1, 16:9, …)")
     ap.add_argument("--poll-seconds", type=int, default=120,
                     help="how long to keep polling for completion")
@@ -67,13 +69,15 @@ def main() -> int:
                     print('USER_NOT_FOUND')
                     return
                 try:
+                    pid = {args.profile_id!r}
+                    import uuid as _uuid
                     job = await job_service.create_job(
                         db,
                         user_id=user.id,
                         provider='grok',
                         job_type='image',
                         prompt={args.prompt!r},
-                        profile_id=None,  # let auto-pick choose
+                        profile_id=_uuid.UUID(pid) if pid else None,
                         options={{
                             'aspect': {args.aspect!r},
                             'size': '1024x1024',

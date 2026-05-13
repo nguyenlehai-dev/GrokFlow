@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -59,6 +60,15 @@ async def _resolve_profile_for_job(
     )
     profile = (await db.execute(stmt)).scalar_one_or_none()
     if profile:
+        # Bump last_used_at NOW so back-to-back create_job calls don't all
+        # land on the same profile while waiting for the worker to pick up
+        # the first one. Without this, 10 jobs queued in a burst all see
+        # active_jobs=0 across the pool and the ORDER BY tie-breaker keeps
+        # picking the first profile by id → starving the others. The worker
+        # also updates last_used_at when it acquires a slot, which is fine —
+        # both writes are monotonic so they don't fight.
+        profile.last_used_at = datetime.now(timezone.utc)
+        await db.flush()
         return profile
     raise InvalidPayload(
         f"Không có profile {provider} nào logged_in. Admin cần Auto-login profile trước."
