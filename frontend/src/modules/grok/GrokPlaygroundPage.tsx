@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import axios from "axios";
 import { Activity, RefreshCw, KeyRound, X, Loader2, ChevronRight } from "lucide-react";
 
