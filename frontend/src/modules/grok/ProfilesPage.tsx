@@ -6,6 +6,7 @@ import { useAuthStore } from "@/core/auth/store";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { UploadCookiesModal } from "./UploadCookiesModal";
 import { AutoLoginModal } from "./AutoLoginModal";
+import { ProfileDomainsModal } from "./ProfileDomainsModal";
 
 interface Profile {
   id: string;
@@ -22,6 +23,7 @@ interface Profile {
 export function ProfilesPage() {
   const me = useAuthStore((s) => s.user);
   const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
+  const isSuper = me?.role === "super_admin";
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["profiles"],
@@ -31,6 +33,8 @@ export function ProfilesPage() {
   const [open, setOpen] = useState(false);
   const [cookiesFor, setCookiesFor] = useState<string | null>(null);
   const [autoLoginFor, setAutoLoginFor] = useState<string | null>(null);
+  // Per-row state for the domain assignment modal — super_admin only.
+  const [domainsFor, setDomainsFor] = useState<{ id: string; name: string } | null>(null);
 
   const disable = useMutation({
     mutationFn: (id: string) => api.post(`/api/profiles/${id}/disable`),
@@ -117,6 +121,15 @@ export function ProfilesPage() {
                     {isAdmin && (
                       <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                         <button className="btn-primary" onClick={() => setAutoLoginFor(p.id)}>Auto login</button>
+                        {isSuper && (
+                          <button
+                            className="btn-ghost"
+                            onClick={() => setDomainsFor({ id: p.id, name: p.name })}
+                            title="Phân quyền domain (chọn tenant nào được dùng)"
+                          >
+                            Domains
+                          </button>
+                        )}
                         <button className="btn-ghost" onClick={() => stopVnc.mutate(p.id)} title="Tắt browser, giải phóng RAM">Stop</button>
                         <button className="btn-ghost" onClick={() => disable.mutate(p.id)}>Disable</button>
                         <button className="btn-ghost text-rose-600" onClick={() => remove.mutate(p.id)}>Delete</button>
@@ -140,6 +153,13 @@ export function ProfilesPage() {
       {open && <CreateProfileModal onClose={() => setOpen(false)} />}
       {cookiesFor && <UploadCookiesModal profileId={cookiesFor} onClose={() => setCookiesFor(null)} />}
       {autoLoginFor && <AutoLoginModal profileId={autoLoginFor} onClose={() => setAutoLoginFor(null)} />}
+      {domainsFor && (
+        <ProfileDomainsModal
+          profileId={domainsFor.id}
+          profileName={domainsFor.name}
+          onClose={() => setDomainsFor(null)}
+        />
+      )}
     </div>
   );
 }

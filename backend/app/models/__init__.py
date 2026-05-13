@@ -137,6 +137,33 @@ class Profile(Base, TimestampMixin):
     jobs: Mapped[list["Job"]] = relationship(back_populates="profile")
 
 
+class ProfileDomainAssignment(Base):
+    """Many-to-many: which Grok profiles each customer domain can pull from.
+
+    A profile is visible to a customer in domain X if EITHER:
+      - an explicit row (profile_id, X) exists here, OR
+      - no rows exist for this profile AND the profile's owner is in domain X
+        (legacy direct-ownership fallback, kept for backward compat with
+        profiles created before this join table existed).
+
+    Only `super_admin` can edit assignments; per-domain `admin` can read its
+    own domain's set and a `user` doesn't see this surface at all.
+    """
+    __tablename__ = "profile_domain_assignments"
+
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    domain_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+
 class Job(Base, TimestampMixin):
     __tablename__ = "jobs"
 
@@ -608,4 +635,5 @@ __all__ = [
     "GwGatewayKey",
     "GwRequest",
     "FlowJob",
+    "ProfileDomainAssignment",
 ]

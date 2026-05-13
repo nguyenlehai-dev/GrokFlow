@@ -6,11 +6,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
-from app.models import Job, JobLog, Profile, User
+from app.models import Job, JobLog, Profile, ProfileDomainAssignment, User
 
 
 async def _resolve_profile_for_job(
-    db: AsyncSession, *, requested_id: uuid.UUID | None, user_id: uuid.UUID, provider: str,
+    db: AsyncSession,
+    *,
+    requested_id: uuid.UUID | None,
+    user_id: uuid.UUID,
+    provider: str,
+    requester_domain_id: uuid.UUID | None = None,
 ) -> Profile | None:
     """Customer cannot use their own profile — always pick from admin pool.
 
@@ -25,6 +30,19 @@ async def _resolve_profile_for_job(
     # — not even themselves — can use as a job runner.
     ADMIN_ROLES = ("admin", "super_admin")
 
+    # A profile is visible to a tenant in `requester_domain_id` if EITHER
+    #   (a) the profile's owner is in that domain (legacy direct ownership), OR
+    #   (b) an explicit (profile, domain) row exists in profile_domain_assignments
+    # When requester_domain_id is None (super_admin path) the visibility filter
+    # is skipped entirely.
+    assigned_to_domain = (
+        select(ProfileDomainAssignment.profile_id)
+        .where(ProfileDomainAssignment.domain_id == requester_domain_id)
+        .scalar_subquery()
+        if requester_domain_id is not None
+        else None
+    )
+
     if requested_id:
         profile = await db.get(Profile, requested_id)
         if not profile:
@@ -36,6 +54,19 @@ async def _resolve_profile_for_job(
             raise InvalidPayload(f"Profile provider mismatch: profile={profile.provider}, requested={provider}")
         if profile.status not in {"logged_in", "running_job"}:
             raise InvalidPayload(f"Profile not ready (status={profile.status}). Ask admin to refresh.")
+        # Tenant visibility check — same rule as auto-pick.
+        if requester_domain_id is not None and owner.domain_id != requester_domain_id:
+            visible = (
+                await db.execute(
+                    select(ProfileDomainAssignment.profile_id)
+                    .where(
+                        ProfileDomainAssignment.profile_id == profile.id,
+                        ProfileDomainAssignment.domain_id == requester_domain_id,
+                    )
+                )
+            ).first()
+            if not visible:
+                raise PermissionDenied("Profile not assigned to your domain")
         return profile
 
     # Auto-pick: any logged_in / running_job admin-pool profile for this provider.
@@ -44,14 +75,20 @@ async def _resolve_profile_for_job(
     # for a fully-loaded profile should QUEUE behind in-flight ones, not be
     # rejected. The worker's _try_acquire_slot enforces concurrency at run
     # time. We just pick the least-loaded profile to spread the queue.
+    where_clauses = [
+        User.role.in_(ADMIN_ROLES),
+        Profile.provider == provider,
+        Profile.status.in_(["logged_in", "running_job"]),
+    ]
+    if assigned_to_domain is not None:
+        where_clauses.append(
+            (User.domain_id == requester_domain_id)
+            | Profile.id.in_(assigned_to_domain)
+        )
     stmt = (
         select(Profile)
         .join(User, User.id == Profile.user_id)
-        .where(
-            User.role.in_(ADMIN_ROLES),
-            Profile.provider == provider,
-            Profile.status.in_(["logged_in", "running_job"]),
-        )
+        .where(*where_clauses)
         .order_by(
             Profile.active_jobs.asc(),
             func.coalesce(Profile.last_used_at, Profile.created_at).asc(),
@@ -86,8 +123,19 @@ async def create_job(
     options: dict[str, Any] | None,
     api_key_id: uuid.UUID | None = None,
 ) -> Job:
+    # Look up requester's domain — used to filter the pool down to profiles
+    # super_admin has loaned to this tenant + legacy same-domain profiles.
+    # super_admin themselves are unscoped (pass None) so they can use any
+    # profile in their own bootstrap workflow.
+    requester = await db.get(User, user_id)
+    requester_domain_id = (
+        requester.domain_id
+        if requester and requester.role != "super_admin"
+        else None
+    )
     profile = await _resolve_profile_for_job(
         db, requested_id=profile_id, user_id=user_id, provider=provider,
+        requester_domain_id=requester_domain_id,
     )
 
     job = Job(

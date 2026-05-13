@@ -22,7 +22,8 @@ from app.core.deps import AdminUser, CurrentUser, DbSession
 from app.core.exceptions import InvalidCredentials, InvalidPayload, NotFound, PermissionDenied
 from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
-from app.models import Profile, User
+from app.core.deps import SuperAdminUser
+from app.models import Domain, Profile, ProfileDomainAssignment, User
 from app.modules.admin.audit import service as audit
 
 
@@ -87,33 +88,61 @@ def _profile_dir(user_id: uuid.UUID, profile_id: uuid.UUID) -> Path:
 
 @router.get("", response_model=list[ProfileOut])
 async def list_profiles(user: CurrentUser, db: DbSession) -> list[Profile]:
-    """super_admin sees all profiles; per-domain admin sees only the
-    profiles owned by users in their own domain; customers see only
-    `logged_in` profiles owned by admins in their domain (the pool).
+    """super_admin sees all profiles; per-domain admin sees own-domain
+    profiles + profiles assigned to its domain via the join table;
+    customers see logged_in admin-owned profiles their domain has access to.
+
+    Visibility for non-super-admins now folds two rules together via
+    `_profile_visible_to_domain_subq`:
+
+      (a) Profile owner is in the requester's domain (legacy direct ownership), OR
+      (b) An explicit (profile, requester_domain) row exists in
+          profile_domain_assignments — super_admin loans a profile to a tenant.
+
+    With rule (b) a super_admin running profiles in their own platform domain
+    can hand-pick which tenants get to see each profile, fixing the old
+    behaviour where super_admin's profiles were invisible to any tenant.
     """
     base = select(Profile).where(Profile.status != "deleted")
 
     if user.role == "super_admin":
         q = base.order_by(Profile.created_at.desc())
     elif user.role == "admin":
-        # Tenant-scope: only profiles owned by users in the admin's domain.
-        q = scope_by_user_domain(base, Profile.user_id, user).order_by(
-            Profile.created_at.desc()
+        q = (
+            base.join(User, User.id == Profile.user_id)
+            .where(
+                (User.domain_id == user.domain_id)
+                | Profile.id.in_(_profile_ids_assigned_to_domain(user.domain_id))
+            )
+            .order_by(Profile.created_at.desc())
         )
     else:
-        # Customer pool: admin-owned, logged_in, same domain.
+        # Customer pool: admin-owned, logged_in, visible to my domain.
         q = (
             select(Profile)
             .join(User, User.id == Profile.user_id)
             .where(
                 User.role.in_(("admin", "super_admin")),
                 Profile.status == "logged_in",
-                User.domain_id == user.domain_id,
+                (User.domain_id == user.domain_id)
+                | Profile.id.in_(_profile_ids_assigned_to_domain(user.domain_id)),
             )
             .order_by(Profile.created_at.desc())
         )
     result = await db.execute(q)
     return list(result.scalars().all())
+
+
+def _profile_ids_assigned_to_domain(domain_id):
+    """Sub-select of profile IDs explicitly assigned to `domain_id`.
+    Inline-able into a WHERE … IN (…) clause."""
+    from app.models import ProfileDomainAssignment
+
+    return (
+        select(ProfileDomainAssignment.profile_id)
+        .where(ProfileDomainAssignment.domain_id == domain_id)
+        .scalar_subquery()
+    )
 
 
 @router.post("", response_model=ProfileOut, status_code=status.HTTP_201_CREATED)
@@ -485,3 +514,81 @@ async def disable_profile(profile_id: uuid.UUID, _admin: AdminUser, db: DbSessio
     await db.commit()
     await db.refresh(profile)
     return profile
+
+
+# ─── Profile ↔ Domain assignment surface ────────────────────────────────
+# Only super_admin manages assignments. Per-domain admin can read its own
+# domain's assigned set (read-only).
+
+class ProfileDomainsOut(BaseModel):
+    profile_id: uuid.UUID
+    domain_ids: list[uuid.UUID]
+
+
+class ProfileDomainsUpdate(BaseModel):
+    domain_ids: list[uuid.UUID]
+
+
+@router.get("/{profile_id}/domains", response_model=ProfileDomainsOut)
+async def get_profile_domains(
+    profile_id: uuid.UUID, user: CurrentUser, db: DbSession,
+) -> ProfileDomainsOut:
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise NotFound("profile")
+    if user.role not in ("super_admin", "admin"):
+        raise PermissionDenied()
+    rows = (
+        await db.execute(
+            select(ProfileDomainAssignment.domain_id)
+            .where(ProfileDomainAssignment.profile_id == profile_id)
+        )
+    ).scalars().all()
+    return ProfileDomainsOut(profile_id=profile_id, domain_ids=list(rows))
+
+
+@router.put("/{profile_id}/domains", response_model=ProfileDomainsOut)
+async def set_profile_domains(
+    profile_id: uuid.UUID,
+    payload: ProfileDomainsUpdate,
+    _super: SuperAdminUser,
+    db: DbSession,
+) -> ProfileDomainsOut:
+    """Replace the set of domains that can see / pick this profile.
+
+    Pass an empty list to revoke all assignments (profile becomes invisible
+    to every tenant unless its owner happens to be in their domain).
+    """
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise NotFound("profile")
+
+    # Validate every domain_id exists — fail-fast keeps partial writes out
+    # of the join table.
+    if payload.domain_ids:
+        found = (
+            await db.execute(
+                select(Domain.id).where(Domain.id.in_(payload.domain_ids))
+            )
+        ).scalars().all()
+        missing = set(payload.domain_ids) - set(found)
+        if missing:
+            raise InvalidPayload(f"Unknown domain_ids: {sorted(str(m) for m in missing)}")
+
+    # Replace = delete-then-insert in one transaction. The join table is
+    # tiny (handful of rows per profile) so the simple approach beats a
+    # diff-based upsert in clarity.
+    await db.execute(
+        ProfileDomainAssignment.__table__.delete()
+        .where(ProfileDomainAssignment.profile_id == profile_id)
+    )
+    for did in payload.domain_ids:
+        db.add(ProfileDomainAssignment(profile_id=profile_id, domain_id=did))
+
+    await audit.log_action(
+        db, user_id=_super.id, action="profile_domains_set",
+        target_type="profile", target_id=profile_id,
+        metadata={"domain_ids": [str(d) for d in payload.domain_ids]},
+    )
+    await db.commit()
+    return ProfileDomainsOut(profile_id=profile_id, domain_ids=list(payload.domain_ids))
