@@ -1,4 +1,4 @@
-"""Diagnose a running deploy — find which build step is in flight."""
+"""VNC diagnosis — why the in-page browser shows black."""
 from __future__ import annotations
 
 import os
@@ -19,56 +19,80 @@ c.connect(HOST, username=USER, password=PASSWORD, timeout=20)
 
 script = textwrap.dedent("""\
     #!/usr/bin/env bash
-    echo "=== docker build top-level proc ==="
-    pgrep -af 'docker compose.*build' | head -3
+    echo "=== chromium stderr inside VNC ==="
+    FIRST_VNC=$(docker ps --filter name=grokflow-vnc --format '{{.Names}}' | head -1)
+    if [ -n "$FIRST_VNC" ]; then
+      docker exec $FIRST_VNC sh -lc '
+        for f in /var/log/supervisor/chromium*.log /var/log/chromium*.log /home/headless/.cache/chromium/log; do
+          [ -f "$f" ] && echo "=== $f ===" && tail -30 "$f"
+        done
+        echo
+        echo "[profile dir ownership]"
+        ls -la /home/headless/.config 2>&1 | head -10
+        echo
+        echo "[lock files in user-data-dir]"
+        find /home/headless/.config /tmp -name "Singleton*" 2>/dev/null | head -5
+        echo
+        echo "[manual chromium launch — capture exit code]"
+        su -s /bin/sh -c "DISPLAY=:1 chromium --no-sandbox --headless=new --disable-gpu --version 2>&1 | head -3" headless || true
+      '
+    fi
 
     echo
-    echo "=== buildkit / buildx child processes ==="
-    ps -ef | grep -E '(buildkit|buildx|apt-get|pip|playwright|node)' | grep -v grep | head -10
+    echo "=== running VNC containers ==="
+    docker ps --filter name=grokflow-vnc --format '{{.Names}}\\t{{.Status}}\\t{{.Image}}'
 
     echo
-    echo "=== open files for the build process (top 10 by recency) ==="
-    BUILD_PID=$(pgrep -f 'docker compose.*build' | head -1)
-    if [ -n "$BUILD_PID" ]; then
-      ls -lat /proc/$BUILD_PID/fd 2>/dev/null | head -15
+    echo "=== if any VNC is up — what's inside ==="
+    FIRST_VNC=$(docker ps --filter name=grokflow-vnc --format '{{.Names}}' | head -1)
+    if [ -n "$FIRST_VNC" ]; then
+      echo "--- inspecting $FIRST_VNC ---"
+      docker exec $FIRST_VNC sh -lc '
+        echo "[ps inside container]"
+        ps -ef 2>/dev/null | head -10 || true
+        echo
+        echo "[supervisor / startup scripts]"
+        ls -la /entrypoint.sh /startup.sh /init.sh 2>/dev/null | head -5
+        echo
+        echo "[display test]"
+        echo "DISPLAY=$DISPLAY"
+        which xset && xset q 2>&1 | head -5 || echo "(no xset)"
+        echo
+        echo "[is chromium running?]"
+        pgrep -f -l chrom 2>/dev/null | head -3 || echo "(no chromium)"
+      ' || true
+      echo
+      echo "--- last 25 log lines of $FIRST_VNC ---"
+      docker logs --tail 25 $FIRST_VNC 2>&1
     else
-      echo "(no docker compose build pid)"
+      echo "(no VNC containers running — were they spawned?)"
     fi
 
     echo
-    echo "=== buildkitd child / latest build container ==="
-    # The actual build runs inside a buildkitd-spawned container
-    docker ps -a --filter status=running --format '{{.Names}}\\t{{.Status}}\\t{{.Image}}' | grep -E '(build|moby)' || echo "(none — old buildkit)"
+    echo "=== nginx /vnc/ route config in frontend image ==="
+    docker exec grokflow-frontend-1 grep -A 12 'location ~ "\\^/vnc/' /etc/nginx/conf.d/default.conf 2>&1 | head -20
 
     echo
-    echo "=== last log lines of docker daemon ==="
-    journalctl -u docker --no-pager -n 5 2>&1 | tail -5 || true
+    echo "=== backend env: PROFILE_BASE_PATH + Docker socket ==="
+    docker exec grokflow-backend-1 sh -lc '
+      echo "PROFILE_BASE_PATH=$PROFILE_BASE_PATH"
+      echo "PROFILE_BASE_PATH_HOST=$PROFILE_BASE_PATH_HOST"
+      ls -la /var/run/docker.sock 2>&1 || echo "(no docker.sock!)"
+    '
 
     echo
-    echo "=== disk + memory ==="
-    df -h /var/lib/docker 2>&1 | tail -2
-    free -h | head -2
-
-    echo
-    echo "=== network throughput last 10s on eth0 ==="
-    IFACE=$(ip -o -4 route show to default | awk '{print $5}' | head -1)
-    if [ -n "$IFACE" ]; then
-      R1=$(cat /sys/class/net/$IFACE/statistics/rx_bytes)
-      sleep 5
-      R2=$(cat /sys/class/net/$IFACE/statistics/rx_bytes)
-      RATE=$(( (R2-R1) / 5 / 1024 ))
-      echo "$IFACE rx ≈ ${RATE} KB/s"
-    fi
+    echo "=== last 10 backend log lines mentioning vnc ==="
+    docker logs --tail 200 grokflow-backend-1 2>&1 | grep -i -E '(vnc|profile|browser)' | tail -10 || echo "(no recent vnc logs)"
 """)
 
 sftp = c.open_sftp()
-with sftp.open("/tmp/check-deploy.sh", "w") as f:
+with sftp.open("/tmp/check-vnc.sh", "w") as f:
     f.write(script)
-sftp.chmod("/tmp/check-deploy.sh", 0o755)
+sftp.chmod("/tmp/check-vnc.sh", 0o755)
 sftp.close()
 
 _, stdout, _ = c.exec_command(
-    f"echo {PASSWORD} | sudo -S bash /tmp/check-deploy.sh",
+    f"echo {PASSWORD} | sudo -S bash /tmp/check-vnc.sh",
     timeout=60,
 )
 stdout.channel.settimeout(60.0)
