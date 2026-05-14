@@ -23,6 +23,7 @@ from app.core.exceptions import InvalidCredentials, InvalidPayload, NotFound, Pe
 from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
 from app.core.deps import SuperAdminUser
+from app.services.nginx_sync import refresh_vnc_map
 from app.models import Domain, Profile, ProfileDomainAssignment, User
 from app.modules.admin.audit import service as audit
 
@@ -430,6 +431,10 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
                            metadata={"container": info["container_name"], "reused": info.get("reused")})
     await db.commit()
 
+    # Tell nginx where this new container lives so the iframe URL routes.
+    # No-op when the host vhost dir isn't mounted (dev / tests).
+    refresh_vnc_map()
+
     base = settings.cors_origin_list[0] if settings.cors_origin_list else ""
     # Per-profile noVNC route. Nginx proxies /vnc/<short-id>/ → <container>:6901
     # `path` param tells noVNC to open WS at /vnc/<short>/websockify (its default
@@ -495,6 +500,8 @@ async def stop_vnc(profile_id: uuid.UUID, admin: AdminUser, db: DbSession) -> Pr
     await audit.log_action(db, user_id=admin.id, action="stop_vnc",
                            target_type="profile", target_id=profile.id)
     await db.commit()
+    # Container is gone; drop it from the nginx VNC map.
+    refresh_vnc_map()
     await db.refresh(profile)
     return profile
 
