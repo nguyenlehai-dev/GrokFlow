@@ -426,30 +426,86 @@ async def auto_provision_project(
             ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await ctx.new_page()
             try:
-                await page.goto("https://grok.com/", wait_until="domcontentloaded", timeout=20_000)
-                # New Project button — try multiple selectors so a Grok UI
-                # tweak doesn't immediately break this.
-                new_btn = page.locator(
-                    "button:has-text('New Project'), "
-                    "a:has-text('New Project'), "
-                    "[aria-label*='Project']:has-text('New')"
-                ).first
-                await new_btn.wait_for(timeout=8_000)
+                await page.goto("https://grok.com/", wait_until="domcontentloaded", timeout=25_000)
+                # Wait for the React shell to mount. The sidebar nav links
+                # are a reliable signal — if "Imagine" is visible, the
+                # SPA is alive.
+                try:
+                    await page.locator("text=Imagine").first.wait_for(timeout=15_000)
+                except PWTimeout:
+                    # Maybe a sign-in wall — surface a clear error.
+                    raise InvalidPayload(
+                        "Grok sidebar không load được — kiểm tra profile đã login chưa."
+                    )
+                # Give the rest of the sidebar (Projects section, "+ New
+                # Project" row) one more beat to hydrate.
+                await page.wait_for_timeout(800)
+
+                # Selectors for the "New Project" button. Grok lays it out
+                # as a row with a "+" icon and text — try every shape we
+                # might encounter, ordered cheap-first.
+                candidates = [
+                    # Playwright's text= matcher is forgiving — case-
+                    # insensitive substring against visible text.
+                    "text=/new project/i",
+                    # Same idea via has-text — sometimes scoped to button/a
+                    "button:has-text('New Project')",
+                    "a:has-text('New Project')",
+                    "[role='button']:has-text('New Project')",
+                    # Some builds use only "+ Project" or "Create project"
+                    "text=/\\+\\s*project/i",
+                    "[aria-label*='new project' i]",
+                    "[aria-label*='create project' i]",
+                ]
+                new_btn = None
+                for sel in candidates:
+                    loc = page.locator(sel).first
+                    try:
+                        await loc.wait_for(timeout=2_500, state="visible")
+                        new_btn = loc
+                        break
+                    except PWTimeout:
+                        continue
+                if new_btn is None:
+                    # Last resort: dump visible sidebar text for diagnostics
+                    sidebar_text = await page.evaluate(
+                        "() => document.body.innerText.split('\\n').slice(0, 30).join(' | ')"
+                    )
+                    raise InvalidPayload(
+                        f"Không tìm thấy nút 'New Project' trong sidebar. "
+                        f"Grok có thể đã đổi UI. Sidebar text: {sidebar_text[:300]}"
+                    )
                 await new_btn.click()
 
-                # Name input — usually first visible textarea/input in the
-                # modal. Try a few common shapes.
-                name_input = page.locator(
-                    "[role='dialog'] input:not([type='hidden']):visible, "
-                    "[role='dialog'] textarea:visible, "
-                    "input[placeholder*='roject']:visible"
-                ).first
-                await name_input.wait_for(timeout=8_000)
+                # Modal opens. Try a generous set of selectors for the
+                # name input, and a longer timeout because the modal
+                # animation takes ~300ms.
+                input_candidates = [
+                    "[role='dialog'] input[type='text']:visible",
+                    "[role='dialog'] input:not([type='hidden']):visible",
+                    "[role='dialog'] textarea:visible",
+                    "input[placeholder*='roject' i]:visible",
+                    "input[placeholder*='name' i]:visible",
+                ]
+                name_input = None
+                for sel in input_candidates:
+                    loc = page.locator(sel).first
+                    try:
+                        await loc.wait_for(timeout=2_500, state="visible")
+                        name_input = loc
+                        break
+                    except PWTimeout:
+                        continue
+                if name_input is None:
+                    raise InvalidPayload(
+                        "Modal tạo project không mở hoặc UI đổi. Thử thủ công."
+                    )
                 await name_input.fill(payload.name)
 
-                # Submit — Enter or Create button
+                # Submit: prefer the dialog's Create button, fall back to Enter.
                 create_btn = page.locator(
                     "[role='dialog'] button:has-text('Create'), "
+                    "[role='dialog'] button:has-text('Tạo'), "
                     "[role='dialog'] button[type='submit']"
                 ).first
                 if await create_btn.count() > 0:
@@ -458,9 +514,8 @@ async def auto_provision_project(
                     await name_input.press("Enter")
 
                 # Wait for URL to settle on /project/<slug>
-                await page.wait_for_url("**/project/**", timeout=15_000)
+                await page.wait_for_url("**/project/**", timeout=20_000)
                 final_url = page.url
-                import re
                 m = re.search(r"/project/([^/?#]+)", final_url)
                 if m:
                     slug = m.group(1)
