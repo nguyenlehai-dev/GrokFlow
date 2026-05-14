@@ -318,7 +318,7 @@ function DomainEditorModal({
 
         {/* Maintenance — per-domain. Lets the team patch one tenant in
             isolation without taking the rest of the platform down. */}
-        <section className={`border-t pt-3 space-y-2 ${maintenanceMode ? "" : ""}`}>
+        <section className="border-t pt-3 space-y-2">
           <h3 className="text-sm font-semibold flex items-center gap-2">
             🔧 Maintenance mode
             {maintenanceMode && (
@@ -333,20 +333,32 @@ function DomainEditorModal({
             </span>
           </Checkbox>
           {maintenanceMode && (
-            <div>
-              <label className="text-xs font-medium text-slate-700">Lời nhắn cho khách (tuỳ chọn)</label>
-              <textarea
-                className="input mt-1"
-                rows={3}
-                value={maintenanceMessage}
-                onChange={(e) => setMaintenanceMessage(e.target.value)}
-                placeholder="VD: Đang nâng cấp tính năng video. Dự kiến xong lúc 22h tối nay."
-                maxLength={2000}
-              />
-              <p className="text-[10px] text-slate-500 mt-1">
-                Hiển thị trong khung vàng trên trang bảo trì. Hỗ trợ xuống dòng.
-              </p>
-            </div>
+            <>
+              <div>
+                <label className="text-xs font-medium text-slate-700">Lời nhắn cho khách (tuỳ chọn)</label>
+                <textarea
+                  className="input mt-1"
+                  rows={3}
+                  value={maintenanceMessage}
+                  onChange={(e) => setMaintenanceMessage(e.target.value)}
+                  placeholder="VD: Đang nâng cấp tính năng video. Dự kiến xong lúc 22h tối nay."
+                  maxLength={2000}
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Hiển thị trong khung vàng trên trang bảo trì. Hỗ trợ xuống dòng.
+                </p>
+              </div>
+              {!isCreate && domain?.hostname && domain.hostname !== "*" && (
+                <a
+                  href={`https://${domain.hostname}/?preview=maintenance`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-secondary btn-sm w-fit"
+                >
+                  🔍 Xem trước (mở tab mới)
+                </a>
+              )}
+            </>
           )}
         </section>
 

@@ -17,10 +17,13 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 
   // Per-domain maintenance mode: non-admin users see the maintenance
   // screen regardless of which authed route they tried to hit. Admins
-  // still get through so they can finish the patch from /admin/domains.
+  // still get through so they can finish the patch — but they can
+  // append `?preview=maintenance` to ANY URL to see what users see
+  // without having to log out.
   if (domainConfig?.maintenance_mode) {
     const isAdmin = user?.role === "admin" || user?.role === "super_admin";
-    if (!isAdmin) return <MaintenancePage />;
+    const previewing = new URLSearchParams(location.search).get("preview") === "maintenance";
+    if (!isAdmin || previewing) return <MaintenancePage />;
   }
 
   // Refresh /me on app boot — keeps cached entitlements in sync after admin
