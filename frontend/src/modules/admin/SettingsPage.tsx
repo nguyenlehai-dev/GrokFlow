@@ -2,9 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import {
-  User as UserIcon, KeyRound, Webhook, Globe, Bell, Image as ImageIcon,
+  User as UserIcon, KeyRound, Webhook, Globe, Bell,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
@@ -18,17 +17,18 @@ import { setLocale } from "@/core/i18n";
  *    Webhook        — existing webhook config
  *    Đa ngôn ngữ    — locale switcher (vi/en today)
  *    Thông báo      — per-event-type notification preferences
- *    Grok Gallery   — link to the standalone gallery page
+ *
+ *  (Gallery lives in its own sidebar group at /gallery/{images,videos,prompts}.
+ *  The legacy tab here was removed because it duplicated that nav entry.)
  */
 
-type TabKey = "account" | "webhook" | "locale" | "notif" | "gallery";
+type TabKey = "account" | "webhook" | "locale" | "notif";
 
 const TABS: { key: TabKey; label: string; icon: typeof UserIcon }[] = [
   { key: "account",  label: "Tài khoản",     icon: UserIcon },
   { key: "webhook",  label: "Webhook",       icon: Webhook },
   { key: "locale",   label: "Đa ngôn ngữ",   icon: Globe },
   { key: "notif",    label: "Thông báo",     icon: Bell },
-  { key: "gallery",  label: "Grok Gallery",  icon: ImageIcon },
 ];
 
 export function SettingsPage() {
@@ -67,7 +67,6 @@ export function SettingsPage() {
         {tab === "webhook" && <WebhookSection />}
         {tab === "locale" && <LocaleTab />}
         {tab === "notif" && <NotificationsTab />}
-        {tab === "gallery" && <GalleryTab />}
       </div>
     </div>
   );
@@ -337,18 +336,3 @@ function NotificationsTab() {
   );
 }
 
-// ─── Grok Gallery shortcut ──────────────────────────────────────────────
-function GalleryTab() {
-  return (
-    <section className="card space-y-3">
-      <h2 className="font-semibold flex items-center gap-2"><ImageIcon size={16} /> Grok Gallery</h2>
-      <p className="text-sm text-slate-600">
-        Xem mọi kết quả Grok image/video đã render với filter theo user, profile, job_type, thời gian.
-        Page riêng để hiển thị grid + preview tốt hơn.
-      </p>
-      <Link to="/gallery" className="btn-primary inline-flex items-center gap-2 w-fit">
-        <ImageIcon size={14} /> Mở Gallery
-      </Link>
-    </section>
-  );
-}

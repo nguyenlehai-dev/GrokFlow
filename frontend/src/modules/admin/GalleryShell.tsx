@@ -49,7 +49,35 @@ interface DomainOption {
 
 export type GalleryMode = "images" | "videos" | "prompts";
 
-const PAGE_SIZE = 24;
+// Smaller page = faster TTI. 18 items = 3 rows × 6 cols on desktop, still
+// "one screen" of preview without making the user paginate too often.
+const PAGE_SIZE = 18;
+
+/** Render `<img>` / `<video>` only once the element enters the viewport.
+ *  Even though browsers honor `loading="lazy"` on <img>, the lazy heuristic
+ *  is generous — it eagerly fetches anything within ~3 screens of the
+ *  viewport, which is still 50+ thumbnails on a long gallery. Wrapping
+ *  with IntersectionObserver gives us a fixed `rootMargin` so we only
+ *  pay for what's actually about to be seen. */
+function useInView<T extends HTMLElement>(rootMargin = "200px") {
+  const ref = useRef<T | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    if (!ref.current || inView) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin },
+    );
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [inView, rootMargin]);
+  return { ref, inView };
+}
 
 const MODE_META: Record<GalleryMode, {
   title: string;
@@ -257,19 +285,26 @@ function MediaGrid({
 
 function GalleryCell({ item, onClick }: { item: GalleryItem; onClick: () => void }) {
   const isVideo = item.job_type === "video";
+  const { ref, inView } = useInView<HTMLButtonElement>("400px");
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onClick}
       className="group relative rounded-xl overflow-hidden bg-ink-100 aspect-square ring-1 ring-ink-200 hover:ring-2 hover:ring-brand-400 hover:shadow-card-hover transition focus:outline-none focus:ring-2 focus:ring-brand-500"
     >
-      {isVideo ? (
+      {!inView ? (
+        // Cheap placeholder until the cell is near the viewport. Keeps
+        // off-screen rows from spawning N HTTP requests on mount.
+        <div className="absolute inset-0 bg-gradient-to-br from-ink-100 to-ink-200" />
+      ) : isVideo ? (
         <VideoThumb url={item.result_url} />
       ) : (
         <img
           src={item.result_url}
           alt={item.prompt.slice(0, 60)}
           loading="lazy"
+          decoding="async"
           className="absolute inset-0 w-full h-full object-cover"
           onError={(e) => {
             (e.target as HTMLImageElement).style.opacity = "0.2";
@@ -347,6 +382,7 @@ function PromptRow({
 }: { item: GalleryItem; onPreview: () => void; isSuper: boolean }) {
   const [copied, setCopied] = useState(false);
   const isVideo = item.job_type === "video";
+  const { ref, inView } = useInView<HTMLDivElement>("400px");
 
   const copy = async () => {
     try {
@@ -357,20 +393,23 @@ function PromptRow({
   };
 
   return (
-    <div className="card-hover flex gap-4 p-4">
+    <div ref={ref} className="card-hover flex gap-4 p-4">
       {/* Thumbnail */}
       <button
         type="button"
         onClick={onPreview}
         className="relative shrink-0 w-24 h-24 rounded-lg overflow-hidden bg-ink-100 ring-1 ring-ink-200 hover:ring-2 hover:ring-brand-400 transition"
       >
-        {isVideo ? (
+        {!inView ? (
+          <div className="absolute inset-0 bg-gradient-to-br from-ink-100 to-ink-200" />
+        ) : isVideo ? (
           <VideoThumb url={item.result_url} />
         ) : (
           <img
             src={item.result_url}
             alt=""
             loading="lazy"
+            decoding="async"
             className="absolute inset-0 w-full h-full object-cover"
           />
         )}
