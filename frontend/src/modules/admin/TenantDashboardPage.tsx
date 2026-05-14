@@ -331,7 +331,7 @@ function Row({
   label, value, sub, icon: Icon,
 }: {
   label: string; value: string; sub?: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: React.ComponentType<any>;
 }) {
   return (
     <div className="flex items-center gap-3">

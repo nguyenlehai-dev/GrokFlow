@@ -3,9 +3,9 @@ import { Link } from "react-router-dom";
 import {
   Check, Image as ImageIcon, Video, Zap, Shield, Code2, Sparkles,
   Wand2, Scissors, Cpu, ArrowRight, PlayCircle, Crown, Star,
-  Globe, BookOpen, Terminal, Lock, Webhook, Layers, BarChart3,
-  Users, Briefcase, Palette, ChevronDown, Plus, Minus, Github,
-  Clock, Rocket, Settings,
+  Globe, BookOpen, Terminal, Lock, Webhook, BarChart3,
+  Users, Briefcase, Palette, Plus, Minus,
+  Rocket,
 } from "lucide-react";
 import { useDomainStore } from "@/core/domain/store";
 
@@ -311,7 +311,18 @@ function TrustStrip() {
 
 // ─── Modules ───────────────────────────────────────────────────────────────
 
-const MODULES = [
+type ModuleCard = {
+  label: string;
+  desc: string;
+  icon: typeof ImageIcon;
+  tone: keyof typeof TONE;
+  to: string;
+  ctaText: string;
+  badge?: string;
+  features: readonly string[];
+};
+
+const MODULES: readonly ModuleCard[] = [
   {
     label: "Grok Image",
     desc: "Aurora · Grok-2 · Grok-3 model. Full aspect ratios. Speed / Quality mode.",
@@ -343,7 +354,7 @@ const MODULES = [
     badge: "v1",
     features: ["Multi-provider", "Pool + key rotation", "Per-function rate limit", "Async + sync mode"],
   },
-] as const;
+];
 
 function ModulesSection() {
   return (

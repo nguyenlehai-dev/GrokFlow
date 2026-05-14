@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import {
-  Sparkles, ImageIcon, Loader2, AlertTriangle, LogIn, Download,
+  Sparkles, ImageIcon, Loader2, AlertTriangle, Download,
   RefreshCw, Wand2, Crown, ArrowRight, Lightbulb, Zap, History,
   Lock, Check, Star, BookOpen, X, Copy, CheckCircle2,
 } from "lucide-react";
