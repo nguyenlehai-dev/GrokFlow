@@ -168,20 +168,79 @@ class GrokAPIClient:
         log: Callable[[str], None] | None = None,
     ) -> list[bytes]:
         """Submit `/imagine <prompt>` and return the bytes of every completed image."""
+        results = await self.imagine_meta(prompt, project_id=project_id, log=log)
+        return [r["bytes"] for r in results]
+
+    async def imagine_meta(
+        self,
+        prompt: str,
+        project_id: str | None = None,
+        log: Callable[[str], None] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Like imagine() but also returns each image's relative URL and UUID.
+
+        Video gen needs the image's `imageUuid` to use as parentPostId —
+        re-uploading the bytes via /upload-file gives a *different* file
+        ID that Grok rejects on the subsequent video request.
+
+        Each entry: { bytes: bytes, image_url: str, image_uuid: str }.
+        """
         body = dict(_IMAGE_BODY)
         body["message"] = (
             prompt if prompt.lstrip().startswith("/imagine") else f"/imagine {prompt}"
         )
         body["workspaceIds"] = [project_id] if project_id else []
-
         referer_path = f"/project/{project_id}" if project_id else "/"
-        return await self._submit_and_collect(
+
+        # _submit_and_collect returns bytes for finished URLs; we also need
+        # the URLs themselves, so run the lower-level collector that returns
+        # URLs and download once at the end.
+        urls = await self._stream_collect_urls(
             body=body,
             referer_path=referer_path,
             extract_asset=_extract_image_url,
             asset_label="image_chunk",
             log=log,
         )
+
+        results: list[dict[str, Any]] = []
+        async with httpx.AsyncClient(
+            timeout=self.timeout, cookies=self.cookies, follow_redirects=True
+        ) as client:
+            for url in urls:
+                full = f"{ASSETS_BASE}/{url.lstrip('/')}"
+                try:
+                    r = await client.get(
+                        full,
+                        headers={
+                            "user-agent": self.user_agent,
+                            "referer": f"{GROK_BASE}/",
+                        },
+                    )
+                except httpx.HTTPError:
+                    continue
+                if r.status_code != 200:
+                    continue
+                # imageUrl format: users/<uid>/generated/<image_uuid>/image.jpg
+                # Pull the UUID segment out — Grok uses it for parentPostId
+                # in the subsequent video gen.
+                parts = url.split("/")
+                image_uuid = ""
+                if "generated" in parts:
+                    idx = parts.index("generated")
+                    if idx + 1 < len(parts):
+                        image_uuid = parts[idx + 1]
+                results.append({
+                    "bytes": r.content,
+                    "image_url": url,
+                    "image_uuid": image_uuid,
+                })
+        if not results:
+            raise GrokAPIError(
+                "unknown_error", "all imagine assets failed to download",
+                retryable=True,
+            )
+        return results
 
     async def upload_file(
         self,
@@ -337,9 +396,12 @@ class GrokAPIClient:
                     log=log,
                 )
             except GrokAPIError as exc:
-                # Only retry on the specific 404 we keep seeing. Other
-                # errors (network, cookie, rate-limit) should surface.
-                if exc.code == "unknown_error" and "invalid-parent-post" in exc.message:
+                # Retry on the rate_limited mapping (which is what we now
+                # surface `invalid-parent-post` as) — that error can mean
+                # either the upstream profile is genuinely out of quota OR
+                # our body shape doesn't match what Grok wants. Trying the
+                # other variants helps disambiguate without re-uploading.
+                if exc.code == "rate_limited" and "quota exhausted" in exc.message:
                     last_err = exc
                     if log:
                         log(f"attempt {label} → invalid-parent-post; trying next")
@@ -349,6 +411,102 @@ class GrokAPIClient:
         raise last_err or GrokAPIError(
             "unknown_error", "all videoize variants failed", retryable=True
         )
+
+    async def _stream_collect_urls(
+        self,
+        *,
+        body: dict[str, Any],
+        referer_path: str,
+        extract_asset: EventExtractor,
+        asset_label: str,
+        log: Callable[[str], None] | None,
+    ) -> list[str]:
+        """POST to /conversations/new and return only the asset URLs found.
+
+        Same stream-parsing as `_submit_and_collect` but skips the asset
+        download step so callers that need the URL itself (video gen needs
+        the imageUuid) don't get the bytes back unnecessarily.
+        """
+
+        def _emit(msg: str) -> None:
+            if log:
+                log(msg)
+
+        urls: list[str] = []
+        soft_stopped = False
+
+        async with httpx.AsyncClient(
+            timeout=self.timeout, cookies=self.cookies, follow_redirects=True
+        ) as client:
+            try:
+                async with client.stream(
+                    "POST",
+                    GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+                    headers=self._headers(referer_path),
+                    json=body,
+                ) as resp:
+                    if resp.status_code == 401:
+                        raise GrokAPIError(
+                            "cookie_expired",
+                            "401 from /conversations/new — session cookie invalid",
+                        )
+                    if resp.status_code == 403:
+                        raise GrokAPIError(
+                            "provider_blocked",
+                            "403 — Cloudflare or statsig challenge",
+                            retryable=True,
+                        )
+                    if resp.status_code == 429:
+                        raise GrokAPIError(
+                            "rate_limited", "429 — Grok rate limit", retryable=True
+                        )
+                    if resp.status_code >= 400:
+                        snippet = (await resp.aread())[:200]
+                        snippet_text = snippet.decode("utf-8", errors="replace")
+                        if "invalid-parent-post" in snippet_text:
+                            raise GrokAPIError(
+                                "rate_limited",
+                                "Grok video quota exhausted on this profile "
+                                "— switch to another profile in the pool",
+                                retryable=True,
+                            )
+                        raise GrokAPIError(
+                            "unknown_error", f"{resp.status_code}: {snippet!r}"
+                        )
+
+                    buf = ""
+                    async for chunk in resp.aiter_text():
+                        buf += chunk
+                        last_end = 0
+                        for obj_text, end in _iter_complete_json(buf):
+                            last_end = end
+                            try:
+                                evt = json.loads(obj_text)
+                            except json.JSONDecodeError:
+                                continue
+                            url = extract_asset(evt)
+                            if url and url not in urls:
+                                urls.append(url)
+                                _emit(f"{asset_label} done: {url}")
+                            response = (evt.get("result") or {}).get("response") or {}
+                            if response.get("isSoftStop"):
+                                soft_stopped = True
+                        if last_end:
+                            buf = buf[last_end:]
+                        if soft_stopped and urls:
+                            break
+            except httpx.HTTPError as exc:
+                raise GrokAPIError(
+                    "network_error", f"HTTP error: {exc}", retryable=True
+                ) from exc
+
+            if not urls:
+                raise GrokAPIError(
+                    "unknown_error",
+                    f"stream ended without a completed {asset_label}",
+                    retryable=True,
+                )
+            return urls
 
     async def _submit_and_collect(
         self,
