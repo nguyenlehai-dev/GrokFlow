@@ -475,50 +475,88 @@ async def auto_provision_project(
                         f"Không tìm thấy nút 'New Project' trong sidebar. "
                         f"Grok có thể đã đổi UI. Sidebar text: {sidebar_text[:300]}"
                     )
+                # Race two outcomes after the click:
+                #   A) URL changes to /project/<slug>  → Grok creates the
+                #      project immediately (no modal flow). Capture the slug.
+                #   B) A naming modal/input appears   → fill name + submit
+                #      and then wait for the URL change.
+                # We can't predict which flow Grok will use (and it may
+                # change). Try A first with a shorter wait, fall back to B.
+                clicked_at_url = page.url
                 await new_btn.click()
 
-                # Modal opens. Try a generous set of selectors for the
-                # name input, and a longer timeout because the modal
-                # animation takes ~300ms.
-                input_candidates = [
-                    "[role='dialog'] input[type='text']:visible",
-                    "[role='dialog'] input:not([type='hidden']):visible",
-                    "[role='dialog'] textarea:visible",
-                    "input[placeholder*='roject' i]:visible",
-                    "input[placeholder*='name' i]:visible",
-                ]
-                name_input = None
-                for sel in input_candidates:
-                    loc = page.locator(sel).first
+                slug_captured = False
+                # ── Path A: wait for URL to switch within 8s ──
+                try:
+                    await page.wait_for_url("**/project/**", timeout=8_000)
+                    final_url = page.url
+                    m = re.search(r"/project/([^/?#]+)", final_url)
+                    if m:
+                        slug = m.group(1)
+                        slug_captured = True
+                except PWTimeout:
+                    pass
+
+                # ── Path B: modal-flow fallback ──
+                if not slug_captured:
+                    input_candidates = [
+                        "[role='dialog'] input[type='text']:visible",
+                        "[role='dialog'] input:not([type='hidden']):visible",
+                        "[role='dialog'] textarea:visible",
+                        "input[placeholder*='roject' i]:visible",
+                        "input[placeholder*='name' i]:visible",
+                    ]
+                    name_input = None
+                    for sel in input_candidates:
+                        loc = page.locator(sel).first
+                        try:
+                            await loc.wait_for(timeout=2_000, state="visible")
+                            name_input = loc
+                            break
+                        except PWTimeout:
+                            continue
+                    if name_input is not None:
+                        await name_input.fill(payload.name)
+                        create_btn = page.locator(
+                            "[role='dialog'] button:has-text('Create'), "
+                            "[role='dialog'] button:has-text('Tạo'), "
+                            "[role='dialog'] button[type='submit']"
+                        ).first
+                        if await create_btn.count() > 0:
+                            await create_btn.click()
+                        else:
+                            await name_input.press("Enter")
+                        try:
+                            await page.wait_for_url("**/project/**", timeout=15_000)
+                            m = re.search(r"/project/([^/?#]+)", page.url)
+                            if m:
+                                slug = m.group(1)
+                                slug_captured = True
+                        except PWTimeout:
+                            pass
+
+                # ── Try to rename the project on Grok side so it's
+                # findable in the sidebar (best-effort; failures don't
+                # abort the whole flow since we still have the slug). ──
+                if slug_captured:
                     try:
-                        await loc.wait_for(timeout=2_500, state="visible")
-                        name_input = loc
-                        break
-                    except PWTimeout:
-                        continue
-                if name_input is None:
-                    raise InvalidPayload(
-                        "Modal tạo project không mở hoặc UI đổi. Thử thủ công."
-                    )
-                await name_input.fill(payload.name)
-
-                # Submit: prefer the dialog's Create button, fall back to Enter.
-                create_btn = page.locator(
-                    "[role='dialog'] button:has-text('Create'), "
-                    "[role='dialog'] button:has-text('Tạo'), "
-                    "[role='dialog'] button[type='submit']"
-                ).first
-                if await create_btn.count() > 0:
-                    await create_btn.click()
-                else:
-                    await name_input.press("Enter")
-
-                # Wait for URL to settle on /project/<slug>
-                await page.wait_for_url("**/project/**", timeout=20_000)
-                final_url = page.url
-                m = re.search(r"/project/([^/?#]+)", final_url)
-                if m:
-                    slug = m.group(1)
+                        # Common title-edit patterns: contenteditable header,
+                        # an input near the top of the project page, or a
+                        # "Rename" menu item. Try fast + give up quickly.
+                        title_loc = page.locator(
+                            "[contenteditable='true']:visible, "
+                            "h1[role='textbox']:visible, "
+                            "input[aria-label*='title' i]:visible"
+                        ).first
+                        await title_loc.wait_for(timeout=3_000, state="visible")
+                        await title_loc.click()
+                        await page.keyboard.press("Control+A")
+                        await page.keyboard.type(payload.name)
+                        await page.keyboard.press("Enter")
+                    except Exception:  # noqa: BLE001
+                        # Naming Grok-side is optional — GrokFlow shows our
+                        # own `name` in the UI anyway, slug is enough.
+                        pass
             finally:
                 try:
                     await page.close()
