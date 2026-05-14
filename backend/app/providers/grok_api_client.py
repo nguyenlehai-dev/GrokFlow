@@ -25,6 +25,7 @@ Stream format (captured from devtools 2026-05-14):
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any, Callable
 
@@ -33,6 +34,7 @@ import httpx
 GROK_BASE = "https://grok.com"
 ASSETS_BASE = "https://assets.grok.com"
 ENDPOINT_NEW_CONVERSATION = "/rest/app-chat/conversations/new"
+ENDPOINT_UPLOAD_FILE = "/rest/app-chat/upload-file"
 
 # Pinned body fields for IMAGE jobs, from a verified working request.
 _IMAGE_BODY: dict[str, Any] = {
@@ -180,30 +182,106 @@ class GrokAPIClient:
             log=log,
         )
 
+    async def upload_file(
+        self,
+        content: bytes,
+        filename: str,
+        mime: str,
+        log: Callable[[str], None] | None = None,
+    ) -> dict[str, str]:
+        """Upload an image to Grok and return its metadata dict.
+
+        Response shape (captured 2026-05-14):
+          {
+            "fileMetadataId": "<uuid>",
+            "fileMimeType": "image/jpeg",
+            "fileName": "...",
+            "fileUri": "users/<user_id>/<fileMetadataId>/content",
+            ...
+          }
+
+        The `fileMetadataId` is what we plug into parentPostId and
+        fileAttachments for the video request. The `fileUri` is prefixed
+        with assets.grok.com to make the inline reference inside the
+        message body.
+        """
+        encoded = base64.b64encode(content).decode("ascii")
+        body = {
+            "fileName": filename,
+            "fileMimeType": mime,
+            "fileSource": "IMAGINE_SELF_UPLOAD_FILE_SOURCE",
+            "content": encoded,
+        }
+        async with httpx.AsyncClient(
+            timeout=self.timeout, cookies=self.cookies, follow_redirects=True
+        ) as client:
+            try:
+                resp = await client.post(
+                    GROK_BASE + ENDPOINT_UPLOAD_FILE,
+                    headers=self._headers("/imagine"),
+                    json=body,
+                )
+            except httpx.HTTPError as exc:
+                raise GrokAPIError(
+                    "network_error", f"upload-file HTTP error: {exc}", retryable=True
+                ) from exc
+            if resp.status_code == 401:
+                raise GrokAPIError("cookie_expired", "401 from upload-file")
+            if resp.status_code == 403:
+                raise GrokAPIError(
+                    "provider_blocked", "403 from upload-file", retryable=True
+                )
+            if resp.status_code >= 400:
+                raise GrokAPIError(
+                    "unknown_error",
+                    f"upload-file {resp.status_code}: {resp.text[:200]!r}",
+                )
+            try:
+                data = resp.json()
+            except json.JSONDecodeError as exc:
+                raise GrokAPIError(
+                    "unknown_error", f"upload-file bad JSON: {exc}"
+                ) from exc
+            if not data.get("fileMetadataId") or not data.get("fileUri"):
+                raise GrokAPIError(
+                    "unknown_error",
+                    f"upload-file missing ids: {data!r}",
+                )
+            if log:
+                log(f"uploaded {filename} → {data['fileMetadataId']}")
+            return data
+
     async def videoize(
         self,
         prompt: str,
         *,
+        file_metadata_id: str,
+        file_uri: str,
         aspect_ratio: str = "3:2",
         resolution: str = "720p",
         duration: int = 10,
         mode: str = "custom",
         log: Callable[[str], None] | None = None,
     ) -> list[bytes]:
-        """Submit a video-generation request and return the bytes of the .mp4."""
+        """Submit an image-to-video request and return the bytes of the .mp4.
+
+        `file_metadata_id` and `file_uri` come from `upload_file()`. The
+        message field embeds the full asset URL of the uploaded image so
+        Grok wires the image into the model's prompt; without it the
+        backend rejects the request with `invalid-parent-post`.
+        """
         # Strip any leading slash command — videoize uses --mode= suffix instead.
         clean_prompt = prompt.lstrip()
         if clean_prompt.startswith("/imagine"):
             clean_prompt = clean_prompt[len("/imagine"):].lstrip()
-        message = f"{clean_prompt} --mode={mode}"
+        asset_url = f"{ASSETS_BASE}/{file_uri.lstrip('/')}"
+        # Two spaces between URL and prompt mirror the frontend's exact wire
+        # format (captured 2026-05-14). Likely the frontend does
+        # `f"{url}  {prompt} --mode={mode}"` and Grok parses that.
+        message = f"{asset_url}  {clean_prompt} --mode={mode}"
 
-        # Notably we do NOT send parentPostId here. For fresh text-to-video
-        # the frontend omits it; Grok generates a postId and echoes it back
-        # as videoPostId in the stream. Sending a fake UUID makes Grok try
-        # to LOOK UP the parent post and 404 with `invalid-parent-post`.
-        # parentPostId is only meaningful for video-extend / video-remix,
-        # which we don't support yet.
         video_config: dict[str, Any] = {
+            "parentPostId": file_metadata_id,
             "aspectRatio": aspect_ratio,
             "videoLength": duration,
             "resolutionName": resolution,
@@ -213,6 +291,7 @@ class GrokAPIClient:
             "temporary": True,
             "modelName": "imagine-video-gen",
             "message": message,
+            "fileAttachments": [file_metadata_id],
             "enableSideBySide": True,
             "responseMetadata": {
                 "experiments": [],

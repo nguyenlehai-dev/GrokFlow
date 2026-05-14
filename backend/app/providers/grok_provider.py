@@ -12,6 +12,7 @@ import asyncio
 import os
 import re
 import time
+import uuid
 
 import asyncio as _asyncio_for_lock
 
@@ -141,18 +142,15 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            # Video API path is DISABLED. Grok's video endpoint requires a
-            # parentPostId pointing at a real image post (videos are always
-            # image-to-video; the UI generates / attaches an image first).
-            # Wiring up the multi-step image→post→video flow saves only
-            # ~15-30s out of a 90-180s job — not worth the complexity yet.
-            # Playwright video path handles this transparently via the
-            # Imagine studio. To re-enable: set GROK_VIDEO_API_ENABLED=1
-            # AND implement the image-upload step in _run_video_via_api.
+            # Video API path: image-to-video via /conversations/new with
+            # an uploaded image as parentPostId. Default ON now that the
+            # multi-step flow (optional imagine → upload → videoize) is
+            # wired up. `GROK_VIDEO_API_ENABLED=0` rolls back to pure
+            # Playwright without redeploying.
             if (
                 job.job_type == "video"
-                and os.getenv("GROK_VIDEO_API_ENABLED", "").lower()
-                in ("1", "true", "yes")
+                and os.getenv("GROK_VIDEO_API_ENABLED", "true").lower()
+                not in ("0", "false", "no")
             ):
                 api_result = await self._run_video_via_api(job)
                 if api_result is not None:
@@ -390,12 +388,18 @@ class GrokProvider(Provider):
         return client, profile_id, tag
 
     async def _run_video_via_api(self, job: JobInput) -> JobResult | None:
-        """Pure-HTTP video generation via the Imagine studio endpoint.
+        """Pure-HTTP video generation. Always image-to-video.
 
-        Body is much simpler than image — just modelName=imagine-video-gen
-        plus modelConfigOverride.videoGenModelConfig (aspect, duration,
-        resolution). Returns None on setup failure so the Playwright video
-        flow takes over.
+        Grok's video endpoint requires an existing image post — there's no
+        pure text-to-video. Flow:
+          1. If the job carries an image attachment, upload it directly.
+          2. Otherwise call imagine() to generate one from the prompt, then
+             upload the result so videoize() has something to reference.
+          3. POST /conversations/new with modelName=imagine-video-gen, the
+             uploaded image's fileMetadataId as parentPostId, and the
+             asset URL embedded in the message body.
+
+        Returns None on any failure → Playwright video flow takes over.
         """
         session = await self._build_api_session(job)
         if session is None:
@@ -404,8 +408,6 @@ class GrokProvider(Provider):
 
         opts = job.options or {}
         aspect = str(opts.get("aspect_ratio") or opts.get("aspect") or "3:2")
-        # Frontend job options may store quality as "480p"/"720p" already, or
-        # as legacy "low"/"high" — map both onto the resolution Grok accepts.
         quality = str(opts.get("resolution") or opts.get("quality") or "720p")
         if quality in ("low", "draft"):
             quality = "480p"
@@ -418,8 +420,40 @@ class GrokProvider(Provider):
         mode = str(opts.get("mode") or "custom")
 
         try:
+            # ── Source image: prefer user-attached, else generate via /imagine
+            if job.attachments:
+                att = job.attachments[0]
+                image_bytes = att.bytes
+                image_mime = att.mime or "image/jpeg"
+                image_name = att.name or "input.jpg"
+                self._log(tag, f"using job attachment ({len(image_bytes)} B)")
+            else:
+                self._log(tag, "no attachment — generating source image via /imagine")
+                imagine_results = await client.imagine(
+                    prompt=job.prompt,
+                    project_id=job.grok_project_id,
+                    log=lambda m: self._log(tag, m),
+                )
+                if not imagine_results:
+                    self._log(tag, "imagine() returned no images — fallback")
+                    return None
+                image_bytes = imagine_results[0]
+                image_mime = "image/jpeg"
+                image_name = f"{uuid.uuid4()}.jpg"
+
+            # ── Upload the image → get fileMetadataId + fileUri
+            meta = await client.upload_file(
+                content=image_bytes,
+                filename=image_name,
+                mime=image_mime,
+                log=lambda m: self._log(tag, m),
+            )
+
+            # ── Trigger video generation referencing the uploaded image
             video_bytes_list = await client.videoize(
                 prompt=job.prompt,
+                file_metadata_id=meta["fileMetadataId"],
+                file_uri=meta["fileUri"],
                 aspect_ratio=aspect,
                 resolution=quality,
                 duration=duration,
