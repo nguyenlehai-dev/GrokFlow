@@ -167,16 +167,34 @@ async def update_domain(
     if not d:
         raise NotFound("domain")
     changes: dict[str, Any] = {}
+    # Fields where `None` means "don't touch" (admin didn't send them).
     for field in (
         "label", "description", "status", "allow_landing", "allow_register",
         "allow_login", "allow_all_pages", "allowed_pages", "brand_name",
         "require_playground_key", "maintenance_mode", "maintenance_message",
-        "maintenance_starts_at", "maintenance_announcement",
+        "maintenance_announcement",
     ):
         v = getattr(payload, field)
         if v is not None:
             setattr(d, field, v)
-            changes[field] = v if not isinstance(v, list) else "updated"
+            if isinstance(v, list):
+                changes[field] = "updated"
+            elif isinstance(v, datetime):
+                changes[field] = v.isoformat()
+            else:
+                changes[field] = v
+
+    # `maintenance_starts_at` is special: admin needs to be able to
+    # CLEAR it (set to null) when the patch is done. Always honor the
+    # value sent — including None — but only log a change when something
+    # actually moved.
+    if "maintenance_starts_at" in payload.model_fields_set:
+        new_starts_at = payload.maintenance_starts_at
+        if d.maintenance_starts_at != new_starts_at:
+            d.maintenance_starts_at = new_starts_at
+            changes["maintenance_starts_at"] = (
+                new_starts_at.isoformat() if new_starts_at else None
+            )
     # Re-sync nginx config: status flip or hostname change could need add/remove.
     if d.hostname != "*":
         if d.status == "active":
