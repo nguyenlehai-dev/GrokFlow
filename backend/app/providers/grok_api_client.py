@@ -26,7 +26,6 @@ Stream format (captured from devtools 2026-05-14):
 from __future__ import annotations
 
 import json
-import uuid
 from typing import Any, Callable
 
 import httpx
@@ -198,10 +197,17 @@ class GrokAPIClient:
             clean_prompt = clean_prompt[len("/imagine"):].lstrip()
         message = f"{clean_prompt} --mode={mode}"
 
-        # The frontend generates a fresh UUID for the post; server reuses it
-        # as the videoPostId. parentPostId == this id means "fresh generation"
-        # (not a remix or extension).
-        post_id = str(uuid.uuid4())
+        # Notably we do NOT send parentPostId here. For fresh text-to-video
+        # the frontend omits it; Grok generates a postId and echoes it back
+        # as videoPostId in the stream. Sending a fake UUID makes Grok try
+        # to LOOK UP the parent post and 404 with `invalid-parent-post`.
+        # parentPostId is only meaningful for video-extend / video-remix,
+        # which we don't support yet.
+        video_config: dict[str, Any] = {
+            "aspectRatio": aspect_ratio,
+            "videoLength": duration,
+            "resolutionName": resolution,
+        }
 
         body = {
             "temporary": True,
@@ -212,12 +218,7 @@ class GrokAPIClient:
                 "experiments": [],
                 "modelConfigOverride": {
                     "modelMap": {
-                        "videoGenModelConfig": {
-                            "parentPostId": post_id,
-                            "aspectRatio": aspect_ratio,
-                            "videoLength": duration,
-                            "resolutionName": resolution,
-                        }
+                        "videoGenModelConfig": video_config,
                     }
                 },
             },
