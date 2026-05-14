@@ -37,7 +37,8 @@ _STATSIG_TTL_S = 3600.0
 # pay the connect cost, and the rest reuse them. Cookies for the
 # session change rarely — sso/sso-rw last days, cf_clearance ~2h.
 _COOKIES_CACHE: dict[str, tuple[dict[str, str], str, float]] = {}
-_COOKIES_TTL_S = 1800.0  # 30 min — well under cf_clearance's ~2h lifetime
+_COOKIES_TTL_S = 600.0  # 10 min — short enough that stale cookies are
+                        # rare; cache miss triggers a sub-second CDP read.
 
 # Per-profile capture lock. Without this, when N concurrent jobs land on
 # the same profile and the statsig cache is cold, each one opens its own
@@ -636,8 +637,13 @@ class GrokProvider(Provider):
             )
         except GrokAPIError as exc:
             self._log(tag, f"API error: {exc.code} — {exc.message}")
-            if exc.code == "provider_blocked":
-                _STATSIG_CACHE.pop(profile_id, None)
+            # Bust BOTH caches on any API failure — the most common cause
+            # is a stale cf_clearance or rotated statsig token. Forcing
+            # the next call to do a fresh CDP capture is way cheaper than
+            # falling all the way through to a 180s Playwright timeout.
+            _STATSIG_CACHE.pop(profile_id, None)
+            _STATSIG_CACHE.pop(f"{profile_id}:video", None)
+            _COOKIES_CACHE.pop(profile_id, None)
             if exc.code == "cookie_expired":
                 return JobResult(
                     success=False,
