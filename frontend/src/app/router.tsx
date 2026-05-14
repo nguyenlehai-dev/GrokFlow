@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { PublicRouteGuard } from "@/components/layout/PublicRouteGuard";
+import { RouteErrorBoundary } from "@/components/layout/RouteErrorBoundary";
 
 import { LoginPage } from "@/modules/auth/LoginPage";
 import { RegisterPage } from "@/modules/auth/RegisterPage";
@@ -23,10 +24,12 @@ export const router = createBrowserRouter([
   {
     path: "/landing",
     element: <PublicRouteGuard flag="allow_landing"><LandingPage /></PublicRouteGuard>,
+    errorElement: <RouteErrorBoundary />,
   },
   {
     path: "/login",
     element: <PublicRouteGuard flag="allow_login"><LoginPage /></PublicRouteGuard>,
+    errorElement: <RouteErrorBoundary />,
   },
   {
     path: "/register",
@@ -35,6 +38,7 @@ export const router = createBrowserRouter([
         <RegisterPage />
       </PublicRouteGuard>
     ),
+    errorElement: <RouteErrorBoundary />,
   },
   {
     path: "/",
@@ -43,10 +47,17 @@ export const router = createBrowserRouter([
         <AppShell />
       </ProtectedRoute>
     ),
+    // Single errorElement on the authed shell catches 404s from missing
+    // module routes + thrown errors from lazy-loaded pages. Replaces the
+    // dev-y default "💿 Hey developer 👋" message with a real UX.
+    errorElement: <RouteErrorBoundary />,
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
       // Routes are contributed by each registered module's manifest.
       ...getAuthedRoutes(),
+      // Catch-all so unknown authed URLs land in the error boundary as a
+      // proper 404 instead of a blank screen.
+      { path: "*", element: <RouteErrorBoundary /> },
     ],
   },
 ]);
