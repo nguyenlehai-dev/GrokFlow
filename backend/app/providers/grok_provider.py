@@ -142,21 +142,17 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            # Video API path is OFF by default. After three rounds of
-            # trying (re-upload via /upload-file, then imageUuid direct
-            # from chat /imagine, with three body-shape variants for
-            # each) Grok still 404s every video request with
-            # `invalid-parent-post`. The Playwright fallback running on
-            # the SAME profile succeeds, so it's not quota — Grok video
-            # gen needs a real Imagine-studio post id, which is created
-            # by a different endpoint than chat /imagine. Until we
-            # capture that endpoint, Playwright stays the production
-            # video path. Set GROK_VIDEO_API_ENABLED=1 to re-enable for
-            # further debugging.
+            # Video API path: image-to-video via /conversations/new. The
+            # previous failures (invalid-parent-post on every variant)
+            # turned out to be a missing piece — the session must be in
+            # "Imagine studio" state before the video gen request lands,
+            # otherwise Grok rejects every parentPostId. The fix is in
+            # _capture_statsig_id which now navigates to /imagine first
+            # for video jobs, warming the session. Default ON now.
             if (
                 job.job_type == "video"
-                and os.getenv("GROK_VIDEO_API_ENABLED", "").lower()
-                in ("1", "true", "yes")
+                and os.getenv("GROK_VIDEO_API_ENABLED", "true").lower()
+                not in ("0", "false", "no")
             ):
                 api_result = await self._run_video_via_api(job)
                 if api_result is not None:
@@ -218,7 +214,7 @@ class GrokProvider(Provider):
         # Re-query to get the canonical info shape (cdp_endpoint etc.)
         return vnc_manager.get_for_profile(profile_id)
 
-    async def _capture_statsig_id(self, ctx, tag: str) -> str | None:
+    async def _capture_statsig_id(self, ctx, tag: str, *, for_video: bool = False) -> str | None:
         """Snatch the `x-statsig-id` header off any outgoing /rest/* request.
 
         Statsig's client SDK computes this header on every fetch using a
@@ -253,16 +249,26 @@ class GrokProvider(Provider):
         page = None
         try:
             page = await ctx.new_page()
-            # `about:blank` is enough — Statsig is initialised on any page
-            # of the same origin via the service worker / shared state, but
-            # to be safe we navigate to grok.com root (cached, ~200ms).
+            # For video jobs, navigate to /imagine FIRST. Grok's server
+            # appears to gate video gen on whether the session is in an
+            # "Imagine studio active" state — the captured working cURL
+            # carries `referer: /imagine` and a session set by Imagine
+            # studio. Without warming this path, subsequent video POSTs
+            # fail with `invalid-parent-post` even with valid parentPostId.
+            target_url = (
+                "https://grok.com/imagine"
+                if for_video
+                else "https://grok.com/"
+            )
             try:
                 await page.goto(
-                    "https://grok.com/", wait_until="domcontentloaded", timeout=8000
+                    target_url, wait_until="domcontentloaded", timeout=8000
                 )
+                # Let Imagine studio JS finish hydrating + register the
+                # session — empirical 1.5s covers cold load on a fresh tab.
+                if for_video:
+                    await asyncio.sleep(1.5)
             except PWTimeout:
-                # Even on timeout, page handlers may still fire — give the
-                # listener a chance before bailing.
                 pass
 
             # Trigger a benign /rest/* call so the Statsig header lands on
@@ -331,6 +337,10 @@ class GrokProvider(Provider):
 
         cookies_dict: dict[str, str] = {}
         statsig_id: str | None = None
+        is_video = job.job_type == "video"
+        # Cache statsig separately for image vs video — they need different
+        # session contexts (chat home vs /imagine studio).
+        cache_key = f"{profile_id}:video" if is_video else profile_id
         try:
             async with async_playwright() as p:
                 try:
@@ -344,17 +354,23 @@ class GrokProvider(Provider):
                 if ctx is None:
                     self._log(tag, "no browser context — fallback")
                     return None
-                raw_cookies = await ctx.cookies("https://grok.com")
-                cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
 
-                cached = _STATSIG_CACHE.get(profile_id)
+                # Capture statsig (this also warms the session for video by
+                # navigating to /imagine first, which Grok requires before
+                # accepting video gen requests).
+                cached = _STATSIG_CACHE.get(cache_key)
                 if cached and time.monotonic() - cached[1] < _STATSIG_TTL_S:
                     statsig_id = cached[0]
-                    self._log(tag, "statsig cache hit")
+                    self._log(tag, f"statsig cache hit ({'video' if is_video else 'image'})")
                 else:
-                    statsig_id = await self._capture_statsig_id(ctx, tag)
+                    statsig_id = await self._capture_statsig_id(ctx, tag, for_video=is_video)
                     if statsig_id:
-                        _STATSIG_CACHE[profile_id] = (statsig_id, time.monotonic())
+                        _STATSIG_CACHE[cache_key] = (statsig_id, time.monotonic())
+
+                # Extract cookies AFTER navigating — /imagine may set
+                # additional session cookies needed by the video endpoint.
+                raw_cookies = await ctx.cookies("https://grok.com")
+                cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
         except Exception as exc:  # noqa: BLE001
             self._log(tag, f"cookie/statsig extraction failed: {exc}")
             return None
