@@ -607,7 +607,17 @@ class GrokProvider(Provider):
         Gated behind GROK_API_ENABLED env var. Default `true` now that
         x-statsig-id capture works; set `GROK_API_ENABLED=0` to roll back
         to pure-Playwright operation without redeploying.
+
+        Image-to-image (job carries an input attachment) is NOT supported
+        on this path yet — the simple `/imagine <prompt>` slash command
+        doesn't accept image attachments inline, so the API would silently
+        ignore the input and generate from text only. Return None so the
+        Playwright path (which has `_attach_files` wired up) runs.
         """
+        if job.attachments:
+            # No log spam — this is the expected fallback for img2img.
+            return None
+
         session = await self._build_api_session(job)
         if session is None:
             return None
