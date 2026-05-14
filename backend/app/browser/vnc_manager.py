@@ -106,9 +106,19 @@ def start_for_profile(profile_id: str, profile_path: str, provider_url: str) -> 
                 "reused": True,
                 "ready": True,
             }
-        c.remove(force=True)
+        # Not running → remove. force=True handles "created" / "exited" /
+        # "dead" / "removing" alike; ignore errors so we proceed to create.
+        try:
+            c.remove(force=True)
+        except (APIError, NotFound) as exc:
+            print(f"[vnc] pre-cleanup remove failed for {name}: {exc}", flush=True)
     except NotFound:
         pass
+    except APIError as exc:
+        # get() can race with a slow remove or hit transient daemon errors.
+        # Log + fall through; the conflict-on-create retry below will cover
+        # the rare case where a same-named container materializes anyway.
+        print(f"[vnc] get() error for {name}, will try to create anyway: {exc}", flush=True)
 
     host_profile_path = _container_to_host_path(profile_path)
     _fix_profile_perms(host_profile_path)
@@ -119,7 +129,7 @@ def start_for_profile(profile_id: str, profile_path: str, provider_url: str) -> 
     # Override via env if you scale slots beyond 4 or up to multiple profiles.
     mem_limit = os.environ.get("VNC_MEM_LIMIT", "4g")
     cpu_quota = int(os.environ.get("VNC_CPU_QUOTA", "200000"))  # 2.0 CPU
-    container = cli.containers.run(
+    run_kwargs = dict(
         image=VNC_IMAGE,
         name=name,
         environment={
@@ -140,6 +150,25 @@ def start_for_profile(profile_id: str, profile_path: str, provider_url: str) -> 
         labels={"grokflow.profile_id": str(profile_id)},
         security_opt=["seccomp=unconfined"],
     )
+
+    # If a same-named container is wedged (created/exited/removing) the
+    # pre-cleanup above sometimes misses it. Treat 409 as "stale leftover,
+    # force-remove by name, retry once". After retry we re-raise so the
+    # caller gets a real error instead of silently spinning.
+    try:
+        container = cli.containers.run(**run_kwargs)
+    except APIError as exc:
+        if exc.response is None or exc.response.status_code != 409:
+            raise
+        print(f"[vnc] 409 conflict on create '{name}' — force-removing leftover and retrying", flush=True)
+        try:
+            stale = cli.containers.get(name)
+            stale.remove(force=True)
+        except NotFound:
+            pass
+        except APIError as inner:
+            print(f"[vnc] could not remove leftover {name}: {inner}", flush=True)
+        container = cli.containers.run(**run_kwargs)
 
     deadline = time.monotonic() + 60
     novnc_ready = cdp_ready = False
