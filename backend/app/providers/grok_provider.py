@@ -780,16 +780,34 @@ class GrokProvider(Provider):
                     try:
                         urls = await page.evaluate(
                             """() => {
-                                // Only accept URLs whose PATH contains
-                                // /generated/ — project icons, avatars,
-                                // and other Grok CDN assets don't have
-                                // that segment.
+                                // Accept Grok-rendered media URLs but
+                                // REJECT the obvious non-result assets
+                                // (project sidebar icons, avatars). A
+                                // generated image's URL on the asset
+                                // CDN either contains /generated/ in
+                                // the path OR ends in a real image
+                                // filename like image.jpg. Project
+                                // icons end with /content (no extension)
+                                // and have a grok-project- prefix.
                                 const ok = s => {
                                     if (!s) return false;
-                                    // Reject obvious non-result assets early.
                                     if (s.includes('grok-project-')) return false;
-                                    if (s.endsWith('/content')) return false;
-                                    return /\\/generated\\//i.test(s);
+                                    // /content (no file extension) is
+                                    // how Grok serves uploaded files /
+                                    // project icons — never a real
+                                    // generated image.
+                                    if (/\\/content(\\?|$)/.test(s)) return false;
+                                    // Require the URL to look like a
+                                    // Grok asset URL with an image
+                                    // extension OR a /generated/ path.
+                                    if (/\\/generated\\//i.test(s)) return true;
+                                    if (/\\.(jpe?g|png|webp)(\\?|$)/i.test(s)
+                                        && (s.includes('assets.grok.com')
+                                            || s.includes('assets.x.ai')
+                                            || s.includes('grok-content'))) {
+                                        return true;
+                                    }
+                                    return false;
                                 };
                                 return Array.from(document.querySelectorAll('img'))
                                     .map(i => i.src).filter(ok);
