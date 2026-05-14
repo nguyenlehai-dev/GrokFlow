@@ -483,7 +483,17 @@ async def auto_provision_project(
                 # We can't predict which flow Grok will use (and it may
                 # change). Try A first with a shorter wait, fall back to B.
                 clicked_at_url = page.url
-                await new_btn.click()
+                # Use force=True to bypass any actionability check that
+                # might silently no-op on subtle overlay styles, and try
+                # a real mouse-style click as backup.
+                try:
+                    await new_btn.click(timeout=5_000)
+                except Exception:  # noqa: BLE001
+                    try:
+                        await new_btn.click(force=True, timeout=3_000)
+                    except Exception:  # noqa: BLE001
+                        # Last resort: dispatch the DOM click event.
+                        await new_btn.evaluate("el => el.click()")
 
                 slug_captured = False
                 # ── Path A: wait for URL to switch within 8s ──
@@ -578,9 +588,33 @@ async def auto_provision_project(
         )
 
     if not slug:
+        # Capture rich diagnostic so the next iteration of selectors can
+        # be informed. Snapshot the page URL + a chunk of innerText —
+        # base64-tagged in the error so super_admin can paste back.
+        diag = "(no diagnostic captured)"
+        try:
+            async with async_playwright() as pw:  # re-connect briefly
+                browser = await pw.chromium.connect_over_cdp(ws_url, timeout=8_000)
+                ctx = browser.contexts[0]
+                # Find a page still on grok.com (we may have multiple).
+                grok_page = None
+                for p in ctx.pages:
+                    if "grok.com" in p.url:
+                        grok_page = p
+                        break
+                if grok_page:
+                    url_now = grok_page.url
+                    body = await grok_page.evaluate(
+                        "() => document.body.innerText.split('\\n').filter(s => s.trim()).slice(0, 40).join(' | ')"
+                    )
+                    diag = f"current_url={url_now} | first_lines={body[:600]}"
+                await browser.close()
+        except Exception as exc:  # noqa: BLE001
+            diag = f"diag-capture-error: {exc}"
         raise InvalidPayload(
-            "Tạo project xong nhưng không capture được slug. "
-            "Kiểm tra trên grok.com rồi paste thủ công."
+            f"Click button OK nhưng URL không chuyển sang /project/<slug>. "
+            f"Có thể Grok hiện confirmation modal khác hoặc UI đã đổi. "
+            f"DIAG: {diag}"
         )
 
     # Same uniqueness guard as manual create.
