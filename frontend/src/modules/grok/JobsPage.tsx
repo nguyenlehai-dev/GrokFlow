@@ -159,26 +159,28 @@ export function JobsPage() {
   useEffect(() => { setPage(1); }, [statusFilter, providerFilter, typeFilter, search, pageSize]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-semibold">Jobs</h1>
+    <div className="space-y-5">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Jobs</h1>
+          <p className="page-subtitle">
+            Theo dõi tất cả job AI đang chạy. Refresh tự động mỗi 5 giây.
+          </p>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           {inFlightCount > 0 && (
             <button
               onClick={() => {
                 if (confirm(`Cancel ${inFlightCount} job đang chạy / chờ?`)) cancelAll.mutate();
               }}
-              className="btn-ghost text-amber-600 inline-flex items-center gap-1.5"
+              className="btn-secondary text-amber-700 border-amber-200 hover:border-amber-300"
               disabled={cancelAll.isPending}
             >
-              <Ban size={14} />
+              <Ban size={15} />
               {cancelAll.isPending ? "Đang cancel..." : `Cancel all (${inFlightCount})`}
             </button>
           )}
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="btn-primary inline-flex items-center gap-1.5"
-          >
+          <button onClick={() => setCreateOpen(true)} className="btn-primary">
             <Plus size={16} />
             Tạo job
           </button>
@@ -186,33 +188,33 @@ export function JobsPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="card flex flex-wrap items-center gap-2 p-3">
+      <div className="card flex flex-wrap items-center gap-2.5 py-3.5">
         <input
           type="text"
-          placeholder="Tìm prompt..."
-          className="input w-48 py-1.5"
+          placeholder="🔍  Tìm prompt..."
+          className="input w-56 input-sm"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select className="input w-auto py-1.5" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select className="input input-sm w-auto" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           {STATUS_FILTERS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
         </select>
-        <select className="input w-auto py-1.5" value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
+        <select className="input input-sm w-auto" value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
           {PROVIDER_FILTERS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
         </select>
-        <select className="input w-auto py-1.5" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+        <select className="input input-sm w-auto" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
           {TYPE_FILTERS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
         </select>
         {(search || statusFilter || providerFilter || typeFilter) && (
           <button
-            className="btn-ghost text-xs"
+            className="btn-ghost btn-sm"
             onClick={() => { setSearch(""); setStatusFilter(""); setProviderFilter(""); setTypeFilter(""); }}
           >
             Clear filter
           </button>
         )}
-        <div className="ml-auto text-xs text-slate-500">
-          {total} jobs
+        <div className="ml-auto text-xs text-ink-500 font-medium">
+          <span className="text-ink-900 font-bold">{total}</span> jobs total
         </div>
       </div>
 

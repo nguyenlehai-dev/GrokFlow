@@ -237,7 +237,7 @@ function DomainEditorModal({
   const isDefault = domain?.hostname === "*";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
       <div className="w-full max-w-2xl max-h-[95vh] overflow-auto rounded-lg bg-white p-5 shadow-xl space-y-4">
         <h2 className="text-lg font-semibold">
           {isCreate ? "Tạo domain mới" : `Sửa: ${domain?.hostname}`}

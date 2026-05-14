@@ -28,7 +28,7 @@ export function UploadCookiesModal({ profileId, onClose }: { profileId: string; 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
       <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-lg space-y-4">
         <h2 className="text-lg font-semibold">Upload cookies cho profile</h2>
         <div className="text-sm text-slate-600 space-y-2">

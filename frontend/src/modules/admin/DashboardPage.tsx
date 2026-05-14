@@ -95,16 +95,19 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-semibold">Dashboard</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Auto-refresh mỗi 15s · {scope === "admin" ? "Toàn hệ thống" : "Của bạn"}
+          <h1 className="page-title">
+            Dashboard <span className="text-gradient">{scope === "admin" ? "System" : "Personal"}</span>
+          </h1>
+          <p className="page-subtitle flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-soft" />
+            Auto-refresh mỗi 15s · {PERIOD_LABEL[period]}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {isAdmin && (
-            <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 mr-2">
+            <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 shadow-card">
               <ScopeBtn active={scope === "admin"} onClick={() => setScope("admin")}>System</ScopeBtn>
               <ScopeBtn active={scope === "me"} onClick={() => setScope("me")}>Của tôi</ScopeBtn>
             </div>
@@ -114,9 +117,11 @@ export function DashboardPage() {
       </div>
 
       {isLoading && !data ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => <div key={i} className="skeleton h-24 rounded-2xl" />)}
+        </div>
       ) : error && !data ? (
-        <div className="card text-rose-600 text-sm">
+        <div className="alert-danger">
           Không tải được dashboard: {(error as any)?.message ?? "lỗi"}
         </div>
       ) : data ? (
@@ -379,10 +384,12 @@ function Kpi({ label, value, sub, accent }: {
   label: string; value: number | string; sub?: string; accent?: string;
 }) {
   return (
-    <div className="card">
-      <div className="text-sm text-slate-500">{label}</div>
-      <div className={`mt-2 text-3xl font-semibold ${accent ?? "text-slate-900"}`}>{value}</div>
-      {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
+    <div className="card-hover">
+      <div className="stat-label">{label}</div>
+      <div className={`mt-2 text-3xl font-bold tracking-tight ${accent ?? "text-ink-900"}`}>
+        {value}
+      </div>
+      {sub && <div className="text-xs text-ink-500 mt-1.5">{sub}</div>}
     </div>
   );
 }
@@ -393,8 +400,10 @@ function ScopeBtn({ active, onClick, children }: {
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-1.5 text-xs rounded transition ${
-        active ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-50"
+      className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+        active
+          ? "bg-gradient-brand text-white shadow-brand"
+          : "text-ink-600 hover:bg-ink-100 hover:text-ink-900"
       }`}
     >
       {children}
@@ -404,13 +413,15 @@ function ScopeBtn({ active, onClick, children }: {
 
 function PeriodTabs({ value, onChange }: { value: Period; onChange: (v: Period) => void }) {
   return (
-    <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5">
+    <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 shadow-card">
       {(["all", "today", "week", "month"] as Period[]).map((p) => (
         <button
           key={p}
           onClick={() => onChange(p)}
-          className={`px-3 py-1.5 text-xs rounded transition ${
-            value === p ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-50"
+          className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+            value === p
+              ? "bg-gradient-brand text-white shadow-brand"
+              : "text-ink-600 hover:bg-ink-100 hover:text-ink-900"
           }`}
         >
           {PERIOD_LABEL[p]}

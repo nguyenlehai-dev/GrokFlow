@@ -299,7 +299,7 @@ function SubscriptionEditorModal({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
       <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">
           {isCreate ? "Tạo subscription" : `Sửa subscription`}
@@ -529,7 +529,7 @@ function PaymentEditorModal({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
       <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">{isCreate ? "Tạo payment" : "Sửa payment"}</h2>
         {isCreate && (
@@ -757,7 +757,7 @@ function InvoiceEditorModal({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
       <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">{isCreate ? "Tạo invoice" : `Sửa ${inv?.invoice_number}`}</h2>
         {isCreate && (

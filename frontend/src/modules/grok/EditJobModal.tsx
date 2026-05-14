@@ -24,7 +24,7 @@ export function EditJobModal({ job, onClose }: { job: Job; onClose: () => void }
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
       <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Sửa prompt — {job.id.slice(0, 8)}</h2>

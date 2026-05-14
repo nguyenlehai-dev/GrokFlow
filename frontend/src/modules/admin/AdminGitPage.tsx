@@ -561,7 +561,7 @@ function RepoEditorModal({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
       <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl space-y-3">
         <h2 className="text-lg font-semibold">
           {isCreate ? "Tạo git repo mới" : `Sửa: ${repo?.label}`}

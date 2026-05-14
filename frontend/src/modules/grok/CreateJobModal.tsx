@@ -201,11 +201,29 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     p.status === "logged_in" || p.status === "running_job";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-3xl rounded-lg bg-white p-6 shadow-xl space-y-4 max-h-[95vh] overflow-auto">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Tạo Job mới (giống Grok)</h2>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm p-4 animate-fade-in">
+      <form
+        onSubmit={handleSubmit(onSubmit)}
+        className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card-hover space-y-4 max-h-[95vh] overflow-auto animate-scale-in border border-ink-200/60"
+      >
+        <div className="flex items-center justify-between pb-3 border-b border-ink-100">
+          <div>
+            <h2 className="text-xl font-bold text-ink-900 flex items-center gap-2">
+              <span className="w-8 h-8 rounded-lg bg-gradient-brand text-white flex items-center justify-center">
+                <ImageIcon size={16} />
+              </span>
+              Tạo Job mới
+            </h2>
+            <p className="text-xs text-ink-500 mt-1">Cấu hình giống Grok Imagine UI</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg text-ink-400 hover:text-ink-900 hover:bg-ink-100 flex items-center justify-center transition-colors"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         <div className="grid grid-cols-3 gap-3">
