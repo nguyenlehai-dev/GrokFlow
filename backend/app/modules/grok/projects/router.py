@@ -351,6 +351,169 @@ async def get_project_users(
     return ProjectUsersOut(project_id=project_id, user_ids=list(rows))
 
 
+class ProjectAutoProvisionIn(BaseModel):
+    profile_id: uuid.UUID
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    domain_ids: list[uuid.UUID] = Field(default_factory=list)
+    user_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+@router.post("/auto-provision", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+async def auto_provision_project(
+    payload: ProjectAutoProvisionIn,
+    _super: SuperAdminUser,
+    db: DbSession,
+) -> ProjectOut:
+    """Drive the profile's Chromium (via CDP) to create a Grok project,
+    capture the resulting URL slug, and persist GrokProject + assignments
+    in one shot. The profile MUST have a running VNC container (status
+    logged_in or running_job) — otherwise we have no CDP endpoint to
+    connect to.
+
+    Selector strategy (best-effort against grok.com as of late 2025):
+      1. Goto https://grok.com
+      2. Click "+ New Project" in the left sidebar
+      3. Type the name into the create-project modal input
+      4. Press Enter / click "Create"
+      5. Wait for URL to change to /project/<slug>
+      6. Extract <slug> from the URL
+
+    If any step times out we raise a clear 502 so the FE can fall back
+    to manual entry.
+    """
+    profile = await db.get(Profile, payload.profile_id)
+    if not profile:
+        raise NotFound("profile")
+    if profile.status not in ("logged_in", "running_job"):
+        raise InvalidPayload(
+            f"Profile chưa logged_in (status={profile.status}). "
+            "Auto-login trước khi auto-provision."
+        )
+
+    # Late imports — playwright + docker are heavy and unused by other
+    # endpoints in this file.
+    from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+
+    cdp_endpoint = f"http://grokflow-vnc-{str(profile.id).replace('-','')[:12]}:9223"
+
+    slug: str | None = None
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(cdp_endpoint, timeout=10_000)
+            ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = await ctx.new_page()
+            try:
+                await page.goto("https://grok.com/", wait_until="domcontentloaded", timeout=20_000)
+                # New Project button — try multiple selectors so a Grok UI
+                # tweak doesn't immediately break this.
+                new_btn = page.locator(
+                    "button:has-text('New Project'), "
+                    "a:has-text('New Project'), "
+                    "[aria-label*='Project']:has-text('New')"
+                ).first
+                await new_btn.wait_for(timeout=8_000)
+                await new_btn.click()
+
+                # Name input — usually first visible textarea/input in the
+                # modal. Try a few common shapes.
+                name_input = page.locator(
+                    "[role='dialog'] input:not([type='hidden']):visible, "
+                    "[role='dialog'] textarea:visible, "
+                    "input[placeholder*='roject']:visible"
+                ).first
+                await name_input.wait_for(timeout=8_000)
+                await name_input.fill(payload.name)
+
+                # Submit — Enter or Create button
+                create_btn = page.locator(
+                    "[role='dialog'] button:has-text('Create'), "
+                    "[role='dialog'] button[type='submit']"
+                ).first
+                if await create_btn.count() > 0:
+                    await create_btn.click()
+                else:
+                    await name_input.press("Enter")
+
+                # Wait for URL to settle on /project/<slug>
+                await page.wait_for_url("**/project/**", timeout=15_000)
+                final_url = page.url
+                import re
+                m = re.search(r"/project/([^/?#]+)", final_url)
+                if m:
+                    slug = m.group(1)
+            finally:
+                try:
+                    await page.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    await browser.close()
+                except Exception:  # noqa: BLE001
+                    pass
+    except PWTimeout as exc:
+        raise InvalidPayload(
+            f"Auto-provision timeout — Grok UI may have changed. "
+            f"Tạo thủ công đi: {exc}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidPayload(
+            f"Auto-provision failed ({type(exc).__name__}): {exc}. "
+            "Kiểm tra VNC profile rồi thử lại."
+        )
+
+    if not slug:
+        raise InvalidPayload(
+            "Tạo project xong nhưng không capture được slug. "
+            "Kiểm tra trên grok.com rồi paste thủ công."
+        )
+
+    # Same uniqueness guard as manual create.
+    dup = (
+        await db.execute(
+            select(GrokProject).where(
+                GrokProject.profile_id == payload.profile_id,
+                GrokProject.grok_project_id == slug,
+            )
+        )
+    ).scalar_one_or_none()
+    if dup:
+        raise InvalidPayload(
+            f"Slug '{slug}' đã tồn tại — Grok có thể đã có project trùng tên."
+        )
+
+    p = GrokProject(
+        profile_id=payload.profile_id,
+        grok_project_id=slug,
+        name=payload.name.strip(),
+        description=payload.description,
+    )
+    db.add(p)
+    await db.flush()
+
+    # Apply domain + user assignments in the same transaction so the
+    # caller doesn't see a half-provisioned project.
+    for did in payload.domain_ids:
+        db.add(ProjectDomainAssignment(project_id=p.id, domain_id=did))
+    for uid in payload.user_ids:
+        db.add(ProjectUserAssignment(project_id=p.id, user_id=uid))
+
+    await audit.log_action(
+        db, user_id=_super.id, action="grok_project_auto_provisioned",
+        target_type="grok_project", target_id=p.id,
+        metadata={
+            "profile_id": str(payload.profile_id),
+            "slug": slug,
+            "name": p.name,
+            "domain_count": len(payload.domain_ids),
+            "user_count": len(payload.user_ids),
+        },
+    )
+    await db.commit()
+    await db.refresh(p)
+    return _serialize(p, len(payload.domain_ids))
+
+
 @router.put("/{project_id}/users", response_model=ProjectUsersOut)
 async def set_project_users(
     project_id: uuid.UUID, payload: ProjectUsersUpdate,

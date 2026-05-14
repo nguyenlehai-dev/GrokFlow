@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   X, Plus, Pencil, Trash2, Layers, Globe, ExternalLink, Save,
-  ChevronDown, ChevronRight, User as UserIcon, Pin,
+  ChevronDown, ChevronRight, User as UserIcon, Pin, Wand2, Loader2,
 } from "lucide-react";
 
 import { api } from "@/core/api/axios";
@@ -51,6 +51,7 @@ export function ProjectsModal({
   });
 
   const [creating, setCreating] = useState(false);
+  const [autoProvision, setAutoProvision] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
   const [assigning, setAssigning] = useState<Project | null>(null);
 
@@ -87,12 +88,22 @@ export function ProjectsModal({
             <p className="text-sm text-slate-600">
               {projects?.length ?? 0} project — bấm + để đăng ký project mới đã tạo trên grok.com
             </p>
-            <button
-              onClick={() => setCreating(true)}
-              className="btn-primary inline-flex items-center gap-1.5 text-sm"
-            >
-              <Plus size={14} /> Thêm project
-            </button>
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => setAutoProvision(true)}
+                className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-3 py-1.5 text-sm font-semibold hover:from-violet-700 hover:to-fuchsia-700 shadow-sm"
+                title="Tự động mở Grok qua browser của profile, tạo project, capture slug"
+              >
+                <Wand2 size={14} /> Tạo tự động
+              </button>
+              <button
+                onClick={() => setCreating(true)}
+                className="inline-flex items-center gap-1.5 rounded-md bg-white border border-slate-300 text-slate-700 px-3 py-1.5 text-sm font-semibold hover:bg-slate-50"
+                title="Tự copy slug từ grok.com vào đây"
+              >
+                <Plus size={14} /> Thủ công
+              </button>
+            </div>
           </div>
 
           {isLoading ? (
@@ -130,6 +141,13 @@ export function ProjectsModal({
         </footer>
       </div>
 
+      {autoProvision && (
+        <AutoProvisionModal
+          profileId={profileId}
+          profileName={profileName}
+          onClose={() => setAutoProvision(false)}
+        />
+      )}
       {creating && (
         <ProjectEditorModal
           profileId={profileId}
@@ -521,6 +539,171 @@ function DomainRow({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Auto-provision modal ─────────────────────────────────────────────────
+
+/** Driver script provisions a Grok project automatically:
+ *    open Grok in profile's VNC browser → click "New Project" →
+ *    fill name → capture slug → save to DB + apply assignments.
+ *
+ *  Saves the super_admin the manual copy/paste flow. The backend
+ *  endpoint connects to the profile's CDP port; profile MUST be
+ *  logged_in for this to work. */
+function AutoProvisionModal({
+  profileId, profileName, onClose,
+}: { profileId: string; profileName: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+
+  const { data: domains } = useQuery({
+    queryKey: ["admin-domains"],
+    queryFn: async () => (await api.get<Domain[]>("/api/admin/domains")).data,
+  });
+  const tenantDomains = (domains ?? []).filter((d) => d.hostname !== "*");
+  const [selectedDomains, setSelectedDomains] = useState<Set<string>>(new Set());
+  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+
+  const toggleDomain = (id: string) => {
+    const next = new Set(selectedDomains);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedDomains(next);
+  };
+  const toggleUser = (id: string) => {
+    const next = new Set(selectedUsers);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedUsers(next);
+  };
+
+  const provision = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<Project>("/api/grok-projects/auto-provision", {
+        profile_id: profileId,
+        name: name.trim(),
+        description: description || null,
+        domain_ids: Array.from(selectedDomains),
+        user_ids: Array.from(selectedUsers),
+      });
+      return data;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["grok-projects", profileId] });
+      qc.invalidateQueries({ queryKey: ["profiles"] });
+      toast(`Đã tự tạo project "${data.name}" · slug ${data.grok_project_id}`, "success");
+      onClose();
+    },
+    onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Auto-provision lỗi", "error"),
+  });
+
+  const disabled = !name.trim() || provision.isPending;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4">
+      <div className="w-full max-w-lg max-h-[92vh] rounded-xl bg-white shadow-xl flex flex-col">
+        <div className="flex items-center justify-between border-b px-4 py-3 bg-gradient-to-r from-violet-50 to-fuchsia-50">
+          <div>
+            <h3 className="font-semibold inline-flex items-center gap-2">
+              <Wand2 size={16} className="text-violet-600" /> Auto-provision project
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Profile <code className="font-mono">{profileName}</code> · GrokFlow sẽ tự mở Grok
+              trong VNC, tạo project, capture slug.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4 space-y-4">
+          {/* Pre-flight check note */}
+          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900 leading-relaxed">
+            <strong>Yêu cầu:</strong> Profile <code className="font-mono">{profileName}</code> phải
+            đang <code className="font-mono">logged_in</code> (đã Auto-login).
+            Backend sẽ connect CDP vào VNC container, drive grok.com bằng Playwright.
+          </div>
+
+          <label className="block text-sm">
+            <span className="font-medium text-slate-700">
+              Tên project <span className="text-rose-500">*</span>
+            </span>
+            <input
+              className="input mt-1"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="vd: Khách ABC - Production"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Tên này sẽ hiện trên Grok sidebar + trong GrokFlow.
+            </p>
+          </label>
+
+          <label className="block text-sm">
+            <span className="font-medium text-slate-700">Mô tả (tùy chọn)</span>
+            <textarea
+              className="input mt-1"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Lưu nội bộ, không gửi lên Grok"
+            />
+          </label>
+
+          {/* Assignment picker — reuse the DomainRow component */}
+          <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Globe size={14} className="text-violet-600" />
+              <span className="text-sm font-semibold text-slate-800">
+                Gán cho domain & tài khoản (tùy chọn)
+              </span>
+            </div>
+            {tenantDomains.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">Chưa có domain tenant.</p>
+            ) : (
+              <div className="space-y-1.5 max-h-64 overflow-auto">
+                {tenantDomains.map((d) => (
+                  <DomainRow
+                    key={d.id}
+                    domain={d}
+                    checked={selectedDomains.has(d.id)}
+                    onToggle={() => toggleDomain(d.id)}
+                    selectedUserIds={selectedUsers}
+                    onToggleUser={toggleUser}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {provision.isPending && (
+            <div className="rounded-md bg-violet-50 border border-violet-200 px-3 py-2 text-xs text-violet-900 inline-flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin" />
+              Đang mở Grok, tạo project, capture slug… (15-30s)
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t px-4 py-3 bg-slate-50">
+          <button onClick={onClose} className="btn-ghost" disabled={provision.isPending}>
+            Hủy
+          </button>
+          <button
+            onClick={() => provision.mutate()}
+            disabled={disabled}
+            className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-4 py-2 text-sm font-semibold hover:from-violet-700 hover:to-fuchsia-700 disabled:opacity-50"
+          >
+            {provision.isPending ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+            {provision.isPending
+              ? "Đang tạo…"
+              : `Tạo tự động · ${selectedDomains.size} domain · ${selectedUsers.size} user`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
