@@ -156,28 +156,28 @@ function TopNav({ brandName }: { brandName: string }) {
   }, []);
   return (
     <nav
-      className={`sticky top-0 z-30 transition-all border-b ${
+      className={`sticky top-0 z-30 transition-all ${
         scrolled
-          ? "glass border-ink-800/60"
-          : "border-transparent"
+          ? "bg-black/85 backdrop-blur-md border-b border-ink-800"
+          : "bg-transparent"
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         <Link to="/" className="flex items-center gap-2.5 group">
-          <span className="w-9 h-9 rounded-xl bg-gradient-album text-white flex items-center justify-center font-bold shadow-brand">
+          <span className="w-9 h-9 rounded-full bg-white text-ink-950 flex items-center justify-center font-extrabold">
             {brandName[0].toUpperCase()}
           </span>
-          <span className="font-bold text-lg text-white group-hover:text-gradient transition-all">
+          <span className="font-bold text-lg text-white">
             {brandName}
           </span>
         </Link>
-        <div className="hidden md:flex items-center gap-7 text-sm text-ink-300">
+        <div className="hidden md:flex items-center gap-7 text-sm font-semibold text-white/80">
           <a href="#modules" className="hover:text-white transition">{t("landing.nav_products", "Sản phẩm")}</a>
           <a href="#pricing" className="hover:text-white transition">{t("landing.nav_pricing", "Gói cước")}</a>
           <a href="#faq" className="hover:text-white transition">{t("landing.nav_faq", "FAQ")}</a>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/login" className="btn-ghost btn-sm">{t("landing.nav_login", "Đăng nhập")}</Link>
+          <Link to="/login" className="text-sm font-semibold text-white/80 hover:text-white px-3 py-1.5">{t("landing.nav_login", "Đăng nhập")}</Link>
           <Link to="/register" className="btn-primary btn-sm">{t("landing.nav_register", "Dùng thử")}</Link>
         </div>
       </div>
@@ -190,26 +190,38 @@ function TopNav({ brandName }: { brandName: string }) {
 function Hero({ brandName }: { brandName: string }) {
   const { t } = useTranslation();
   return (
-    <section className="relative">
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-16 sm:pt-28 sm:pb-20">
+    <section
+      className="relative overflow-hidden"
+      style={{
+        // Spotify Premium hero — saturated brand-coloured block with a
+        // subtle vignette so the giant headline reads cleanly. The
+        // colour stops are picked to match Spotify's "Premium" page
+        // (purple → blue) but stay on-brand for us.
+        background: "linear-gradient(135deg, #af2896 0%, #509bf5 100%)",
+      }}
+    >
+      {/* Soft radial highlight, top-left, like Spotify Premium hero. */}
+      <div className="absolute inset-0 pointer-events-none"
+           style={{ background: "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.15), transparent 60%)" }} />
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-20 sm:pt-28 sm:pb-28">
         <div className="text-center max-w-3xl mx-auto space-y-6">
-          {/* "Now playing" pill — flat dark, Spotify-style. */}
-          <div className="inline-flex items-center gap-2 rounded-full bg-ink-900 px-4 py-1.5">
+          {/* "Now playing" pill — translucent over the colour block. */}
+          <div className="inline-flex items-center gap-2 rounded-full bg-black/40 backdrop-blur-sm px-4 py-1.5">
             <span className="flex items-end gap-0.5 h-3">
               <span className="eq-bar h-full animate-eq-bar-1 text-accent-spotify" />
               <span className="eq-bar h-full animate-eq-bar-2 text-accent-spotify" />
               <span className="eq-bar h-full animate-eq-bar-3 text-accent-spotify" />
             </span>
-            <span className="text-xs font-semibold text-ink-300">
+            <span className="text-xs font-semibold text-white/90">
               {t("landing.now_playing", "Đang phát")}: <span className="text-white">AI Image · Aurora model</span>
             </span>
           </div>
 
-          <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight leading-[1.05] text-white">
+          <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight leading-[1.05] text-white drop-shadow-sm">
             {t("landing.hero_title_1", "Một studio.")}<br />
             {t("landing.hero_title_2", "Mọi mô hình AI.")}
           </h1>
-          <p className="text-lg sm:text-xl text-ink-300 max-w-2xl mx-auto leading-relaxed">
+          <p className="text-lg sm:text-xl text-white/90 max-w-2xl mx-auto leading-relaxed">
             {brandName} — {t("landing.hero_subtitle", "Quản lý mọi dự án AI — sinh ảnh, video, văn bản, code — trong một giao diện duy nhất, theo phong cách bảng điều khiển âm nhạc.")}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
@@ -217,19 +229,22 @@ function Hero({ brandName }: { brandName: string }) {
               <Sparkles size={18} /> {t("landing.cta_start", "Bắt đầu miễn phí")}
               <ArrowRight size={18} />
             </Link>
-            <Link to="/try/image" className="btn-secondary btn-lg">
+            <Link
+              to="/try/image"
+              className="btn btn-lg rounded-full border-2 border-white text-white font-bold hover:bg-white/10 hover:scale-105 transition"
+            >
               <Play size={18} /> {t("landing.cta_explore", "Khám phá studio")}
             </Link>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-4 text-sm text-ink-400">
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-4 text-sm text-white/80">
             <span className="inline-flex items-center gap-1.5">
-              <Check size={14} className="text-accent-spotify" /> {t("landing.no_card", "Không cần thẻ")}
+              <Check size={14} className="text-white" /> {t("landing.no_card", "Không cần thẻ")}
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Check size={14} className="text-accent-spotify" /> {t("landing.free_jobs", "10 job/ngày free")}
+              <Check size={14} className="text-white" /> {t("landing.free_jobs", "10 job/ngày free")}
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Check size={14} className="text-accent-spotify" /> {t("landing.multi_tenant", "Multi-tenant native")}
+              <Check size={14} className="text-white" /> {t("landing.multi_tenant", "Multi-tenant native")}
             </span>
           </div>
         </div>
