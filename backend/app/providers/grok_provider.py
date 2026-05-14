@@ -142,18 +142,21 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            # Video API path: image-to-video via /conversations/new with
-            # an uploaded image as parentPostId. Re-enabled after we
-            # confirmed the earlier 404s were the upstream account's
-            # video quota — not a bug in our body shape. When an
-            # individual profile gets `invalid-parent-post` reliably,
-            # treat that profile as video-rate-limited and let the
-            # auto-pick rotate to another one (see jobs/service.py).
-            # Disable via GROK_VIDEO_API_ENABLED=0 if needed.
+            # Video API path is OFF by default. After three rounds of
+            # trying (re-upload via /upload-file, then imageUuid direct
+            # from chat /imagine, with three body-shape variants for
+            # each) Grok still 404s every video request with
+            # `invalid-parent-post`. The Playwright fallback running on
+            # the SAME profile succeeds, so it's not quota — Grok video
+            # gen needs a real Imagine-studio post id, which is created
+            # by a different endpoint than chat /imagine. Until we
+            # capture that endpoint, Playwright stays the production
+            # video path. Set GROK_VIDEO_API_ENABLED=1 to re-enable for
+            # further debugging.
             if (
                 job.job_type == "video"
-                and os.getenv("GROK_VIDEO_API_ENABLED", "true").lower()
-                not in ("0", "false", "no")
+                and os.getenv("GROK_VIDEO_API_ENABLED", "").lower()
+                in ("1", "true", "yes")
             ):
                 api_result = await self._run_video_via_api(job)
                 if api_result is not None:
