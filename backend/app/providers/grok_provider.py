@@ -23,6 +23,13 @@ from app.browser import vnc_manager
 from app.providers.base import JobInput, JobResult, Provider, ResultFile
 from app.providers.grok_api_client import GrokAPIClient, GrokAPIError
 
+# Per-profile cache of x-statsig-id. The Statsig SDK rotates its stableID
+# rarely — caching for an hour cuts the ~3s page-open cost out of nearly
+# every job after the first one in a session.
+_STATSIG_CACHE: dict[str, tuple[str, float]] = {}
+_STATSIG_TTL_S = 3600.0
+
+
 # Per-profile navigation lock: page.goto() on a busy Chromium triggers
 # a render-thread storm if many concurrent tabs each try to bootstrap React
 # at once. Serializing the navigation step alone keeps tail latency bounded.
@@ -190,6 +197,81 @@ class GrokProvider(Provider):
         # Re-query to get the canonical info shape (cdp_endpoint etc.)
         return vnc_manager.get_for_profile(profile_id)
 
+    async def _capture_statsig_id(self, ctx, tag: str) -> str | None:
+        """Snatch the `x-statsig-id` header off any outgoing /rest/* request.
+
+        Statsig's client SDK computes this header on every fetch using a
+        stableID + sdkInfo signature. We can't replicate the algorithm in
+        Python without reverse-engineering the bundle, but we can observe
+        a real request as it leaves the browser and copy the header.
+
+        Strategy:
+          1. Attach a request listener to the existing context (so the
+             whole browser's traffic flows past us).
+          2. Open a blank tab and call `/rest/rate-limits` via fetch from
+             page JS — this is a tiny benign endpoint the Grok UI pings
+             every few seconds, so triggering it manually is invisible.
+          3. The Statsig SDK injects `x-statsig-id` into the request.
+             Capture it from the listener, close the tab, return.
+
+        Returns None on any failure — caller falls back to Playwright.
+        """
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[str] = loop.create_future()
+
+        def on_request(request) -> None:  # noqa: ANN001 — Playwright type
+            if future.done():
+                return
+            if "/rest/" not in request.url:
+                return
+            sid = request.headers.get("x-statsig-id")
+            if sid:
+                future.set_result(sid)
+
+        ctx.on("request", on_request)
+        page = None
+        try:
+            page = await ctx.new_page()
+            # `about:blank` is enough — Statsig is initialised on any page
+            # of the same origin via the service worker / shared state, but
+            # to be safe we navigate to grok.com root (cached, ~200ms).
+            try:
+                await page.goto(
+                    "https://grok.com/", wait_until="domcontentloaded", timeout=8000
+                )
+            except PWTimeout:
+                # Even on timeout, page handlers may still fire — give the
+                # listener a chance before bailing.
+                pass
+
+            # Trigger a benign /rest/* call so the Statsig header lands on
+            # the wire. rate-limits is the cheapest such endpoint.
+            try:
+                await page.evaluate(
+                    "fetch('/rest/rate-limits', {credentials: 'include'})"
+                    ".catch(() => {})"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+            try:
+                sid = await asyncio.wait_for(future, timeout=6.0)
+                self._log(tag, f"captured x-statsig-id (len={len(sid)})")
+                return sid
+            except asyncio.TimeoutError:
+                self._log(tag, "no x-statsig-id observed within 6s")
+                return None
+        finally:
+            try:
+                ctx.remove_listener("request", on_request)
+            except Exception:  # noqa: BLE001
+                pass
+            if page is not None:
+                try:
+                    await page.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
     async def _run_image_via_api(self, job: JobInput) -> JobResult | None:
         """Pure-HTTP /imagine via grok.com/rest/app-chat/conversations/new.
 
@@ -209,12 +291,11 @@ class GrokProvider(Provider):
         rotated their statsig token, and the Playwright path can still
         complete because it runs inside a real browser session.
 
-        Gated behind GROK_API_ENABLED env var — disabled by default until
-        x-statsig-id extraction lands. When disabled the function returns
-        instantly with zero side-effects so every job goes straight to the
-        proven Playwright pipelines.
+        Gated behind GROK_API_ENABLED env var. Default `true` now that
+        x-statsig-id capture works; set `GROK_API_ENABLED=0` to roll back
+        to pure-Playwright operation without redeploying.
         """
-        if os.getenv("GROK_API_ENABLED", "").lower() not in ("1", "true", "yes"):
+        if os.getenv("GROK_API_ENABLED", "true").lower() in ("0", "false", "no"):
             return None
         profile_id = self._profile_id_from_path(job.profile_path)
         tag = f"api:{profile_id[:8]}"
@@ -239,10 +320,13 @@ class GrokProvider(Provider):
             self._log(tag, f"CDP discovery error: {exc}")
             return None
 
-        # Pull cookies out of the live context. We don't open a page —
-        # `context.cookies()` reads straight from the cookie jar that the
-        # admin's manual login populated.
+        # Pull cookies + x-statsig-id out of the live context. Cookies come
+        # straight from the cookie jar (no page required). x-statsig-id is
+        # only produced as an outgoing request header by the Statsig SDK
+        # running on grok.com, so we open a short-lived page, listen for
+        # any `/rest/*` request, and capture the header off the wire.
         cookies_dict: dict[str, str] = {}
+        statsig_id: str | None = None
         try:
             async with async_playwright() as p:
                 try:
@@ -261,8 +345,20 @@ class GrokProvider(Provider):
                     return None
                 raw_cookies = await ctx.cookies("https://grok.com")
                 cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
+
+                # Capture x-statsig-id from any /rest/* request. We trigger
+                # one by fetching /rest/rate-limits — a tiny endpoint Grok
+                # always pings on page load, so it's cheap and reliable.
+                cached = _STATSIG_CACHE.get(profile_id)
+                if cached and time.monotonic() - cached[1] < _STATSIG_TTL_S:
+                    statsig_id = cached[0]
+                    self._log(tag, "statsig cache hit")
+                else:
+                    statsig_id = await self._capture_statsig_id(ctx, tag)
+                    if statsig_id:
+                        _STATSIG_CACHE[profile_id] = (statsig_id, time.monotonic())
         except Exception as exc:  # noqa: BLE001
-            self._log(tag, f"cookie extraction failed: {exc}")
+            self._log(tag, f"cookie/statsig extraction failed: {exc}")
             return None
 
         # Sanity: without the session cookie we can't authenticate. Falling
@@ -283,10 +379,19 @@ class GrokProvider(Provider):
         self._log(
             tag,
             f"calling /conversations/new (project={job.grok_project_id}, "
-            f"cookies={len(cookies_dict)})",
+            f"cookies={len(cookies_dict)}, "
+            f"statsig={'yes' if statsig_id else 'no'})",
         )
 
+        # No statsig → Grok will 403 every time. Skip the network round-trip
+        # and let Playwright handle this job; better to fail fast than wait
+        # ~5s for a guaranteed-failure POST.
+        if not statsig_id:
+            self._log(tag, "no x-statsig-id available — skipping API path")
+            return None
+
         client = GrokAPIClient(cookies=cookies_dict, user_agent=ua,
+                               x_statsig_id=statsig_id,
                                timeout=self.IMAGE_TIMEOUT_MS / 1000)
         try:
             image_bytes_list = await client.imagine(
@@ -296,6 +401,11 @@ class GrokProvider(Provider):
             )
         except GrokAPIError as exc:
             self._log(tag, f"API error: {exc.code} — {exc.message}")
+            # 403 means the statsig token Grok rejected — purge the cache
+            # so the next attempt re-captures a fresh one. Without this we'd
+            # keep replaying a stale token until the TTL expires.
+            if exc.code == "provider_blocked":
+                _STATSIG_CACHE.pop(profile_id, None)
             # Cookie expired is definitive — surface to worker so the
             # profile state machine flips to need_login. Other errors
             # fall through to Playwright as a safety net.
