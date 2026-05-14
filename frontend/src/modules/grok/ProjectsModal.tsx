@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   X, Plus, Pencil, Trash2, Layers, Globe, ExternalLink, Save,
+  ChevronDown, ChevronRight, User as UserIcon, Pin,
 } from "lucide-react";
 
 import { api } from "@/core/api/axios";
@@ -251,18 +252,35 @@ function ProjectEditorModal({
     enabled: isEdit,
   });
 
+  const { data: currentUsers } = useQuery({
+    queryKey: ["grok-project-users", project?.id],
+    queryFn: async () =>
+      (await api.get<{ project_id: string; user_ids: string[] }>(
+        `/api/grok-projects/${project!.id}/users`,
+      )).data,
+    enabled: isEdit,
+  });
+
   const [selectedDomainIds, setSelectedDomainIds] = useState<Set<string> | null>(null);
-  const effective = selectedDomainIds ?? new Set(currentAssign?.domain_ids ?? []);
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string> | null>(null);
+  const effectiveDomains = selectedDomainIds ?? new Set(currentAssign?.domain_ids ?? []);
+  const effectiveUsers = selectedUserIds ?? new Set(currentUsers?.user_ids ?? []);
+
   const toggleDomain = (id: string) => {
-    const next = new Set(effective);
+    const next = new Set(effectiveDomains);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setSelectedDomainIds(next);
   };
+  const toggleUser = (id: string) => {
+    const next = new Set(effectiveUsers);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedUserIds(next);
+  };
 
   const save = useMutation({
     mutationFn: async () => {
-      // 1) Create or update the project row itself.
       let projectId: string;
       if (isEdit) {
         await api.patch(`/api/grok-projects/${project!.id}`, {
@@ -280,20 +298,23 @@ function ProjectEditorModal({
         });
         projectId = data.id;
       }
-      // 2) Push the domain assignment in the same flow so user doesn't
-      // need to re-open the row. Empty array = revoke all.
-      await api.put(`/api/grok-projects/${projectId}/domains`, {
-        domain_ids: Array.from(effective),
-      });
+      // Push both assignment sets in parallel.
+      await Promise.all([
+        api.put(`/api/grok-projects/${projectId}/domains`, {
+          domain_ids: Array.from(effectiveDomains),
+        }),
+        api.put(`/api/grok-projects/${projectId}/users`, {
+          user_ids: Array.from(effectiveUsers),
+        }),
+      ]);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["grok-projects", profileId] });
       qc.invalidateQueries({ queryKey: ["grok-project-domains", project?.id] });
+      qc.invalidateQueries({ queryKey: ["grok-project-users", project?.id] });
       qc.invalidateQueries({ queryKey: ["profiles"] });
       toast(
-        isEdit
-          ? `Đã lưu · ${effective.size} domain assigned`
-          : `Đã tạo project · ${effective.size} domain assigned`,
+        `${isEdit ? "Đã lưu" : "Đã tạo project"} · ${effectiveDomains.size} domain · ${effectiveUsers.size} user pinned`,
         "success",
       );
       onClose();
@@ -347,17 +368,17 @@ function ProjectEditorModal({
             />
           </label>
 
-          {/* Inline domain assignment so the user doesn't need to open a 2nd
-              modal after creating the project. Empty selection = nobody can
-              see this project (super_admin only). */}
+          {/* Two-level assignment: domain rows can expand to show their
+              users, letting super_admin pin specific users to this project
+              (overrides the domain-wide rule for those users). */}
           <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-3">
             <div className="flex items-center gap-1.5 mb-2">
               <Globe size={14} className="text-violet-600" />
               <span className="text-sm font-semibold text-slate-800">
-                Gán cho domain (tenant)
+                Gán cho domain & tài khoản
               </span>
               <span className="text-xs text-slate-500">
-                · Project chỉ visible với tenant được tick
+                · 2 cấp: domain (tất cả user) → tài khoản (riêng từng người)
               </span>
             </div>
             {tenantDomains.length === 0 ? (
@@ -365,29 +386,26 @@ function ProjectEditorModal({
                 Chưa có domain tenant — tạo ở /admin/domains trước.
               </p>
             ) : (
-              <div className="space-y-1.5 max-h-48 overflow-auto">
+              <div className="space-y-1.5 max-h-80 overflow-auto">
                 {tenantDomains.map((d) => (
-                  <label
+                  <DomainRow
                     key={d.id}
-                    className="flex items-center gap-2 rounded-md bg-white border border-slate-200 px-3 py-1.5 cursor-pointer hover:bg-violet-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={effective.has(d.id)}
-                      onChange={() => toggleDomain(d.id)}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-slate-800">{d.label}</div>
-                      <code className="text-[11px] font-mono text-slate-500">{d.hostname}</code>
-                    </div>
-                  </label>
+                    domain={d}
+                    checked={effectiveDomains.has(d.id)}
+                    onToggle={() => toggleDomain(d.id)}
+                    selectedUserIds={effectiveUsers}
+                    onToggleUser={toggleUser}
+                  />
                 ))}
               </div>
             )}
-            <p className="text-[11px] text-slate-500 mt-2">
-              Tick = tenant đó dùng được project này.
-              Để trống = chỉ super_admin dùng được.
-            </p>
+            <div className="mt-3 rounded-md bg-white/70 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
+              <strong>Quy tắc auto-pick lúc submit job:</strong><br />
+              1. Nếu user có <Pin size={9} className="inline text-violet-600" />{" "}
+              pin tới project này → dùng project đó<br />
+              2. Else nếu domain của user có gắn project này → dùng<br />
+              3. Else không thấy project (worker fallback /imagine)
+            </div>
           </section>
         </div>
         <div className="flex justify-end gap-2 border-t px-4 py-3 bg-slate-50">
@@ -401,8 +419,8 @@ function ProjectEditorModal({
             {save.isPending
               ? "Đang lưu..."
               : isEdit
-              ? `Lưu · ${effective.size} domain`
-              : `Tạo · ${effective.size} domain`}
+              ? `Lưu · ${effectiveDomains.size} domain · ${effectiveUsers.size} user`
+              : `Tạo · ${effectiveDomains.size} domain · ${effectiveUsers.size} user`}
           </button>
         </div>
       </div>
@@ -410,7 +428,104 @@ function ProjectEditorModal({
   );
 }
 
-// ─── Domain assignment modal ──────────────────────────────────────────────
+interface UserRow {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+}
+
+/** Domain row that expands to its users on click. Outer checkbox toggles
+ *  the domain-wide assignment; inner checkboxes pin specific users. */
+function DomainRow({
+  domain, checked, onToggle, selectedUserIds, onToggleUser,
+}: {
+  domain: Domain;
+  checked: boolean;
+  onToggle: () => void;
+  selectedUserIds: Set<string>;
+  onToggleUser: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Lazy-load users only when the row is expanded the first time, so
+  // unticked domains don't fire N requests on modal open.
+  const { data: users, isLoading } = useQuery({
+    queryKey: ["domain-users", domain.id],
+    queryFn: async () =>
+      (await api.get<UserRow[]>(`/api/grok-projects/_users-by-domain/${domain.id}`)).data,
+    enabled: open,
+  });
+
+  const pinnedInDomain = (users ?? []).filter((u) => selectedUserIds.has(u.id)).length;
+
+  return (
+    <div className="rounded-md bg-white border border-slate-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onToggle}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex-1 min-w-0 flex items-center gap-2 text-left"
+        >
+          <span className="text-sm font-medium text-slate-800">{domain.label}</span>
+          <code className="text-[11px] font-mono text-slate-500">{domain.hostname}</code>
+          {pinnedInDomain > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded-full">
+              <Pin size={9} /> {pinnedInDomain} user pinned
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="text-slate-400 hover:text-slate-700"
+        >
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-slate-100 bg-slate-50/50 px-3 py-2">
+          {isLoading ? (
+            <p className="text-xs text-slate-500 italic">Đang tải tài khoản…</p>
+          ) : (users ?? []).length === 0 ? (
+            <p className="text-xs text-slate-500 italic">
+              Domain này chưa có user nào.
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {users!.map((u) => (
+                <li key={u.id}>
+                  <label className="flex items-center gap-2 rounded px-2 py-1 hover:bg-white cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedUserIds.has(u.id)}
+                      onChange={() => onToggleUser(u.id)}
+                    />
+                    <UserIcon size={11} className="text-slate-400 flex-shrink-0" />
+                    <span className="text-xs font-mono text-slate-700 flex-1 truncate">{u.email}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                      {u.role}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-[10px] text-slate-500 mt-1.5 italic">
+            Tick user = pin riêng người đó vào project này (ưu tiên hơn domain-wide).
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Domain-only quick-assign modal (kept for inline edits) ───────────────
 
 function AssignDomainsModal({
   project, domains, onClose,

@@ -29,7 +29,7 @@ from sqlalchemy import select
 
 from app.core.deps import CurrentUser, DbSession, SuperAdminUser
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
-from app.models import Domain, GrokProject, Profile, ProjectDomainAssignment
+from app.models import Domain, GrokProject, Profile, ProjectDomainAssignment, ProjectUserAssignment, User
 from app.modules.admin.audit import service as audit
 
 router = APIRouter(prefix="/api/grok-projects", tags=["grok-projects"])
@@ -73,6 +73,22 @@ class ProjectDomainsOut(BaseModel):
 
 class ProjectDomainsUpdate(BaseModel):
     domain_ids: list[uuid.UUID]
+
+
+class UserInDomainOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    role: str
+    status: str
+
+
+class ProjectUsersOut(BaseModel):
+    project_id: uuid.UUID
+    user_ids: list[uuid.UUID]
+
+
+class ProjectUsersUpdate(BaseModel):
+    user_ids: list[uuid.UUID]
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -289,4 +305,95 @@ async def set_project_domains(
     await db.commit()
     return ProjectDomainsOut(
         project_id=project_id, domain_ids=list(payload.domain_ids),
+    )
+
+
+# ─── Users-in-domain helper (for the project editor UI) ───────────────────
+
+
+@router.get("/_users-by-domain/{domain_id}", response_model=list[UserInDomainOut])
+async def list_users_in_domain(
+    domain_id: uuid.UUID, _super: SuperAdminUser, db: DbSession,
+) -> list[UserInDomainOut]:
+    """Lookup users in a specific domain so the project editor can show a
+    per-user assignment picker after the domain is selected."""
+    rows = (
+        await db.execute(
+            select(User)
+            .where(User.domain_id == domain_id, User.status == "active")
+            .order_by(User.role.desc(), User.email.asc())
+        )
+    ).scalars().all()
+    return [
+        UserInDomainOut(id=u.id, email=u.email, role=u.role, status=u.status)
+        for u in rows
+    ]
+
+
+# ─── Per-user pinning ─────────────────────────────────────────────────────
+
+
+@router.get("/{project_id}/users", response_model=ProjectUsersOut)
+async def get_project_users(
+    project_id: uuid.UUID, user: CurrentUser, db: DbSession,
+) -> ProjectUsersOut:
+    p = await db.get(GrokProject, project_id)
+    if not p:
+        raise NotFound("grok_project")
+    if user.role not in ("super_admin", "admin"):
+        raise PermissionDenied()
+    rows = (
+        await db.execute(
+            select(ProjectUserAssignment.user_id)
+            .where(ProjectUserAssignment.project_id == project_id)
+        )
+    ).scalars().all()
+    return ProjectUsersOut(project_id=project_id, user_ids=list(rows))
+
+
+@router.put("/{project_id}/users", response_model=ProjectUsersOut)
+async def set_project_users(
+    project_id: uuid.UUID, payload: ProjectUsersUpdate,
+    _super: SuperAdminUser, db: DbSession,
+) -> ProjectUsersOut:
+    """Replace the per-user pin set for this project. Each user listed
+    here will use this project regardless of any domain-wide assignment.
+
+    Pass an empty list to revoke all per-user pins (domain-wide rule
+    takes over).
+    """
+    p = await db.get(GrokProject, project_id)
+    if not p:
+        raise NotFound("grok_project")
+
+    if payload.user_ids:
+        found = (
+            await db.execute(
+                select(User.id).where(User.id.in_(payload.user_ids))
+            )
+        ).scalars().all()
+        missing = set(payload.user_ids) - set(found)
+        if missing:
+            raise InvalidPayload(
+                f"Unknown user_ids: {sorted(str(m) for m in missing)}"
+            )
+
+    await db.execute(
+        ProjectUserAssignment.__table__.delete()
+        .where(ProjectUserAssignment.project_id == project_id)
+    )
+    for uid in payload.user_ids:
+        db.add(ProjectUserAssignment(project_id=project_id, user_id=uid))
+
+    await audit.log_action(
+        db, user_id=_super.id, action="grok_project_users_set",
+        target_type="grok_project", target_id=project_id,
+        metadata={
+            "name": p.name,
+            "user_ids": [str(u) for u in payload.user_ids],
+        },
+    )
+    await db.commit()
+    return ProjectUsersOut(
+        project_id=project_id, user_ids=list(payload.user_ids),
     )

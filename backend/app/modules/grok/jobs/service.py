@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
-from app.models import Job, JobLog, GrokProject, Profile, ProjectDomainAssignment, User
+from app.models import Job, JobLog, GrokProject, Profile, ProjectDomainAssignment, ProjectUserAssignment, User
 from app.modules.admin.audit import service as audit
 
 
@@ -143,22 +143,50 @@ async def create_job(
         requester_domain_id=requester_domain_id,
     )
 
-    # Pick the specific GrokProject the worker should use. Rules:
-    #   - tenant: project assigned to their domain on this profile
-    #   - super_admin: first project of the profile (no scope filter)
-    # If the profile has no projects yet we leave project_id NULL — worker
-    # falls back to the legacy grok.com/imagine root URL. This keeps
-    # bootstrapping smooth: super_admin can run a job before defining
-    # projects.
-    project_q = select(GrokProject).where(GrokProject.profile_id == profile.id)
-    if requester_domain_id is not None:
-        project_q = (
-            project_q
-            .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
-            .where(ProjectDomainAssignment.domain_id == requester_domain_id)
+    # Pick the specific GrokProject the worker should use. Priority:
+    #   1) per-user pin (project_user_assignments) — tenant user gets
+    #      THEIR project even when sharing the profile with others
+    #   2) domain-wide assignment — every user in this tenant uses it
+    #   3) super_admin bootstrap: first project on the profile
+    # Profile has no projects yet → leave NULL → worker falls back to
+    # grok.com/imagine root URL (legacy behaviour).
+    picked_project = None
+    # 1) per-user pin
+    user_pin_q = (
+        select(GrokProject)
+        .join(ProjectUserAssignment, ProjectUserAssignment.project_id == GrokProject.id)
+        .where(
+            GrokProject.profile_id == profile.id,
+            ProjectUserAssignment.user_id == user_id,
         )
-    project_q = project_q.order_by(GrokProject.created_at.asc()).limit(1)
-    picked_project = (await db.execute(project_q)).scalar_one_or_none()
+        .order_by(GrokProject.created_at.asc())
+        .limit(1)
+    )
+    picked_project = (await db.execute(user_pin_q)).scalar_one_or_none()
+
+    # 2) domain-wide fallback (tenant path)
+    if picked_project is None and requester_domain_id is not None:
+        domain_q = (
+            select(GrokProject)
+            .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
+            .where(
+                GrokProject.profile_id == profile.id,
+                ProjectDomainAssignment.domain_id == requester_domain_id,
+            )
+            .order_by(GrokProject.created_at.asc())
+            .limit(1)
+        )
+        picked_project = (await db.execute(domain_q)).scalar_one_or_none()
+
+    # 3) super_admin bootstrap: any project on this profile
+    if picked_project is None and requester_domain_id is None:
+        any_q = (
+            select(GrokProject)
+            .where(GrokProject.profile_id == profile.id)
+            .order_by(GrokProject.created_at.asc())
+            .limit(1)
+        )
+        picked_project = (await db.execute(any_q)).scalar_one_or_none()
 
     job = Job(
         user_id=user_id,

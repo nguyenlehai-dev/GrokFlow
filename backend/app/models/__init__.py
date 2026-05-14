@@ -171,12 +171,38 @@ class GrokProject(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text)
 
 
+class ProjectUserAssignment(Base):
+    """Per-user assignment of a GrokProject.
+
+    Lets super_admin pin a specific tenant user to a specific project so
+    each customer gets their own chat history/preset even when sharing a
+    Grok account with other tenants in the same domain. Takes priority
+    over the domain-level assignment when both exist.
+    """
+    __tablename__ = "project_user_assignments"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("grok_projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+
 class ProjectDomainAssignment(Base):
     """Many-to-many: which GrokProject each customer domain can pull from.
 
     Replaces the old ProfileDomainAssignment — granularity moved one level
     down so a single Grok account can serve multiple tenants in parallel
     via separate projects. Migration 0020 drops the legacy table.
+
+    Per-user pinning is in ProjectUserAssignment and takes priority over
+    this domain-wide rule when both apply.
 
     Only `super_admin` edits these. Per-domain `admin` can read their
     own set; `user` doesn't see this surface.
