@@ -30,6 +30,15 @@ from app.providers.grok_api_client import GrokAPIClient, GrokAPIError
 _STATSIG_CACHE: dict[str, tuple[str, float]] = {}
 _STATSIG_TTL_S = 3600.0
 
+# Per-profile cache of (cookies_dict, user_agent). Each job currently
+# opens its own Playwright connection just to ctx.cookies() — under burst
+# (16+ concurrent jobs hit the same Chromium) that pile of CDP clients
+# crashes the browser. Caching the cookie jar lets only the first job
+# pay the connect cost, and the rest reuse them. Cookies for the
+# session change rarely — sso/sso-rw last days, cf_clearance ~2h.
+_COOKIES_CACHE: dict[str, tuple[dict[str, str], str, float]] = {}
+_COOKIES_TTL_S = 1800.0  # 30 min — well under cf_clearance's ~2h lifetime
+
 # Per-profile capture lock. Without this, when N concurrent jobs land on
 # the same profile and the statsig cache is cold, each one opens its own
 # /imagine page simultaneously inside the SAME Chromium and the browser
@@ -359,64 +368,90 @@ class GrokProvider(Provider):
 
         cookies_dict: dict[str, str] = {}
         statsig_id: str | None = None
+        ua: str = ""
         is_video = job.job_type == "video"
         # Cache statsig separately for image vs video — they need different
         # session contexts (chat home vs /imagine studio).
         cache_key = f"{profile_id}:video" if is_video else profile_id
-        try:
-            async with async_playwright() as p:
-                try:
-                    browser = await p.chromium.connect_over_cdp(ws_url, timeout=12000)
-                except Exception as exc:  # noqa: BLE001
-                    self._log(tag, f"connect_over_cdp failed: {exc}")
-                    return None
-                # Important: do NOT call browser.close() — that would
-                # terminate the remote Chromium that other paths depend on.
-                ctx = browser.contexts[0] if browser.contexts else None
-                if ctx is None:
-                    self._log(tag, "no browser context — fallback")
-                    return None
 
-                # Capture statsig under a per-profile lock so concurrent
-                # jobs don't all open their own page simultaneously and
-                # crash the Chromium. First caller does the real work,
-                # the rest see the warm cache on entry.
-                cached = _STATSIG_CACHE.get(cache_key)
-                if cached and time.monotonic() - cached[1] < _STATSIG_TTL_S:
-                    statsig_id = cached[0]
-                    self._log(tag, f"statsig cache hit ({'video' if is_video else 'image'})")
+        # ── Fast path: everything cached → skip Playwright entirely ──
+        # In burst load (10+ concurrent jobs hitting the same profile),
+        # opening a CDP connection per job is what overloads Chromium.
+        # If both caches are warm, we don't need the browser at all.
+        cached_statsig = _STATSIG_CACHE.get(cache_key)
+        cached_cookies = _COOKIES_CACHE.get(profile_id)
+        statsig_warm = (
+            cached_statsig
+            and time.monotonic() - cached_statsig[1] < _STATSIG_TTL_S
+        )
+        cookies_warm = (
+            cached_cookies
+            and time.monotonic() - cached_cookies[2] < _COOKIES_TTL_S
+        )
+        if statsig_warm and cookies_warm:
+            statsig_id = cached_statsig[0]
+            cookies_dict = dict(cached_cookies[0])  # defensive copy
+            ua = cached_cookies[1]
+            self._log(tag, "all caches warm — skipped CDP connect")
+        else:
+            # ── Slow path: open Playwright once, refill both caches ──
+            # Serialize the refill per profile so concurrent jobs don't
+            # all stampede the same Chromium with simultaneous CDP opens.
+            async with _statsig_lock(cache_key):
+                # Re-check after lock — another worker may have just
+                # populated both caches while we waited.
+                cached_statsig = _STATSIG_CACHE.get(cache_key)
+                cached_cookies = _COOKIES_CACHE.get(profile_id)
+                if (
+                    cached_statsig and time.monotonic() - cached_statsig[1] < _STATSIG_TTL_S
+                    and cached_cookies and time.monotonic() - cached_cookies[2] < _COOKIES_TTL_S
+                ):
+                    statsig_id = cached_statsig[0]
+                    cookies_dict = dict(cached_cookies[0])
+                    ua = cached_cookies[1]
+                    self._log(tag, "caches warmed by sibling — skipped CDP")
                 else:
-                    async with _statsig_lock(cache_key):
-                        # Re-check inside the lock — by the time we got
-                        # the lock another concurrent job may have just
-                        # populated the cache for us.
-                        cached = _STATSIG_CACHE.get(cache_key)
-                        if cached and time.monotonic() - cached[1] < _STATSIG_TTL_S:
-                            statsig_id = cached[0]
-                            self._log(tag, f"statsig cache hit after lock ({'video' if is_video else 'image'})")
-                        else:
+                    try:
+                        async with async_playwright() as p:
+                            try:
+                                browser = await p.chromium.connect_over_cdp(ws_url, timeout=12000)
+                            except Exception as exc:  # noqa: BLE001
+                                self._log(tag, f"connect_over_cdp failed: {exc}")
+                                return None
+                            # Important: do NOT call browser.close() — that
+                            # would terminate the remote Chromium.
+                            ctx = browser.contexts[0] if browser.contexts else None
+                            if ctx is None:
+                                self._log(tag, "no browser context — fallback")
+                                return None
+
+                            # Capture statsig (cold path).
                             statsig_id = await self._capture_statsig_id(ctx, tag, for_video=is_video)
                             if statsig_id:
                                 _STATSIG_CACHE[cache_key] = (statsig_id, time.monotonic())
 
-                # Extract cookies AFTER navigating — /imagine may set
-                # additional session cookies needed by the video endpoint.
-                raw_cookies = await ctx.cookies("https://grok.com")
-                cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
-        except Exception as exc:  # noqa: BLE001
-            self._log(tag, f"cookie/statsig extraction failed: {exc}")
-            return None
+                            # Extract cookies fresh.
+                            raw_cookies = await ctx.cookies("https://grok.com")
+                            cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
+                            ua = (browser_ua or "").replace("HeadlessChrome", "Chrome")
+                            if cookies_dict and ua:
+                                _COOKIES_CACHE[profile_id] = (
+                                    dict(cookies_dict), ua, time.monotonic(),
+                                )
+                            self._log(tag, "cold refill: opened CDP, repopulated caches")
+                    except Exception as exc:  # noqa: BLE001
+                        self._log(tag, f"cookie/statsig extraction failed: {exc}")
+                        return None
 
         if "sso" not in cookies_dict:
             self._log(tag, "no `sso` cookie — fallback to Playwright path")
             return None
 
-        ua = browser_ua or (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
-        )
-        # `headless=true` UAs leak the word "HeadlessChrome" which Grok filters.
-        ua = ua.replace("HeadlessChrome", "Chrome")
+        if not ua:
+            ua = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+            )
 
         self._log(
             tag,
