@@ -208,14 +208,48 @@ async def process_one(db: AsyncSession, job: Job) -> None:
 
     slot_held: uuid.UUID | None = None
     if job.profile_id:
+        # First: try the originally-assigned profile (fast path — keeps
+        # session warm cookies / project pinning intact).
         if await _try_acquire_slot(db, job.profile_id, job_type=job.job_type):
             slot_held = job.profile_id
         else:
-            job.status = "queued"
-            db.add(JobLog(job_id=job.id, level="warning",
-                          message="Profile at capacity, requeue"))
-            await db.commit()
-            return
+            # Hot-failover: original profile is at capacity right now.
+            # Look for any sibling profile in the pool that has a free
+            # slot of the right type and switch to it. The original
+            # profile is excluded just for this attempt — not banned —
+            # so future jobs still consider it.
+            original_pid = job.profile_id
+            payload = job.input_payload or {}
+            already_banned = list(payload.get("_banned_profiles") or [])
+            try_skip = list(set(already_banned + [str(original_pid)]))
+            try:
+                alt = await jobs_service._resolve_profile_for_job(
+                    db,
+                    requested_id=None,
+                    user_id=job.user_id,
+                    provider=job.provider,
+                    excluded_profile_ids=try_skip,
+                )
+            except Exception:  # noqa: BLE001 — pool empty or any other
+                alt = None
+
+            if alt and await _try_acquire_slot(db, alt.id, job_type=job.job_type):
+                job.profile_id = alt.id
+                slot_held = alt.id
+                db.add(JobLog(
+                    job_id=job.id, level="info",
+                    message=f"Hot-failover: original at capacity, switched to "
+                            f"{alt.name} ({str(alt.id)[:8]})",
+                ))
+            else:
+                # No sibling had capacity either — keep the original
+                # binding and requeue normally so we don't fragment
+                # workload across stale profiles.
+                job.status = "queued"
+                db.add(JobLog(job_id=job.id, level="warning",
+                              message="Pool at capacity, requeue"))
+                await db.commit()
+                return
 
     profile: Profile | None = None
     if slot_held:
