@@ -15,15 +15,18 @@ How cookies arrive here:
 
 Stream format (captured from devtools 2026-05-14):
 - Response is a sequence of CONCATENATED JSON objects (no SSE framing).
-- Each object has `result.response.cardAttachment.jsonData` (stringified JSON)
+- Image event: `result.response.cardAttachment.jsonData` (stringified JSON)
   whose `image_chunk.imageUrl` carries the final asset path when `progress=100`.
+- Video event: `result.response.streamingVideoGenerationResponse.videoUrl`
+  appears when `progress=100`.
 - `result.response.isSoftStop=true` marks end of stream.
-- Asset URL is RELATIVE; full URL is https://assets.grok.com/<imageUrl>.
+- Asset URL is RELATIVE; full URL is https://assets.grok.com/<assetUrl>.
 """
 
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Callable
 
 import httpx
@@ -32,9 +35,8 @@ GROK_BASE = "https://grok.com"
 ASSETS_BASE = "https://assets.grok.com"
 ENDPOINT_NEW_CONVERSATION = "/rest/app-chat/conversations/new"
 
-# Pinned body fields from a verified working request. If Grok adds required
-# fields we'll see 4xx — bump these and ship.
-_DEFAULT_BODY: dict[str, Any] = {
+# Pinned body fields for IMAGE jobs, from a verified working request.
+_IMAGE_BODY: dict[str, Any] = {
     "temporary": False,
     "fileAttachments": [],
     "imageAttachments": [],
@@ -114,8 +116,13 @@ def _iter_complete_json(buf: str):
                 start = -1
 
 
+# Type for the per-stream event extractor. Returns the asset URL to download
+# when an event signals "asset finished", else None.
+EventExtractor = Callable[[dict], str | None]
+
+
 class GrokAPIClient:
-    """One-shot client for an /imagine call. Build per-job to avoid stale state.
+    """One-shot client for /conversations/new. Build per-job to avoid stale state.
 
     Caller supplies cookies (a dict mapping cookie name → value) and the UA
     string the live profile is using; both come from the Playwright context.
@@ -133,20 +140,16 @@ class GrokAPIClient:
         self.x_statsig_id = x_statsig_id
         self.timeout = timeout
 
-    def _headers(self, project_id: str | None) -> dict[str, str]:
-        # Referer matters: project-scoped responses are gated on `referer`
-        # pointing at the workspace, and the body's workspaceIds must match.
-        referer = (
-            f"{GROK_BASE}/project/{project_id}"
-            if project_id
-            else f"{GROK_BASE}/"
-        )
+    def _headers(self, referer_path: str) -> dict[str, str]:
+        # Referer matters: project-scoped image responses are gated on
+        # `referer` pointing at the workspace; video responses on the
+        # Imagine studio URL. Both are computed by the caller.
         h = {
             "accept": "*/*",
             "accept-language": "en-US,en;q=0.9",
             "content-type": "application/json",
             "origin": GROK_BASE,
-            "referer": referer,
+            "referer": f"{GROK_BASE}{referer_path}",
             "user-agent": self.user_agent,
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
@@ -162,22 +165,88 @@ class GrokAPIClient:
         project_id: str | None = None,
         log: Callable[[str], None] | None = None,
     ) -> list[bytes]:
-        """Submit `/imagine <prompt>` and return the bytes of every completed image.
-
-        Raises GrokAPIError with a code matching ERROR_CODES.
-        """
-        body = dict(_DEFAULT_BODY)
+        """Submit `/imagine <prompt>` and return the bytes of every completed image."""
+        body = dict(_IMAGE_BODY)
         body["message"] = (
             prompt if prompt.lstrip().startswith("/imagine") else f"/imagine {prompt}"
         )
         body["workspaceIds"] = [project_id] if project_id else []
 
-        image_urls: list[str] = []
-        soft_stopped = False
+        referer_path = f"/project/{project_id}" if project_id else "/"
+        return await self._submit_and_collect(
+            body=body,
+            referer_path=referer_path,
+            extract_asset=_extract_image_url,
+            asset_label="image_chunk",
+            log=log,
+        )
+
+    async def videoize(
+        self,
+        prompt: str,
+        *,
+        aspect_ratio: str = "3:2",
+        resolution: str = "720p",
+        duration: int = 10,
+        mode: str = "custom",
+        log: Callable[[str], None] | None = None,
+    ) -> list[bytes]:
+        """Submit a video-generation request and return the bytes of the .mp4."""
+        # Strip any leading slash command — videoize uses --mode= suffix instead.
+        clean_prompt = prompt.lstrip()
+        if clean_prompt.startswith("/imagine"):
+            clean_prompt = clean_prompt[len("/imagine"):].lstrip()
+        message = f"{clean_prompt} --mode={mode}"
+
+        # The frontend generates a fresh UUID for the post; server reuses it
+        # as the videoPostId. parentPostId == this id means "fresh generation"
+        # (not a remix or extension).
+        post_id = str(uuid.uuid4())
+
+        body = {
+            "temporary": True,
+            "modelName": "imagine-video-gen",
+            "message": message,
+            "enableSideBySide": True,
+            "responseMetadata": {
+                "experiments": [],
+                "modelConfigOverride": {
+                    "modelMap": {
+                        "videoGenModelConfig": {
+                            "parentPostId": post_id,
+                            "aspectRatio": aspect_ratio,
+                            "videoLength": duration,
+                            "resolutionName": resolution,
+                        }
+                    }
+                },
+            },
+        }
+        return await self._submit_and_collect(
+            body=body,
+            referer_path="/imagine",
+            extract_asset=_extract_video_url,
+            asset_label="video_chunk",
+            log=log,
+        )
+
+    async def _submit_and_collect(
+        self,
+        *,
+        body: dict[str, Any],
+        referer_path: str,
+        extract_asset: EventExtractor,
+        asset_label: str,
+        log: Callable[[str], None] | None,
+    ) -> list[bytes]:
+        """POST to /conversations/new, stream-parse, download final assets."""
 
         def _emit(msg: str) -> None:
             if log:
                 log(msg)
+
+        urls: list[str] = []
+        soft_stopped = False
 
         async with httpx.AsyncClient(
             timeout=self.timeout, cookies=self.cookies, follow_redirects=True
@@ -186,7 +255,7 @@ class GrokAPIClient:
                 async with client.stream(
                     "POST",
                     GROK_BASE + ENDPOINT_NEW_CONVERSATION,
-                    headers=self._headers(project_id),
+                    headers=self._headers(referer_path),
                     json=body,
                 ) as resp:
                     if resp.status_code == 401:
@@ -195,8 +264,6 @@ class GrokAPIClient:
                             "401 from /conversations/new — session cookie invalid",
                         )
                     if resp.status_code == 403:
-                        # cf_clearance expired or x-statsig-id rejected. Caller
-                        # should fall back to Playwright which can refresh.
                         raise GrokAPIError(
                             "provider_blocked",
                             "403 — Cloudflare or statsig challenge",
@@ -209,8 +276,7 @@ class GrokAPIClient:
                     if resp.status_code >= 400:
                         snippet = (await resp.aread())[:200]
                         raise GrokAPIError(
-                            "unknown_error",
-                            f"{resp.status_code}: {snippet!r}",
+                            "unknown_error", f"{resp.status_code}: {snippet!r}"
                         )
 
                     buf = ""
@@ -223,35 +289,34 @@ class GrokAPIClient:
                                 evt = json.loads(obj_text)
                             except json.JSONDecodeError:
                                 continue
-                            self._handle_event(evt, image_urls, _emit)
-                            response = (
-                                evt.get("result", {}).get("response", {})
-                            )
+                            url = extract_asset(evt)
+                            if url and url not in urls:
+                                urls.append(url)
+                                _emit(f"{asset_label} done: {url}")
+                            response = (evt.get("result") or {}).get("response") or {}
                             if response.get("isSoftStop"):
                                 soft_stopped = True
                         if last_end:
                             buf = buf[last_end:]
-                        # Once stream signals stop AND we have a finished image,
-                        # short-circuit — saves up to ~10s of trailing tokens.
-                        if soft_stopped and image_urls:
+                        if soft_stopped and urls:
                             break
             except httpx.HTTPError as exc:
                 raise GrokAPIError(
                     "network_error", f"HTTP error: {exc}", retryable=True
                 ) from exc
 
-            if not image_urls:
+            if not urls:
                 raise GrokAPIError(
                     "unknown_error",
-                    "stream ended without a completed image_chunk",
+                    f"stream ended without a completed {asset_label}",
                     retryable=True,
                 )
 
-            # Asset URLs are relative — download each. Reusing the same cookie
-            # jar lets assets.grok.com authorize the fetch under the user's
-            # session (the URL contains the user UUID).
+            # Download each asset. Reusing the same cookie jar lets
+            # assets.grok.com authorize the fetch under the user's session
+            # (the URL contains the user UUID).
             results: list[bytes] = []
-            for url in image_urls:
+            for url in urls:
                 full = f"{ASSETS_BASE}/{url.lstrip('/')}"
                 try:
                     r = await client.get(
@@ -270,27 +335,34 @@ class GrokAPIClient:
                 results.append(r.content)
             if not results:
                 raise GrokAPIError(
-                    "unknown_error",
-                    "all asset downloads failed",
-                    retryable=True,
+                    "unknown_error", "all asset downloads failed", retryable=True
                 )
             return results
 
-    @staticmethod
-    def _handle_event(
-        evt: dict, image_urls: list[str], emit: Callable[[str], None]
-    ) -> None:
-        response = (evt.get("result") or {}).get("response") or {}
-        card = response.get("cardAttachment")
-        if not card:
-            return
-        try:
-            data = json.loads(card.get("jsonData", "{}"))
-        except json.JSONDecodeError:
-            return
-        ic = data.get("image_chunk") or {}
-        url = ic.get("imageUrl")
-        progress = ic.get("progress")
-        if url and progress == 100 and url not in image_urls:
-            image_urls.append(url)
-            emit(f"image_chunk done: {url}")
+
+def _extract_image_url(evt: dict) -> str | None:
+    """Return imageUrl from a completed image_chunk event."""
+    response = (evt.get("result") or {}).get("response") or {}
+    card = response.get("cardAttachment")
+    if not card:
+        return None
+    try:
+        data = json.loads(card.get("jsonData", "{}"))
+    except json.JSONDecodeError:
+        return None
+    ic = data.get("image_chunk") or {}
+    url = ic.get("imageUrl")
+    if url and ic.get("progress") == 100:
+        return url
+    return None
+
+
+def _extract_video_url(evt: dict) -> str | None:
+    """Return videoUrl from a completed streamingVideoGenerationResponse event."""
+    response = (evt.get("result") or {}).get("response") or {}
+    vg = response.get("streamingVideoGenerationResponse")
+    if not vg:
+        return None
+    if vg.get("progress") != 100:
+        return None
+    return vg.get("videoUrl")

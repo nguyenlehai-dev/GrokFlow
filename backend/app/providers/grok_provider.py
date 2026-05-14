@@ -141,6 +141,13 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
+            if job.job_type == "video":
+                # Same idea for video — much simpler body, no project scope,
+                # but cuts ~15s of DOM clicking off the front of every job.
+                api_result = await self._run_video_via_api(job)
+                if api_result is not None:
+                    return api_result
+
             if job.grok_project_id and job.job_type == "image":
                 # Best-effort project-scoped flow. Falls back to /imagine
                 # internally if the chat input or response can't be
@@ -272,28 +279,16 @@ class GrokProvider(Provider):
                 except Exception:  # noqa: BLE001
                     pass
 
-    async def _run_image_via_api(self, job: JobInput) -> JobResult | None:
-        """Pure-HTTP /imagine via grok.com/rest/app-chat/conversations/new.
+    async def _build_api_session(
+        self, job: JobInput
+    ) -> tuple[GrokAPIClient, str, str] | None:
+        """Prepare a GrokAPIClient bound to this profile's live cookies + statsig.
 
-        Strategy:
-          1. Ensure the VNC Chromium is up (it owns the cf_clearance + sso
-             cookies that were established during admin Auto-login).
-          2. Attach via CDP, pull live cookies + UA out of the context.
-          3. POST through GrokAPIClient and stream-parse the response.
+        Returns `(client, profile_id, tag)` on success, or None to signal
+        "fall back to Playwright" (no VNC, no cookies, no statsig, etc.).
 
-        Returns:
-          - JobResult on definitive success or definitive failure (4xx etc.)
-          - None when we couldn't even set up the API call (no VNC, no
-            cookies). Caller falls back to the Playwright pipelines.
-
-        We intentionally swallow GrokAPIError(provider_blocked) and return
-        None instead of failing the job: a 403 here usually means Grok
-        rotated their statsig token, and the Playwright path can still
-        complete because it runs inside a real browser session.
-
-        Gated behind GROK_API_ENABLED env var. Default `true` now that
-        x-statsig-id capture works; set `GROK_API_ENABLED=0` to roll back
-        to pure-Playwright operation without redeploying.
+        Shared by image + video paths so the cookie/statsig extraction is
+        only written once.
         """
         if os.getenv("GROK_API_ENABLED", "true").lower() in ("0", "false", "no"):
             return None
@@ -320,11 +315,6 @@ class GrokProvider(Provider):
             self._log(tag, f"CDP discovery error: {exc}")
             return None
 
-        # Pull cookies + x-statsig-id out of the live context. Cookies come
-        # straight from the cookie jar (no page required). x-statsig-id is
-        # only produced as an outgoing request header by the Statsig SDK
-        # running on grok.com, so we open a short-lived page, listen for
-        # any `/rest/*` request, and capture the header off the wire.
         cookies_dict: dict[str, str] = {}
         statsig_id: str | None = None
         try:
@@ -335,10 +325,7 @@ class GrokProvider(Provider):
                     self._log(tag, f"connect_over_cdp failed: {exc}")
                     return None
                 # Important: do NOT call browser.close() — that would
-                # terminate the remote Chromium that other paths (and the
-                # very fallback we may want to use) depend on. The
-                # async_playwright context manager only releases our
-                # client-side connection, leaving the remote alive.
+                # terminate the remote Chromium that other paths depend on.
                 ctx = browser.contexts[0] if browser.contexts else None
                 if ctx is None:
                     self._log(tag, "no browser context — fallback")
@@ -346,9 +333,6 @@ class GrokProvider(Provider):
                 raw_cookies = await ctx.cookies("https://grok.com")
                 cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
 
-                # Capture x-statsig-id from any /rest/* request. We trigger
-                # one by fetching /rest/rate-limits — a tiny endpoint Grok
-                # always pings on page load, so it's cheap and reliable.
                 cached = _STATSIG_CACHE.get(profile_id)
                 if cached and time.monotonic() - cached[1] < _STATSIG_TTL_S:
                     statsig_id = cached[0]
@@ -361,9 +345,6 @@ class GrokProvider(Provider):
             self._log(tag, f"cookie/statsig extraction failed: {exc}")
             return None
 
-        # Sanity: without the session cookie we can't authenticate. Falling
-        # back keeps the job from failing for "cookie_expired" when the
-        # profile actually IS logged in but we just couldn't read the jar.
         if "sso" not in cookies_dict:
             self._log(tag, "no `sso` cookie — fallback to Playwright path")
             return None
@@ -372,27 +353,118 @@ class GrokProvider(Provider):
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
         )
-        # `headless=true` UAs leak the word "HeadlessChrome" which Grok
-        # filters; strip it so the server sees a normal Chrome UA.
+        # `headless=true` UAs leak the word "HeadlessChrome" which Grok filters.
         ua = ua.replace("HeadlessChrome", "Chrome")
 
         self._log(
             tag,
-            f"calling /conversations/new (project={job.grok_project_id}, "
-            f"cookies={len(cookies_dict)}, "
+            f"calling /conversations/new (job_type={job.job_type}, "
+            f"project={job.grok_project_id}, cookies={len(cookies_dict)}, "
             f"statsig={'yes' if statsig_id else 'no'})",
         )
 
-        # No statsig → Grok will 403 every time. Skip the network round-trip
-        # and let Playwright handle this job; better to fail fast than wait
-        # ~5s for a guaranteed-failure POST.
         if not statsig_id:
             self._log(tag, "no x-statsig-id available — skipping API path")
             return None
 
-        client = GrokAPIClient(cookies=cookies_dict, user_agent=ua,
-                               x_statsig_id=statsig_id,
-                               timeout=self.IMAGE_TIMEOUT_MS / 1000)
+        # Video can take ~3 min on Grok's queue; use the bigger timeout.
+        timeout_s = (
+            self.VIDEO_TIMEOUT_MS if job.job_type == "video"
+            else self.IMAGE_TIMEOUT_MS
+        ) / 1000
+
+        client = GrokAPIClient(
+            cookies=cookies_dict, user_agent=ua,
+            x_statsig_id=statsig_id, timeout=timeout_s,
+        )
+        return client, profile_id, tag
+
+    async def _run_video_via_api(self, job: JobInput) -> JobResult | None:
+        """Pure-HTTP video generation via the Imagine studio endpoint.
+
+        Body is much simpler than image — just modelName=imagine-video-gen
+        plus modelConfigOverride.videoGenModelConfig (aspect, duration,
+        resolution). Returns None on setup failure so the Playwright video
+        flow takes over.
+        """
+        session = await self._build_api_session(job)
+        if session is None:
+            return None
+        client, profile_id, tag = session
+
+        opts = job.options or {}
+        aspect = str(opts.get("aspect_ratio") or opts.get("aspect") or "3:2")
+        # Frontend job options may store quality as "480p"/"720p" already, or
+        # as legacy "low"/"high" — map both onto the resolution Grok accepts.
+        quality = str(opts.get("resolution") or opts.get("quality") or "720p")
+        if quality in ("low", "draft"):
+            quality = "480p"
+        elif quality in ("high", "hd"):
+            quality = "720p"
+        try:
+            duration = int(opts.get("duration") or opts.get("video_length") or 10)
+        except (TypeError, ValueError):
+            duration = 10
+        mode = str(opts.get("mode") or "custom")
+
+        try:
+            video_bytes_list = await client.videoize(
+                prompt=job.prompt,
+                aspect_ratio=aspect,
+                resolution=quality,
+                duration=duration,
+                mode=mode,
+                log=lambda m: self._log(tag, m),
+            )
+        except GrokAPIError as exc:
+            self._log(tag, f"API error: {exc.code} — {exc.message}")
+            if exc.code == "provider_blocked":
+                _STATSIG_CACHE.pop(profile_id, None)
+            if exc.code == "cookie_expired":
+                return JobResult(
+                    success=False,
+                    error_code="cookie_expired",
+                    error_message=exc.message,
+                    retryable=False,
+                )
+            return None
+
+        files = [
+            ResultFile(bytes=b, name=f"video-{i}.mp4", mime="video/mp4")
+            for i, b in enumerate(video_bytes_list)
+        ]
+        return JobResult(success=True, files=files,
+                         extra={"path": "api", "type": "video",
+                                "count": len(files)})
+
+    async def _run_image_via_api(self, job: JobInput) -> JobResult | None:
+        """Pure-HTTP /imagine via grok.com/rest/app-chat/conversations/new.
+
+        Strategy:
+          1. Ensure the VNC Chromium is up (it owns the cf_clearance + sso
+             cookies that were established during admin Auto-login).
+          2. Attach via CDP, pull live cookies + UA out of the context.
+          3. POST through GrokAPIClient and stream-parse the response.
+
+        Returns:
+          - JobResult on definitive success or definitive failure (4xx etc.)
+          - None when we couldn't even set up the API call (no VNC, no
+            cookies). Caller falls back to the Playwright pipelines.
+
+        We intentionally swallow GrokAPIError(provider_blocked) and return
+        None instead of failing the job: a 403 here usually means Grok
+        rotated their statsig token, and the Playwright path can still
+        complete because it runs inside a real browser session.
+
+        Gated behind GROK_API_ENABLED env var. Default `true` now that
+        x-statsig-id capture works; set `GROK_API_ENABLED=0` to roll back
+        to pure-Playwright operation without redeploying.
+        """
+        session = await self._build_api_session(job)
+        if session is None:
+            return None
+        client, profile_id, tag = session
+
         try:
             image_bytes_list = await client.imagine(
                 prompt=job.prompt,
@@ -401,14 +473,8 @@ class GrokProvider(Provider):
             )
         except GrokAPIError as exc:
             self._log(tag, f"API error: {exc.code} — {exc.message}")
-            # 403 means the statsig token Grok rejected — purge the cache
-            # so the next attempt re-captures a fresh one. Without this we'd
-            # keep replaying a stale token until the TTL expires.
             if exc.code == "provider_blocked":
                 _STATSIG_CACHE.pop(profile_id, None)
-            # Cookie expired is definitive — surface to worker so the
-            # profile state machine flips to need_login. Other errors
-            # fall through to Playwright as a safety net.
             if exc.code == "cookie_expired":
                 return JobResult(
                     success=False,
