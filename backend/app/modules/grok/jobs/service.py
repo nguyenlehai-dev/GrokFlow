@@ -17,6 +17,7 @@ async def _resolve_profile_for_job(
     user_id: uuid.UUID,
     provider: str,
     requester_domain_id: uuid.UUID | None = None,
+    excluded_profile_ids: list[uuid.UUID] | list[str] | None = None,
 ) -> Profile | None:
     """Customer cannot use their own profile — always pick from admin pool.
 
@@ -90,6 +91,15 @@ async def _resolve_profile_for_job(
             (User.domain_id == requester_domain_id)
             | Profile.id.in_(assigned_to_domain)
         )
+    # Honor profile rotation requests — when a worker retries a job whose
+    # original profile hit a quota / rate-limit, it passes the failed
+    # profile id(s) here so the resolver picks a sibling instead.
+    if excluded_profile_ids:
+        excluded_uuids = [
+            uuid.UUID(str(p)) if not isinstance(p, uuid.UUID) else p
+            for p in excluded_profile_ids
+        ]
+        where_clauses.append(Profile.id.not_in(excluded_uuids))
     stmt = (
         select(Profile)
         .join(User, User.id == Profile.user_id)
@@ -115,6 +125,37 @@ async def _resolve_profile_for_job(
     raise InvalidPayload(
         f"Không có profile {provider} nào logged_in. Admin cần Auto-login profile trước."
     )
+
+
+async def pick_alternate_profile(
+    db: AsyncSession,
+    job: Job,
+) -> Profile | None:
+    """Find a fresh profile for a job whose previous one hit rate-limit.
+
+    Reads `_banned_profiles` from the job's input_payload (worker writes
+    failed profile ids there before clearing job.profile_id). Returns
+    None if the pool is exhausted — caller should mark the job failed.
+    """
+    payload = job.input_payload or {}
+    banned = payload.get("_banned_profiles") or []
+    owner = await db.get(User, job.user_id)
+    requester_domain_id = (
+        owner.domain_id if owner and owner.role != "super_admin" else None
+    )
+    try:
+        return await _resolve_profile_for_job(
+            db,
+            requested_id=None,
+            user_id=job.user_id,
+            provider=job.provider,
+            requester_domain_id=requester_domain_id,
+            excluded_profile_ids=banned,
+        )
+    except InvalidPayload:
+        # Pool exhausted (all profiles either down or already banned for
+        # this job). Caller decides what to do — usually mark failed.
+        return None
 
 
 async def create_job(

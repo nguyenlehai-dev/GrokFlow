@@ -23,6 +23,7 @@ from app.core.sanitize import scrub_secrets
 from app.models import Job, JobLog, Profile, User
 from app.modules.admin.notifications import service as notif
 from app.modules.grok.files import service as files_service
+from app.modules.grok.jobs import service as jobs_service
 from app.providers import JobInput, get_provider
 from app.workers import webhook
 
@@ -181,6 +182,29 @@ async def process_one(db: AsyncSession, job: Job) -> None:
     job.started_at = datetime.now(timezone.utc)
     db.add(JobLog(job_id=job.id, level="info",
                   message=f"Worker {WORKER_ID} picked up job (retry={job.retry_count})"))
+
+    # Auto-rotate: if a prior retry banished the original profile, the
+    # profile_id is now NULL. Pick a fresh one from the pool (skipping any
+    # already-banned). If the pool is exhausted for this job, fail
+    # cleanly instead of crashing in _try_acquire_slot.
+    if job.profile_id is None:
+        alt = await jobs_service.pick_alternate_profile(db, job)
+        if alt is None:
+            job.status = "failed"
+            job.completed_at = datetime.now(timezone.utc)
+            job.error_message = "[no_profile] All profiles exhausted (rate-limited or banned)."
+            db.add(JobLog(
+                job_id=job.id, level="error",
+                message="No alternate profile available after rotation — failing.",
+            ))
+            await db.commit()
+            return
+        job.profile_id = alt.id
+        db.add(JobLog(
+            job_id=job.id, level="info",
+            message=f"Rotated to profile {str(alt.id)[:8]} ({alt.name})",
+        ))
+        await db.flush()
 
     slot_held: uuid.UUID | None = None
     if job.profile_id:
@@ -348,6 +372,28 @@ async def process_one(db: AsyncSession, job: Job) -> None:
                 delay = table[min(job.retry_count - 1, len(table) - 1)]
                 job.next_attempt_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
                 job.status = "queued"
+
+                # Profile rotation: when the failure was a per-profile
+                # quota/rate-limit (or browser crash that suggests the
+                # Chromium itself is degraded), banish this profile from
+                # the job's retries. Worker re-resolves to a sibling on
+                # the next pickup. Without this the same exhausted
+                # profile keeps catching the retry and burns the budget.
+                ROTATE_CODES = {"rate_limited", "browser_crashed"}
+                if error_code in ROTATE_CODES and job.profile_id:
+                    payload = dict(job.input_payload or {})
+                    banned = list(payload.get("_banned_profiles") or [])
+                    pid_str = str(job.profile_id)
+                    if pid_str not in banned:
+                        banned.append(pid_str)
+                    payload["_banned_profiles"] = banned
+                    job.input_payload = payload
+                    db.add(JobLog(
+                        job_id=job.id, level="info",
+                        message=f"Rotating away from profile {pid_str[:8]} (code={error_code}), banned={len(banned)}",
+                    ))
+                    job.profile_id = None  # ← forces resolver on next pickup
+
                 db.add(JobLog(job_id=job.id, level="info",
                               message=f"Retry after ~{delay}s ({job.retry_count}/{job.max_retry}, code={error_code})"))
             else:
