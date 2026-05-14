@@ -273,8 +273,15 @@ class GrokProvider(Provider):
                 # Always go to /imagine — the dedicated /imagine/video URL
                 # was deprecated in late 2025 (renders an empty page now).
                 # Image vs Video is selected via the in-page radio toggle.
-                target_url = self.GROK_IMAGINE
-                self._log(tag, f"goto {target_url} (job_type={job.job_type})")
+                # If the job was scoped to a GrokProject, hit that URL
+                # instead so chat history / presets stay separated per
+                # tenant. Grok ignores the trailing /imagine when inside a
+                # project context — the mode toggle handles image/video.
+                if job.grok_project_id:
+                    target_url = f"https://grok.com/project/{job.grok_project_id}"
+                else:
+                    target_url = self.GROK_IMAGINE
+                self._log(tag, f"goto {target_url} (job_type={job.job_type}, project={job.grok_project_id or '-'})")
                 # Serialize the goto step across concurrent jobs on this
                 # Chromium — N parallel React boots can deadlock the renderer
                 # and trigger ERR_ABORTED / TimeoutError storms.

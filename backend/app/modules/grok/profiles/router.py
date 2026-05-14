@@ -24,7 +24,7 @@ from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
 from app.core.deps import SuperAdminUser
 from app.services.nginx_sync import refresh_vnc_map
-from app.models import Domain, Profile, ProfileDomainAssignment, User
+from app.models import Domain, GrokProject, Profile, ProjectDomainAssignment, User
 from app.modules.admin.audit import service as audit
 
 
@@ -49,16 +49,17 @@ async def _assert_profile_accessible(
     owner = await db.get(User, profile.user_id)
     if owner and owner.domain_id == admin.domain_id:
         return
-    # Assigned-to-tenant case. Mirror the visibility join used in
-    # list_profiles() so "I can see it" implies "I can act on it".
-    # NOTE: profile_domain_assignments has a composite PK (profile_id,
-    # domain_id) — no surrogate `id`. Project the PK columns directly.
-    from app.models import ProfileDomainAssignment
+    # Assigned-to-tenant case. After 0020 migration the relation goes
+    # Profile → GrokProject → Domain. Profile is accessible if ANY of its
+    # projects has an assignment to admin's domain.
     assigned = (await db.execute(
-        select(ProfileDomainAssignment.profile_id).where(
-            ProfileDomainAssignment.profile_id == profile.id,
-            ProfileDomainAssignment.domain_id == admin.domain_id,
+        select(GrokProject.id)
+        .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
+        .where(
+            GrokProject.profile_id == profile.id,
+            ProjectDomainAssignment.domain_id == admin.domain_id,
         )
+        .limit(1)
     )).first()
     if assigned:
         return
@@ -155,13 +156,18 @@ async def list_profiles(user: CurrentUser, db: DbSession) -> list[Profile]:
 
 
 def _profile_ids_assigned_to_domain(domain_id):
-    """Sub-select of profile IDs explicitly assigned to `domain_id`.
-    Inline-able into a WHERE … IN (…) clause."""
-    from app.models import ProfileDomainAssignment
+    """Sub-select: profile IDs that have at least one GrokProject
+    assigned to `domain_id`. Used as `Profile.id.in_(...)` to filter
+    list_profiles for tenant admins.
 
+    The join goes Profile → GrokProject → ProjectDomainAssignment, so
+    a profile is visible to a tenant the moment any of its projects is
+    granted to that tenant's domain.
+    Inline-able into a WHERE … IN (…) clause."""
     return (
-        select(ProfileDomainAssignment.profile_id)
-        .where(ProfileDomainAssignment.domain_id == domain_id)
+        select(GrokProject.profile_id)
+        .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
+        .where(ProjectDomainAssignment.domain_id == domain_id)
         .scalar_subquery()
     )
 
@@ -543,16 +549,15 @@ async def disable_profile(profile_id: uuid.UUID, _admin: AdminUser, db: DbSessio
     return profile
 
 
-# ─── Profile ↔ Domain assignment surface ────────────────────────────────
-# Only super_admin manages assignments. Per-domain admin can read its own
-# domain's assigned set (read-only).
+# ─── Profile-level domain summary (read-only) ───────────────────────────
+# After v0.5, assignments live on GrokProject (see app.modules.grok.projects).
+# We keep a read-only summary endpoint here so existing UIs that show "this
+# profile serves N domains" still work — the write side moved to
+# /api/grok-projects/{project_id}/domains.
+
 
 class ProfileDomainsOut(BaseModel):
     profile_id: uuid.UUID
-    domain_ids: list[uuid.UUID]
-
-
-class ProfileDomainsUpdate(BaseModel):
     domain_ids: list[uuid.UUID]
 
 
@@ -560,6 +565,13 @@ class ProfileDomainsUpdate(BaseModel):
 async def get_profile_domains(
     profile_id: uuid.UUID, user: CurrentUser, db: DbSession,
 ) -> ProfileDomainsOut:
+    """Read-only union of domains across all projects of this profile.
+
+    Returns DISTINCT domain_ids so a tenant counts once even when several
+    of the profile's projects are assigned to them. Editing per-domain
+    assignments is now done at project granularity — use the projects
+    module endpoints.
+    """
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
@@ -567,55 +579,10 @@ async def get_profile_domains(
         raise PermissionDenied()
     rows = (
         await db.execute(
-            select(ProfileDomainAssignment.domain_id)
-            .where(ProfileDomainAssignment.profile_id == profile_id)
+            select(ProjectDomainAssignment.domain_id)
+            .join(GrokProject, GrokProject.id == ProjectDomainAssignment.project_id)
+            .where(GrokProject.profile_id == profile_id)
+            .distinct()
         )
     ).scalars().all()
     return ProfileDomainsOut(profile_id=profile_id, domain_ids=list(rows))
-
-
-@router.put("/{profile_id}/domains", response_model=ProfileDomainsOut)
-async def set_profile_domains(
-    profile_id: uuid.UUID,
-    payload: ProfileDomainsUpdate,
-    _super: SuperAdminUser,
-    db: DbSession,
-) -> ProfileDomainsOut:
-    """Replace the set of domains that can see / pick this profile.
-
-    Pass an empty list to revoke all assignments (profile becomes invisible
-    to every tenant unless its owner happens to be in their domain).
-    """
-    profile = await db.get(Profile, profile_id)
-    if not profile:
-        raise NotFound("profile")
-
-    # Validate every domain_id exists — fail-fast keeps partial writes out
-    # of the join table.
-    if payload.domain_ids:
-        found = (
-            await db.execute(
-                select(Domain.id).where(Domain.id.in_(payload.domain_ids))
-            )
-        ).scalars().all()
-        missing = set(payload.domain_ids) - set(found)
-        if missing:
-            raise InvalidPayload(f"Unknown domain_ids: {sorted(str(m) for m in missing)}")
-
-    # Replace = delete-then-insert in one transaction. The join table is
-    # tiny (handful of rows per profile) so the simple approach beats a
-    # diff-based upsert in clarity.
-    await db.execute(
-        ProfileDomainAssignment.__table__.delete()
-        .where(ProfileDomainAssignment.profile_id == profile_id)
-    )
-    for did in payload.domain_ids:
-        db.add(ProfileDomainAssignment(profile_id=profile_id, domain_id=did))
-
-    await audit.log_action(
-        db, user_id=_super.id, action="profile_domains_set",
-        target_type="profile", target_id=profile_id,
-        metadata={"domain_ids": [str(d) for d in payload.domain_ids]},
-    )
-    await db.commit()
-    return ProfileDomainsOut(profile_id=profile_id, domain_ids=list(payload.domain_ids))

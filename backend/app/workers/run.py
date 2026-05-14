@@ -209,6 +209,16 @@ async def process_one(db: AsyncSession, job: Job) -> None:
         # etc.) we cut the cord rather than letting the job sit in
         # processing_provider forever. Image: 5 min, video: 8 min.
         hard_cap = 300 if job.job_type != "video" else 480
+        # Look up the project slug (if scoped) so the worker hits
+        # grok.com/project/<slug> instead of /imagine, keeping each
+        # tenant's chat history separated.
+        grok_project_id: str | None = None
+        if job.project_id:
+            from app.models import GrokProject
+            gp = await db.get(GrokProject, job.project_id)
+            if gp:
+                grok_project_id = gp.grok_project_id
+
         # Run provider as a task + watchdog that aborts on user cancel.
         provider_task = asyncio.create_task(provider.run(JobInput(
             prompt=job.prompt,
@@ -216,6 +226,7 @@ async def process_one(db: AsyncSession, job: Job) -> None:
             options=job.input_payload,
             profile_path=profile.profile_path if profile else "",
             attachments=attachments,
+            grok_project_id=grok_project_id,
         )))
         watcher = asyncio.create_task(_watch_for_cancel(job.id, provider_task))
         cancelled_mid_run = False

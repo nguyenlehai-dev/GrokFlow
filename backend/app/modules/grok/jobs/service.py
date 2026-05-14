@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
-from app.models import Job, JobLog, Profile, ProfileDomainAssignment, User
+from app.models import Job, JobLog, GrokProject, Profile, ProjectDomainAssignment, User
 from app.modules.admin.audit import service as audit
 
 
@@ -33,12 +33,14 @@ async def _resolve_profile_for_job(
 
     # A profile is visible to a tenant in `requester_domain_id` if EITHER
     #   (a) the profile's owner is in that domain (legacy direct ownership), OR
-    #   (b) an explicit (profile, domain) row exists in profile_domain_assignments
-    # When requester_domain_id is None (super_admin path) the visibility filter
-    # is skipped entirely.
+    #   (b) the profile has at least one GrokProject assigned to that domain
+    #       via project_domain_assignments.
+    # When requester_domain_id is None (super_admin path) the visibility
+    # filter is skipped entirely.
     assigned_to_domain = (
-        select(ProfileDomainAssignment.profile_id)
-        .where(ProfileDomainAssignment.domain_id == requester_domain_id)
+        select(GrokProject.profile_id)
+        .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
+        .where(ProjectDomainAssignment.domain_id == requester_domain_id)
         .scalar_subquery()
         if requester_domain_id is not None
         else None
@@ -55,15 +57,17 @@ async def _resolve_profile_for_job(
             raise InvalidPayload(f"Profile provider mismatch: profile={profile.provider}, requested={provider}")
         if profile.status not in {"logged_in", "running_job"}:
             raise InvalidPayload(f"Profile not ready (status={profile.status}). Ask admin to refresh.")
-        # Tenant visibility check — same rule as auto-pick.
+        # Tenant visibility check — same rule as auto-pick, via project assignments.
         if requester_domain_id is not None and owner.domain_id != requester_domain_id:
             visible = (
                 await db.execute(
-                    select(ProfileDomainAssignment.profile_id)
+                    select(GrokProject.id)
+                    .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
                     .where(
-                        ProfileDomainAssignment.profile_id == profile.id,
-                        ProfileDomainAssignment.domain_id == requester_domain_id,
+                        GrokProject.profile_id == profile.id,
+                        ProjectDomainAssignment.domain_id == requester_domain_id,
                     )
+                    .limit(1)
                 )
             ).first()
             if not visible:
@@ -139,10 +143,28 @@ async def create_job(
         requester_domain_id=requester_domain_id,
     )
 
+    # Pick the specific GrokProject the worker should use. Rules:
+    #   - tenant: project assigned to their domain on this profile
+    #   - super_admin: first project of the profile (no scope filter)
+    # If the profile has no projects yet we leave project_id NULL — worker
+    # falls back to the legacy grok.com/imagine root URL. This keeps
+    # bootstrapping smooth: super_admin can run a job before defining
+    # projects.
+    project_q = select(GrokProject).where(GrokProject.profile_id == profile.id)
+    if requester_domain_id is not None:
+        project_q = (
+            project_q
+            .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
+            .where(ProjectDomainAssignment.domain_id == requester_domain_id)
+        )
+    project_q = project_q.order_by(GrokProject.created_at.asc()).limit(1)
+    picked_project = (await db.execute(project_q)).scalar_one_or_none()
+
     job = Job(
         user_id=user_id,
         api_key_id=api_key_id,
         profile_id=profile.id,
+        project_id=picked_project.id if picked_project else None,
         provider=provider,
         job_type=job_type,
         prompt=prompt,

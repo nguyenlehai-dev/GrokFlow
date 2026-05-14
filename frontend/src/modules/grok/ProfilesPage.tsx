@@ -6,7 +6,7 @@ import { useAuthStore } from "@/core/auth/store";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { UploadCookiesModal } from "./UploadCookiesModal";
 import { AutoLoginModal } from "./AutoLoginModal";
-import { ProfileDomainsModal } from "./ProfileDomainsModal";
+import { ProjectsModal } from "./ProjectsModal";
 
 interface Profile {
   id: string;
@@ -34,7 +34,7 @@ export function ProfilesPage() {
   const [cookiesFor, setCookiesFor] = useState<string | null>(null);
   const [autoLoginFor, setAutoLoginFor] = useState<string | null>(null);
   // Per-row state for the domain assignment modal — super_admin only.
-  const [domainsFor, setDomainsFor] = useState<{ id: string; name: string } | null>(null);
+  const [projectsFor, setProjectsFor] = useState<{ id: string; name: string } | null>(null);
 
   const disable = useMutation({
     mutationFn: (id: string) => api.post(`/api/profiles/${id}/disable`),
@@ -124,10 +124,10 @@ export function ProfilesPage() {
                         {isSuper && (
                           <button
                             className="btn-ghost"
-                            onClick={() => setDomainsFor({ id: p.id, name: p.name })}
-                            title="Phân quyền domain (chọn tenant nào được dùng)"
+                            onClick={() => setProjectsFor({ id: p.id, name: p.name })}
+                            title="Quản lý projects + phân quyền domain per-project"
                           >
-                            Domains
+                            Projects
                           </button>
                         )}
                         <button className="btn-ghost" onClick={() => stopVnc.mutate(p.id)} title="Tắt browser, giải phóng RAM">Stop</button>
@@ -153,11 +153,11 @@ export function ProfilesPage() {
       {open && <CreateProfileModal onClose={() => setOpen(false)} />}
       {cookiesFor && <UploadCookiesModal profileId={cookiesFor} onClose={() => setCookiesFor(null)} />}
       {autoLoginFor && <AutoLoginModal profileId={autoLoginFor} onClose={() => setAutoLoginFor(null)} />}
-      {domainsFor && (
-        <ProfileDomainsModal
-          profileId={domainsFor.id}
-          profileName={domainsFor.name}
-          onClose={() => setDomainsFor(null)}
+      {projectsFor && (
+        <ProjectsModal
+          profileId={projectsFor.id}
+          profileName={projectsFor.name}
+          onClose={() => setProjectsFor(null)}
         />
       )}
     </div>

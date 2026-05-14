@@ -143,22 +143,48 @@ class Profile(Base, TimestampMixin):
     jobs: Mapped[list["Job"]] = relationship(back_populates="profile")
 
 
-class ProfileDomainAssignment(Base):
-    """Many-to-many: which Grok profiles each customer domain can pull from.
+class GrokProject(Base, TimestampMixin):
+    """A 'project' inside a single Grok account (= one Profile).
 
-    A profile is visible to a customer in domain X if EITHER:
-      - an explicit row (profile_id, X) exists here, OR
-      - no rows exist for this profile AND the profile's owner is in domain X
-        (legacy direct-ownership fallback, kept for backward compat with
-        profiles created before this join table existed).
+    Grok's web UI lets you keep chat history / presets / brand voice
+    separated by project. We mirror that as a row here: one Profile
+    (browser session) can hold N projects. Each project gets assigned to
+    specific tenant domain(s) via ProjectDomainAssignment, so the same
+    Profile can serve multiple customers without their data bleeding
+    into each other's workspace.
 
-    Only `super_admin` can edit assignments; per-domain `admin` can read its
-    own domain's set and a `user` doesn't see this surface at all.
+    Identification:
+      - `grok_project_id` = the slug Grok uses in its URL
+        (https://grok.com/project/<slug>). Worker navigates here before
+        each prompt submit.
+      - `name` is the human label super_admin sets in our UI.
     """
-    __tablename__ = "profile_domain_assignments"
+    __tablename__ = "grok_projects"
 
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
     profile_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("profiles.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    grok_project_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+
+
+class ProjectDomainAssignment(Base):
+    """Many-to-many: which GrokProject each customer domain can pull from.
+
+    Replaces the old ProfileDomainAssignment — granularity moved one level
+    down so a single Grok account can serve multiple tenants in parallel
+    via separate projects. Migration 0020 drops the legacy table.
+
+    Only `super_admin` edits these. Per-domain `admin` can read their
+    own set; `user` doesn't see this surface.
+    """
+    __tablename__ = "project_domain_assignments"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("grok_projects.id", ondelete="CASCADE"),
         primary_key=True,
     )
     domain_id: Mapped[uuid.UUID] = mapped_column(
@@ -177,6 +203,12 @@ class Job(Base, TimestampMixin):
     user_id: Mapped[uuid.UUID] = mapped_column(UUIDType, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType, ForeignKey("api_keys.id", ondelete="SET NULL"))
     profile_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType, ForeignKey("profiles.id", ondelete="SET NULL"))
+    # When the auto-pick scoped to a project assignment, we record it here
+    # so the worker can navigate to grok.com/project/<grok_project_id>
+    # before submitting the prompt. NULL for legacy jobs / non-project runs.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("grok_projects.id", ondelete="SET NULL"), index=True,
+    )
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     job_type: Mapped[str] = mapped_column(String(50), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)

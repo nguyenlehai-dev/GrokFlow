@@ -17,6 +17,10 @@ class JobInput:
     options: dict[str, Any] | None
     profile_path: str  # absolute path to Chrome user-data-dir
     attachments: list[InputAttachment] = field(default_factory=list)
+    # When the job was scoped to a GrokProject (per-tenant workspace inside
+    # the Grok account), the worker navigates to grok.com/project/<slug>
+    # before submitting the prompt. None → use the default /imagine URL.
+    grok_project_id: str | None = None
 
 
 @dataclass

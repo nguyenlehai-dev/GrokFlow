@@ -1,0 +1,292 @@
+"""GrokProject CRUD + per-project domain assignment.
+
+A `Profile` corresponds to one Grok account; a `GrokProject` is a
+workspace inside that account. Mapping each tenant domain to its own
+project keeps chat history, presets, and brand voice separated.
+
+Endpoints:
+  GET    /api/grok-projects?profile_id=<uuid>     list (admin scope)
+  POST   /api/grok-projects                       create
+  PATCH  /api/grok-projects/{id}                  rename / re-id
+  DELETE /api/grok-projects/{id}                  remove (cascades assignments)
+  GET    /api/grok-projects/{id}/domains          list assigned domains
+  PUT    /api/grok-projects/{id}/domains          replace assignment set
+
+Scope:
+  - super_admin: full CRUD on any project.
+  - admin tenant: list/read projects but cannot mutate (assignments are
+    a super_admin-only surface — same rule as the legacy /profiles/
+    domains endpoint).
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from fastapi import APIRouter, Query, status
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+
+from app.core.deps import CurrentUser, DbSession, SuperAdminUser
+from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
+from app.models import Domain, GrokProject, Profile, ProjectDomainAssignment
+from app.modules.admin.audit import service as audit
+
+router = APIRouter(prefix="/api/grok-projects", tags=["grok-projects"])
+
+
+# ─── Schemas ───────────────────────────────────────────────────────────────
+
+
+class ProjectCreate(BaseModel):
+    profile_id: uuid.UUID
+    grok_project_id: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+
+
+class ProjectUpdate(BaseModel):
+    grok_project_id: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+
+
+class ProjectOut(BaseModel):
+    id: uuid.UUID
+    profile_id: uuid.UUID
+    grok_project_id: str
+    name: str
+    description: str | None
+    created_at: datetime
+    # Quick summary so the UI doesn't have to fetch /domains separately
+    # just to show "→ assigned to 2 tenants".
+    domain_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectDomainsOut(BaseModel):
+    project_id: uuid.UUID
+    domain_ids: list[uuid.UUID]
+
+
+class ProjectDomainsUpdate(BaseModel):
+    domain_ids: list[uuid.UUID]
+
+
+# ─── Helpers ───────────────────────────────────────────────────────────────
+
+
+async def _domain_counts(db, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    """Bulk-count assignments so list endpoints stay O(1) round-trips."""
+    if not project_ids:
+        return {}
+    from sqlalchemy import func
+    rows = (
+        await db.execute(
+            select(
+                ProjectDomainAssignment.project_id,
+                func.count(ProjectDomainAssignment.domain_id),
+            )
+            .where(ProjectDomainAssignment.project_id.in_(project_ids))
+            .group_by(ProjectDomainAssignment.project_id)
+        )
+    ).all()
+    return {pid: cnt for pid, cnt in rows}
+
+
+def _serialize(p: GrokProject, count: int = 0) -> ProjectOut:
+    return ProjectOut(
+        id=p.id, profile_id=p.profile_id,
+        grok_project_id=p.grok_project_id, name=p.name,
+        description=p.description, created_at=p.created_at,
+        domain_count=count,
+    )
+
+
+# ─── CRUD ──────────────────────────────────────────────────────────────────
+
+
+@router.get("", response_model=list[ProjectOut])
+async def list_projects(
+    user: CurrentUser, db: DbSession,
+    profile_id: uuid.UUID | None = Query(default=None),
+) -> list[ProjectOut]:
+    """List projects.
+      - super_admin: every project (filterable by profile_id)
+      - admin tenant: projects whose at least one assignment matches their
+        domain. They use this to see what they're using.
+    """
+    q = select(GrokProject)
+    if profile_id is not None:
+        q = q.where(GrokProject.profile_id == profile_id)
+
+    if user.role != "super_admin":
+        # Restrict to projects assigned to admin's domain.
+        q = q.join(
+            ProjectDomainAssignment,
+            ProjectDomainAssignment.project_id == GrokProject.id,
+        ).where(ProjectDomainAssignment.domain_id == user.domain_id).distinct()
+
+    q = q.order_by(GrokProject.created_at.asc())
+    rows = list((await db.execute(q)).scalars().all())
+    counts = await _domain_counts(db, [r.id for r in rows])
+    return [_serialize(r, counts.get(r.id, 0)) for r in rows]
+
+
+@router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+async def create_project(
+    payload: ProjectCreate, _super: SuperAdminUser, db: DbSession,
+) -> ProjectOut:
+    profile = await db.get(Profile, payload.profile_id)
+    if not profile:
+        raise NotFound("profile")
+    # Uniqueness — same Grok project slug shouldn't be registered twice on the
+    # same profile (would race the worker into the same URL anyway).
+    dup = (
+        await db.execute(
+            select(GrokProject).where(
+                GrokProject.profile_id == payload.profile_id,
+                GrokProject.grok_project_id == payload.grok_project_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if dup:
+        raise InvalidPayload(
+            f"Project '{payload.grok_project_id}' đã đăng ký cho profile này"
+        )
+    p = GrokProject(
+        profile_id=payload.profile_id,
+        grok_project_id=payload.grok_project_id.strip(),
+        name=payload.name.strip(),
+        description=payload.description,
+    )
+    db.add(p)
+    await db.flush()
+    await audit.log_action(
+        db, user_id=_super.id, action="grok_project_created",
+        target_type="grok_project", target_id=p.id,
+        metadata={
+            "profile_id": str(payload.profile_id),
+            "grok_project_id": p.grok_project_id,
+            "name": p.name,
+        },
+    )
+    await db.commit()
+    await db.refresh(p)
+    return _serialize(p, 0)
+
+
+@router.patch("/{project_id}", response_model=ProjectOut)
+async def update_project(
+    project_id: uuid.UUID, payload: ProjectUpdate,
+    _super: SuperAdminUser, db: DbSession,
+) -> ProjectOut:
+    p = await db.get(GrokProject, project_id)
+    if not p:
+        raise NotFound("grok_project")
+    changes: dict = {}
+    if payload.grok_project_id is not None:
+        p.grok_project_id = payload.grok_project_id.strip()
+        changes["grok_project_id"] = p.grok_project_id
+    if payload.name is not None:
+        p.name = payload.name.strip()
+        changes["name"] = p.name
+    if payload.description is not None:
+        p.description = payload.description
+        changes["description"] = "updated"
+    await audit.log_action(
+        db, user_id=_super.id, action="grok_project_updated",
+        target_type="grok_project", target_id=p.id, metadata=changes,
+    )
+    await db.commit()
+    await db.refresh(p)
+    counts = await _domain_counts(db, [p.id])
+    return _serialize(p, counts.get(p.id, 0))
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_project(
+    project_id: uuid.UUID, _super: SuperAdminUser, db: DbSession,
+) -> None:
+    p = await db.get(GrokProject, project_id)
+    if not p:
+        raise NotFound("grok_project")
+    await audit.log_action(
+        db, user_id=_super.id, action="grok_project_deleted",
+        target_type="grok_project", target_id=p.id,
+        metadata={"name": p.name, "grok_project_id": p.grok_project_id},
+    )
+    await db.delete(p)
+    await db.commit()
+
+
+# ─── Per-project domain assignment ────────────────────────────────────────
+
+
+@router.get("/{project_id}/domains", response_model=ProjectDomainsOut)
+async def get_project_domains(
+    project_id: uuid.UUID, user: CurrentUser, db: DbSession,
+) -> ProjectDomainsOut:
+    p = await db.get(GrokProject, project_id)
+    if not p:
+        raise NotFound("grok_project")
+    if user.role not in ("super_admin", "admin"):
+        raise PermissionDenied()
+    rows = (
+        await db.execute(
+            select(ProjectDomainAssignment.domain_id)
+            .where(ProjectDomainAssignment.project_id == project_id)
+        )
+    ).scalars().all()
+    return ProjectDomainsOut(project_id=project_id, domain_ids=list(rows))
+
+
+@router.put("/{project_id}/domains", response_model=ProjectDomainsOut)
+async def set_project_domains(
+    project_id: uuid.UUID, payload: ProjectDomainsUpdate,
+    _super: SuperAdminUser, db: DbSession,
+) -> ProjectDomainsOut:
+    """Replace the set of tenant domains that can pull from this project.
+
+    Pass an empty list to revoke all assignments — project becomes
+    super_admin-only (still usable by the owner directly).
+    """
+    p = await db.get(GrokProject, project_id)
+    if not p:
+        raise NotFound("grok_project")
+
+    if payload.domain_ids:
+        found = (
+            await db.execute(
+                select(Domain.id).where(Domain.id.in_(payload.domain_ids))
+            )
+        ).scalars().all()
+        missing = set(payload.domain_ids) - set(found)
+        if missing:
+            raise InvalidPayload(
+                f"Unknown domain_ids: {sorted(str(m) for m in missing)}"
+            )
+
+    # Delete-then-insert. Set is small (handful per project) so the simple
+    # approach beats a diff-based upsert in readability.
+    await db.execute(
+        ProjectDomainAssignment.__table__.delete()
+        .where(ProjectDomainAssignment.project_id == project_id)
+    )
+    for did in payload.domain_ids:
+        db.add(ProjectDomainAssignment(project_id=project_id, domain_id=did))
+
+    await audit.log_action(
+        db, user_id=_super.id, action="grok_project_domains_set",
+        target_type="grok_project", target_id=project_id,
+        metadata={
+            "name": p.name,
+            "domain_ids": [str(d) for d in payload.domain_ids],
+        },
+    )
+    await db.commit()
+    return ProjectDomainsOut(
+        project_id=project_id, domain_ids=list(payload.domain_ids),
+    )
