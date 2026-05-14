@@ -778,25 +778,23 @@ class GrokProvider(Provider):
                 while time.monotonic() - start < timeout_s:
                     elapsed = int(time.monotonic() - start)
                     try:
-                        urls = await page.evaluate(
+                        result = await page.evaluate(
                             """() => {
-                                // REQUIRE /generated/ in path — that's
-                                // the ONE segment that appears only on
-                                // AI-rendered output, not on project
-                                // sidebar icons, user avatars, or other
-                                // CDN-hosted Grok assets. Tested
-                                // empirically: real images live at
-                                //   users/<uid>/generated/<uuid>/image.jpg
-                                // Icons live at
-                                //   users/<uid>/<rand>/<file>.webp
-                                // (no /generated/ segment).
-                                const ok = s => s && /\\/generated\\//i.test(s);
-                                return Array.from(document.querySelectorAll('img'))
-                                    .map(i => i.src).filter(ok);
+                                // REQUIRE /generated/ in path — only
+                                // segment that appears on AI-rendered
+                                // output, not project icons / avatars.
+                                const all = Array.from(document.querySelectorAll('img'))
+                                    .map(i => i.src)
+                                    .filter(s => s && s.includes('assets.grok'));
+                                const matched = all.filter(s => /\\/generated\\//i.test(s));
+                                return { matched, all };
                             }"""
                         )
+                        urls = result.get("matched", [])
+                        all_grok_urls = result.get("all", [])
                     except Exception:  # noqa: BLE001
                         urls = []
+                        all_grok_urls = []
                     if urls:
                         # Use LAST match — chat appends new bubbles to
                         # the bottom, so the freshest generated image is
@@ -805,7 +803,14 @@ class GrokProvider(Provider):
                         self._log(tag, f"image url after {elapsed}s: {found_url[:80]}…")
                         break
                     if elapsed - last_log >= 30:
-                        self._log(tag, f"polling chat… {elapsed}s")
+                        # Dump any Grok-CDN URLs we DID see so we can
+                        # debug filter false-negatives without a fresh
+                        # capture. Cap at 3 per cycle to keep logs sane.
+                        sample = (all_grok_urls or [])[:3]
+                        if sample:
+                            self._log(tag, f"polling chat… {elapsed}s — non-match urls: {sample}")
+                        else:
+                            self._log(tag, f"polling chat… {elapsed}s — 0 grok assets yet")
                         last_log = elapsed
                     await asyncio.sleep(5)
 
