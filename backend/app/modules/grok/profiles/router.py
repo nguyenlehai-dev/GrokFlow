@@ -51,9 +51,11 @@ async def _assert_profile_accessible(
         return
     # Assigned-to-tenant case. Mirror the visibility join used in
     # list_profiles() so "I can see it" implies "I can act on it".
+    # NOTE: profile_domain_assignments has a composite PK (profile_id,
+    # domain_id) — no surrogate `id`. Project the PK columns directly.
     from app.models import ProfileDomainAssignment
     assigned = (await db.execute(
-        select(ProfileDomainAssignment.id).where(
+        select(ProfileDomainAssignment.profile_id).where(
             ProfileDomainAssignment.profile_id == profile.id,
             ProfileDomainAssignment.domain_id == admin.domain_id,
         )
