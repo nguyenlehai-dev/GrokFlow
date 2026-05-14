@@ -233,25 +233,69 @@ function ProjectEditorModal({
   const [name, setName] = useState(project?.name ?? "");
   const [description, setDescription] = useState(project?.description ?? "");
 
+  // Fetch all tenant domains (* fallback excluded) so the user can pick
+  // assignments inline at creation. Saves a 2nd modal trip.
+  const { data: domains } = useQuery({
+    queryKey: ["admin-domains"],
+    queryFn: async () => (await api.get<Domain[]>("/api/admin/domains")).data,
+  });
+  const tenantDomains = (domains ?? []).filter((d) => d.hostname !== "*");
+
+  // For edit mode, prefill the current assignments.
+  const { data: currentAssign } = useQuery({
+    queryKey: ["grok-project-domains", project?.id],
+    queryFn: async () =>
+      (await api.get<{ project_id: string; domain_ids: string[] }>(
+        `/api/grok-projects/${project!.id}/domains`,
+      )).data,
+    enabled: isEdit,
+  });
+
+  const [selectedDomainIds, setSelectedDomainIds] = useState<Set<string> | null>(null);
+  const effective = selectedDomainIds ?? new Set(currentAssign?.domain_ids ?? []);
+  const toggleDomain = (id: string) => {
+    const next = new Set(effective);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedDomainIds(next);
+  };
+
   const save = useMutation({
     mutationFn: async () => {
+      // 1) Create or update the project row itself.
+      let projectId: string;
       if (isEdit) {
-        return api.patch(`/api/grok-projects/${project!.id}`, {
+        await api.patch(`/api/grok-projects/${project!.id}`, {
           grok_project_id: grokId.trim() || undefined,
           name: name.trim() || undefined,
           description: description || null,
         });
+        projectId = project!.id;
+      } else {
+        const { data } = await api.post<Project>("/api/grok-projects", {
+          profile_id: profileId,
+          grok_project_id: grokId.trim(),
+          name: name.trim(),
+          description: description || null,
+        });
+        projectId = data.id;
       }
-      return api.post("/api/grok-projects", {
-        profile_id: profileId,
-        grok_project_id: grokId.trim(),
-        name: name.trim(),
-        description: description || null,
+      // 2) Push the domain assignment in the same flow so user doesn't
+      // need to re-open the row. Empty array = revoke all.
+      await api.put(`/api/grok-projects/${projectId}/domains`, {
+        domain_ids: Array.from(effective),
       });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["grok-projects", profileId] });
-      toast(isEdit ? "Đã lưu project" : "Đã tạo project", "success");
+      qc.invalidateQueries({ queryKey: ["grok-project-domains", project?.id] });
+      qc.invalidateQueries({ queryKey: ["profiles"] });
+      toast(
+        isEdit
+          ? `Đã lưu · ${effective.size} domain assigned`
+          : `Đã tạo project · ${effective.size} domain assigned`,
+        "success",
+      );
       onClose();
     },
     onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Lỗi", "error"),
@@ -259,14 +303,14 @@ function ProjectEditorModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
+      <div className="w-full max-w-lg max-h-[92vh] rounded-xl bg-white shadow-xl flex flex-col">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="font-semibold">{isEdit ? `Sửa: ${project!.name}` : "Thêm project"}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
             <X size={18} />
           </button>
         </div>
-        <div className="p-4 space-y-3">
+        <div className="flex-1 overflow-auto p-4 space-y-4">
           <label className="block text-sm">
             <span className="font-medium text-slate-700">
               Grok project slug <span className="text-rose-500">*</span>
@@ -302,15 +346,63 @@ function ProjectEditorModal({
               placeholder="Vd: Brand voice + preset cho khách ABC"
             />
           </label>
+
+          {/* Inline domain assignment so the user doesn't need to open a 2nd
+              modal after creating the project. Empty selection = nobody can
+              see this project (super_admin only). */}
+          <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Globe size={14} className="text-violet-600" />
+              <span className="text-sm font-semibold text-slate-800">
+                Gán cho domain (tenant)
+              </span>
+              <span className="text-xs text-slate-500">
+                · Project chỉ visible với tenant được tick
+              </span>
+            </div>
+            {tenantDomains.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">
+                Chưa có domain tenant — tạo ở /admin/domains trước.
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-48 overflow-auto">
+                {tenantDomains.map((d) => (
+                  <label
+                    key={d.id}
+                    className="flex items-center gap-2 rounded-md bg-white border border-slate-200 px-3 py-1.5 cursor-pointer hover:bg-violet-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={effective.has(d.id)}
+                      onChange={() => toggleDomain(d.id)}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-slate-800">{d.label}</div>
+                      <code className="text-[11px] font-mono text-slate-500">{d.hostname}</code>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-slate-500 mt-2">
+              Tick = tenant đó dùng được project này.
+              Để trống = chỉ super_admin dùng được.
+            </p>
+          </section>
         </div>
-        <div className="flex justify-end gap-2 border-t px-4 py-3">
+        <div className="flex justify-end gap-2 border-t px-4 py-3 bg-slate-50">
           <button onClick={onClose} className="btn-ghost">Hủy</button>
           <button
             onClick={() => save.mutate()}
             disabled={!grokId.trim() || !name.trim() || save.isPending}
             className="btn-primary inline-flex items-center gap-1.5"
           >
-            <Save size={14} /> {save.isPending ? "Đang lưu..." : isEdit ? "Lưu" : "Tạo"}
+            <Save size={14} />
+            {save.isPending
+              ? "Đang lưu..."
+              : isEdit
+              ? `Lưu · ${effective.size} domain`
+              : `Tạo · ${effective.size} domain`}
           </button>
         </div>
       </div>
