@@ -444,37 +444,39 @@ async def auto_provision_project(
                 # Selectors for the "New Project" button. Grok lays it out
                 # as a row with a "+" icon and text — try every shape we
                 # might encounter, ordered cheap-first.
-                candidates = [
-                    # Playwright's text= matcher is forgiving — case-
-                    # insensitive substring against visible text.
-                    "text=/new project/i",
-                    # Same idea via has-text — sometimes scoped to button/a
-                    "button:has-text('New Project')",
-                    "a:has-text('New Project')",
-                    "[role='button']:has-text('New Project')",
-                    # Some builds use only "+ Project" or "Create project"
-                    "text=/\\+\\s*project/i",
-                    "[aria-label*='new project' i]",
-                    "[aria-label*='create project' i]",
-                ]
-                new_btn = None
-                for sel in candidates:
-                    loc = page.locator(sel).first
-                    try:
-                        await loc.wait_for(timeout=2_500, state="visible")
-                        new_btn = loc
-                        break
-                    except PWTimeout:
-                        continue
-                if new_btn is None:
-                    # Last resort: dump visible sidebar text for diagnostics
+                # Find the CLOSEST clickable element wrapping the "New
+                # Project" text. The text= matcher often hits a span/
+                # label that's not itself clickable; walking up to the
+                # nearest <a>/<button>/[role] is what actually fires the
+                # SPA's route change.
+                target_handle = await page.evaluate_handle(
+                    """() => {
+                        const lower = s => (s || '').trim().toLowerCase();
+                        const all = Array.from(document.querySelectorAll('a, button, [role="button"], [role="link"]'));
+                        // 1) Prefer ones whose own text is exactly New Project / + New Project
+                        const exact = all.find(el => {
+                            const t = lower(el.innerText);
+                            return t === 'new project' || t === '+ new project' || t === 'new project +';
+                        });
+                        if (exact) return exact;
+                        // 2) Any clickable whose text *contains* 'new project'
+                        const sub = all.find(el => lower(el.innerText).includes('new project'));
+                        if (sub) return sub;
+                        // 3) An aria-label hint
+                        const aria = document.querySelector('[aria-label*="new project" i], [aria-label*="create project" i]');
+                        return aria || null;
+                    }"""
+                )
+                element = target_handle.as_element() if target_handle else None
+                if element is None:
                     sidebar_text = await page.evaluate(
-                        "() => document.body.innerText.split('\\n').slice(0, 30).join(' | ')"
+                        "() => document.body.innerText.split('\\n').slice(0, 40).join(' | ')"
                     )
                     raise InvalidPayload(
-                        f"Không tìm thấy nút 'New Project' trong sidebar. "
-                        f"Grok có thể đã đổi UI. Sidebar text: {sidebar_text[:300]}"
+                        f"Không tìm thấy clickable cho 'New Project'. UI có thể đã đổi. "
+                        f"Sidebar text: {sidebar_text[:400]}"
                     )
+                new_btn = element  # ElementHandle; click() works directly
                 # Race two outcomes after the click:
                 #   A) URL changes to /project/<slug>  → Grok creates the
                 #      project immediately (no modal flow). Capture the slug.
@@ -483,9 +485,13 @@ async def auto_provision_project(
                 # We can't predict which flow Grok will use (and it may
                 # change). Try A first with a shorter wait, fall back to B.
                 clicked_at_url = page.url
-                # Use force=True to bypass any actionability check that
-                # might silently no-op on subtle overlay styles, and try
-                # a real mouse-style click as backup.
+                # `new_btn` here is a JSHandle/ElementHandle resolved by
+                # evaluate_handle. Use ElementHandle.click() which handles
+                # actionability + falls back nicely.
+                try:
+                    await new_btn.scroll_into_view_if_needed(timeout=3_000)
+                except Exception:  # noqa: BLE001
+                    pass
                 try:
                     await new_btn.click(timeout=5_000)
                 except Exception:  # noqa: BLE001
