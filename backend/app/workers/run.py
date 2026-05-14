@@ -61,20 +61,38 @@ async def _pick_job(db: AsyncSession, job_type_filter: str | None) -> Job | None
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def _try_acquire_slot(db: AsyncSession, profile_id: uuid.UUID) -> bool:
-    """Atomically increment active_jobs if under cap. Returns True on success."""
+async def _try_acquire_slot(
+    db: AsyncSession, profile_id: uuid.UUID, job_type: str = "image",
+) -> bool:
+    """Atomically bump the right counter if both caps allow it.
+
+    Two independent caps:
+      • active_jobs < max_concurrent_jobs (overall — image + video)
+      • active_video_jobs < max_concurrent_video (video only)
+
+    Video jobs check both. Non-video jobs check only the first. Both
+    increment active_jobs; video additionally increments
+    active_video_jobs so it counts twice toward the limits.
+    """
+    is_video = job_type == "video"
+    where_clauses = [
+        Profile.id == profile_id,
+        Profile.active_jobs < Profile.max_concurrent_jobs,
+        Profile.status.in_(["logged_in", "running_job"]),
+    ]
+    values: dict = {
+        "active_jobs": Profile.active_jobs + 1,
+        "status": "running_job",
+        "last_used_at": datetime.now(timezone.utc),
+    }
+    if is_video:
+        where_clauses.append(Profile.active_video_jobs < Profile.max_concurrent_video)
+        values["active_video_jobs"] = Profile.active_video_jobs + 1
+
     result = await db.execute(
         update(Profile)
-        .where(
-            Profile.id == profile_id,
-            Profile.active_jobs < Profile.max_concurrent_jobs,
-            Profile.status.in_(["logged_in", "running_job"]),
-        )
-        .values(
-            active_jobs=Profile.active_jobs + 1,
-            status="running_job",
-            last_used_at=datetime.now(timezone.utc),
-        )
+        .where(*where_clauses)
+        .values(**values)
         .returning(Profile.id)
     )
     return result.scalar_one_or_none() is not None
@@ -82,13 +100,16 @@ async def _try_acquire_slot(db: AsyncSession, profile_id: uuid.UUID) -> bool:
 
 async def _release_slot(db: AsyncSession, profile_id: uuid.UUID,
                         new_status: str | None = None,
-                        error_message: str | None = None) -> None:
-    """Decrement active_jobs (clamped to 0). If counter reaches 0, set status accordingly."""
-    # Decrement; if final count is 0, restore status to logged_in (or new_status).
+                        error_message: str | None = None,
+                        job_type: str = "image") -> None:
+    """Decrement active_jobs (clamped to 0). If video, also decrement
+    active_video_jobs. If counter reaches 0, set status accordingly."""
     profile = await db.get(Profile, profile_id, with_for_update=True)
     if not profile:
         return
     profile.active_jobs = max(0, profile.active_jobs - 1)
+    if job_type == "video":
+        profile.active_video_jobs = max(0, profile.active_video_jobs - 1)
     if profile.active_jobs == 0:
         profile.status = new_status or "logged_in"
     elif new_status and new_status != "logged_in":
@@ -163,7 +184,7 @@ async def process_one(db: AsyncSession, job: Job) -> None:
 
     slot_held: uuid.UUID | None = None
     if job.profile_id:
-        if await _try_acquire_slot(db, job.profile_id):
+        if await _try_acquire_slot(db, job.profile_id, job_type=job.job_type):
             slot_held = job.profile_id
         else:
             job.status = "queued"
@@ -352,7 +373,9 @@ async def process_one(db: AsyncSession, job: Job) -> None:
 
     finally:
         if slot_held:
-            await _release_slot(db, slot_held, new_status=profile_terminal_status)
+            await _release_slot(db, slot_held,
+                                new_status=profile_terminal_status,
+                                job_type=job.job_type)
 
     if job.status in {"success", "failed", "cancelled"}:
         await _maybe_send_webhook(db, job)

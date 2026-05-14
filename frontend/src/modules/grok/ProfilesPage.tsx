@@ -17,6 +17,8 @@ interface Profile {
   last_used_at: string | null;
   active_jobs: number;
   max_concurrent_jobs: number;
+  active_video_jobs: number;
+  max_concurrent_video: number;
   created_at: string;
 }
 
@@ -53,6 +55,11 @@ export function ProfilesPage() {
       api.patch(`/api/profiles/${id}`, { max_concurrent_jobs: max }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
   });
+  const updateMaxVideo = useMutation({
+    mutationFn: ({ id, max }: { id: string; max: number }) =>
+      api.patch(`/api/profiles/${id}`, { max_concurrent_video: max }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
 
   return (
     <div className="space-y-5">
@@ -63,7 +70,7 @@ export function ProfilesPage() {
           </h1>
           <p className="page-subtitle">
             {isAdmin
-              ? "Mỗi profile = 1 Chromium nền. Tăng 'Max' để 1 profile chạy nhiều tab/job song song. Mỗi tab thêm ~150 MB RAM."
+              ? "Image slots: chạy qua REST API, scale thoải mái (12-16 OK). Video slots: chạy qua Playwright DOM, KHÔNG để quá 4-6 mỗi profile — Chromium sẽ crash."
               : "Pool admin đã đăng nhập sẵn. Chọn profile lúc tạo job, hoặc để hệ thống tự pick (least-loaded)."}
           </p>
         </div>
@@ -112,7 +119,8 @@ export function ProfilesPage() {
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Provider</th>
                 <th className="px-4 py-2">Status</th>
-                <th className="px-4 py-2">Slots</th>
+                <th className="px-4 py-2" title="Image jobs cap (API path, scales well)">Image slots</th>
+                <th className="px-4 py-2" title="Video jobs cap (Playwright path, capped at ~4 per Chromium)">Video slots</th>
                 <th className="px-4 py-2">Last used</th>
                 {isAdmin && <th className="px-4 py-2">Actions</th>}
               </tr>
@@ -121,6 +129,14 @@ export function ProfilesPage() {
               {data?.map((p) => {
                 const usage = p.max_concurrent_jobs > 0 ? p.active_jobs / p.max_concurrent_jobs : 0;
                 const slotColor = usage >= 1 ? "text-rose-600" : usage >= 0.7 ? "text-amber-600" : "text-emerald-600";
+                const videoUsage = p.max_concurrent_video > 0
+                  ? (p.active_video_jobs ?? 0) / p.max_concurrent_video
+                  : 0;
+                const videoColor = videoUsage >= 1
+                  ? "text-rose-600"
+                  : videoUsage >= 0.7
+                  ? "text-amber-600"
+                  : "text-emerald-600";
                 return (
                   <tr key={p.id} className="border-t">
                     <td className="px-4 py-2 font-medium">{p.name}</td>
@@ -137,11 +153,32 @@ export function ProfilesPage() {
                           max={16}
                           defaultValue={p.max_concurrent_jobs}
                           className="ml-2 w-14 px-2 py-0.5 text-xs border rounded"
-                          title="Sửa max"
+                          title="Sửa max (image)"
                           onBlur={(e) => {
                             const v = Number(e.target.value);
                             if (v >= 1 && v <= 16 && v !== p.max_concurrent_jobs) {
                               updateMax.mutate({ id: p.id, max: v });
+                            }
+                          }}
+                        />
+                      )}
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className={`font-mono font-semibold ${videoColor}`}>
+                        {p.active_video_jobs ?? 0}/{p.max_concurrent_video ?? 4}
+                      </span>
+                      {isAdmin && (
+                        <input
+                          type="number"
+                          min={1}
+                          max={12}
+                          defaultValue={p.max_concurrent_video ?? 4}
+                          className="ml-2 w-14 px-2 py-0.5 text-xs border rounded"
+                          title="Video chạy qua Playwright — đừng đặt quá 4-6 mỗi profile để tránh crash Chromium"
+                          onBlur={(e) => {
+                            const v = Number(e.target.value);
+                            if (v >= 1 && v <= 12 && v !== p.max_concurrent_video) {
+                              updateMaxVideo.mutate({ id: p.id, max: v });
                             }
                           }}
                         />

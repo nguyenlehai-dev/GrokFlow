@@ -138,6 +138,18 @@ class Profile(Base, TimestampMixin):
     # Chromium tabs. Counter is atomically incremented when worker claims a slot.
     active_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     max_concurrent_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # Image jobs go through the lightweight HTTP API path, so they scale
+    # with `max_concurrent_jobs` (one tab per slot is fine).
+    # Video jobs still drive Playwright DOM heavily — opening more than
+    # ~4 video tabs in the same Chromium reliably crashes it
+    # (TargetClosedError). Cap them separately so admins can leave
+    # `max_concurrent_jobs` at 12 for image throughput without melting
+    # the browser on video. Default 4 mirrors what works empirically.
+    max_concurrent_video: Mapped[int] = mapped_column(Integer, nullable=False, default=4, server_default="4")
+    # Subset of `active_jobs` that is video. We need this as a separate
+    # counter so the slot-acquire UPDATE can enforce both caps atomically
+    # without re-querying running jobs.
+    active_video_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     user: Mapped[User] = relationship(back_populates="profiles")
     jobs: Mapped[list["Job"]] = relationship(back_populates="profile")

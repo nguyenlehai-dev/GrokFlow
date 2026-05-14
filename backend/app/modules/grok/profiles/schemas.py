@@ -19,12 +19,16 @@ class ProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     provider: str = Field(pattern="^(grok|flow|other)$")
     max_concurrent_jobs: int = Field(default=1, ge=1, le=16)
+    # Video uses Playwright DOM — cap separately. 4 is empirically the
+    # sweet spot before Chromium starts crashing tabs on heavy video pages.
+    max_concurrent_video: int = Field(default=4, ge=1, le=12)
 
 
 class ProfileUpdate(BaseModel):
     name: str | None = None
     status: str | None = None
     max_concurrent_jobs: int | None = Field(default=None, ge=1, le=16)
+    max_concurrent_video: int | None = Field(default=None, ge=1, le=12)
 
 
 class ProfileOut(BaseModel):
@@ -37,6 +41,8 @@ class ProfileOut(BaseModel):
     error_message: str | None
     active_jobs: int = 0
     max_concurrent_jobs: int = 1
+    active_video_jobs: int = 0
+    max_concurrent_video: int = 4
     created_at: datetime
 
     class Config:

@@ -186,6 +186,7 @@ async def create_profile(payload: ProfileCreate, admin: AdminUser, db: DbSession
         profile_path=str(path),
         status="created",
         max_concurrent_jobs=payload.max_concurrent_jobs,
+        max_concurrent_video=payload.max_concurrent_video,
     )
     db.add(profile)
     await audit.log_action(db, user_id=admin.id, action="create_profile",
@@ -239,6 +240,9 @@ async def update_profile(
     if payload.max_concurrent_jobs is not None:
         profile.max_concurrent_jobs = payload.max_concurrent_jobs
         changes["max_concurrent_jobs"] = payload.max_concurrent_jobs
+    if payload.max_concurrent_video is not None:
+        profile.max_concurrent_video = payload.max_concurrent_video
+        changes["max_concurrent_video"] = payload.max_concurrent_video
     # Audit so changes to status (esp. "deleted" / "logged_in") are traceable.
     await audit.log_action(
         db, user_id=admin.id, action="update_profile",
