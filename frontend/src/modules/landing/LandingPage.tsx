@@ -134,6 +134,7 @@ export function LandingPage() {
 // ─── Top nav ───────────────────────────────────────────────────────────
 
 function TopNav({ brandName }: { brandName: string }) {
+  const { t } = useTranslation();
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 30);
@@ -159,13 +160,13 @@ function TopNav({ brandName }: { brandName: string }) {
           </span>
         </Link>
         <div className="hidden md:flex items-center gap-7 text-sm text-ink-300">
-          <a href="#modules" className="hover:text-white transition">Sản phẩm</a>
-          <a href="#pricing" className="hover:text-white transition">Gói cước</a>
-          <a href="#faq" className="hover:text-white transition">FAQ</a>
+          <a href="#modules" className="hover:text-white transition">{t("landing.nav_products", "Sản phẩm")}</a>
+          <a href="#pricing" className="hover:text-white transition">{t("landing.nav_pricing", "Gói cước")}</a>
+          <a href="#faq" className="hover:text-white transition">{t("landing.nav_faq", "FAQ")}</a>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/login" className="btn-ghost btn-sm">Đăng nhập</Link>
-          <Link to="/register" className="btn-primary btn-sm">Dùng thử</Link>
+          <Link to="/login" className="btn-ghost btn-sm">{t("landing.nav_login", "Đăng nhập")}</Link>
+          <Link to="/register" className="btn-primary btn-sm">{t("landing.nav_register", "Dùng thử")}</Link>
         </div>
       </div>
     </nav>
@@ -216,13 +217,13 @@ function Hero({ brandName }: { brandName: string }) {
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-4 text-sm text-ink-400">
             <span className="inline-flex items-center gap-1.5">
-              <Check size={14} className="text-accent-spotify" /> Không cần thẻ
+              <Check size={14} className="text-accent-spotify" /> {t("landing.no_card", "Không cần thẻ")}
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Check size={14} className="text-accent-spotify" /> 10 job/ngày free
+              <Check size={14} className="text-accent-spotify" /> {t("landing.free_jobs", "10 job/ngày free")}
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Check size={14} className="text-accent-spotify" /> Multi-tenant native
+              <Check size={14} className="text-accent-spotify" /> {t("landing.multi_tenant", "Multi-tenant native")}
             </span>
           </div>
         </div>
@@ -305,12 +306,13 @@ function NowPlayingDemo() {
 // ─── Module showcase (album-art style) ─────────────────────────────────
 
 function ModuleShowcase() {
+  const { t } = useTranslation();
   return (
     <section id="modules" className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
       <SectionHeader
-        eyebrow="4 module · 1 nền tảng"
-        title={<>Mọi công cụ AI bạn cần,<br /><span className="text-gradient">trong một dashboard.</span></>}
-        subtitle="Đăng nhập 1 lần dùng được hết. Quota chia theo gói. Khách anonymous được thử AI Image ngay trên web."
+        eyebrow={t("landing.modules_eyebrow", "4 module · 1 nền tảng")}
+        title={<>{t("landing.modules_title_a", "Mọi công cụ AI bạn cần,")}<br /><span className="text-gradient">{t("landing.modules_title_b", "trong một dashboard.")}</span></>}
+        subtitle={t("landing.modules_subtitle", "Đăng nhập 1 lần dùng được hết. Quota chia theo gói. Khách anonymous được thử AI Image ngay trên web.")}
       />
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mt-10">
         {MODULES.map((m) => (
@@ -358,10 +360,11 @@ function ModuleShowcase() {
 // ─── Artist spotlight (AI model spotlight) ─────────────────────────────
 
 function ArtistSpotlight() {
+  const { t } = useTranslation();
   const artists = [
     {
       name: "Aurora", role: "Image generation",
-      desc: "Mô hình ảnh chủ lực của Grok — photoreal, anime, art style.",
+      desc: "Mô hình ảnh photoreal / anime / art style hàng đầu — tích hợp sẵn.",
       gradient: "from-violet-600 to-fuchsia-600",
       stats: "Top-1 cho realism",
     },
@@ -381,9 +384,9 @@ function ArtistSpotlight() {
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
       <SectionHeader
-        eyebrow="Artist Spotlight"
-        title={<>Mô hình AI <span className="text-gradient">đỉnh nhất</span> hiện nay</>}
-        subtitle="Chúng tôi tích hợp mọi provider hàng đầu trong 1 platform — bạn chọn, hệ thống route."
+        eyebrow={t("landing.artists_eyebrow", "Artist Spotlight")}
+        title={<>{t("landing.artists_title_a", "Mô hình AI")} <span className="text-gradient">{t("landing.artists_title_b", "đỉnh nhất")}</span> {t("landing.artists_title_c", "hiện nay")}</>}
+        subtitle={t("landing.artists_subtitle", "Chúng tôi tích hợp mọi provider hàng đầu trong 1 platform — bạn chọn, hệ thống route.")}
       />
       <div className="grid md:grid-cols-3 gap-5 mt-10">
         {artists.map((a) => (
@@ -411,40 +414,41 @@ function fmtVnd(n: number): string {
 }
 
 function PricingSection() {
+  const { t } = useTranslation();
   return (
     <section id="pricing" className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
       <SectionHeader
-        eyebrow="Gói cước"
-        title={<>Premium <span className="text-gradient">subscription.</span></>}
-        subtitle="Hủy bất kỳ lúc nào. Không lock-in. Free tier không cần thẻ."
+        eyebrow={t("landing.pricing_eyebrow", "Gói cước")}
+        title={<>{t("landing.pricing_title_a", "Premium")} <span className="text-gradient">{t("landing.pricing_title_b", "subscription.")}</span></>}
+        subtitle={t("landing.pricing_subtitle", "Hủy bất kỳ lúc nào. Không lock-in. Free tier không cần thẻ.")}
       />
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 mt-10">
-        {TIERS.map((t) => (
+        {TIERS.map((tier) => (
           <div
-            key={t.code}
+            key={tier.code}
             className={`album-card flex flex-col h-full ${
-              t.highlight ? "ring-2 ring-accent-fuchsia shadow-glow-pink" : ""
+              tier.highlight ? "ring-2 ring-accent-fuchsia shadow-glow-pink" : ""
             }`}
           >
-            {t.highlight && (
-              <span className="badge-pink text-[10px] w-fit mb-3">⭐ Phổ biến nhất</span>
+            {tier.highlight && (
+              <span className="badge-pink text-[10px] w-fit mb-3">{t("landing.pricing_popular", "⭐ Phổ biến nhất")}</span>
             )}
-            <h3 className="text-xl font-bold text-white">{t.name}</h3>
-            <p className="text-sm text-ink-400 mt-1 min-h-[40px]">{t.description}</p>
+            <h3 className="text-xl font-bold text-white">{tier.name}</h3>
+            <p className="text-sm text-ink-400 mt-1 min-h-[40px]">{tier.description}</p>
             <div className="mt-4 mb-5">
-              {t.priceVnd === 0 ? (
+              {tier.priceVnd === 0 ? (
                 <span className="text-4xl font-extrabold text-white">Free</span>
-              ) : t.priceVnd === null ? (
-                <span className="text-3xl font-extrabold text-white">{t.priceLabel}</span>
+              ) : tier.priceVnd === null ? (
+                <span className="text-3xl font-extrabold text-white">{tier.priceLabel}</span>
               ) : (
                 <span>
-                  <span className="text-4xl font-extrabold text-white">{fmtVnd(t.priceVnd)}</span>
-                  <span className="text-sm text-ink-400">/tháng</span>
+                  <span className="text-4xl font-extrabold text-white">{fmtVnd(tier.priceVnd)}</span>
+                  <span className="text-sm text-ink-400">{t("landing.pricing_per_month", "/tháng")}</span>
                 </span>
               )}
             </div>
             <ul className="space-y-2 flex-1">
-              {t.features.map((f) => (
+              {tier.features.map((f) => (
                 <li key={f} className="flex items-start gap-2 text-sm text-ink-200">
                   <Check size={14} className="text-accent-spotify mt-0.5 shrink-0" />
                   {f}
@@ -452,12 +456,12 @@ function PricingSection() {
               ))}
             </ul>
             <Link
-              to={t.ctaTo}
+              to={tier.ctaTo}
               className={`mt-6 ${
-                t.highlight ? "btn-primary" : "btn-secondary"
+                tier.highlight ? "btn-primary" : "btn-secondary"
               } w-full justify-center`}
             >
-              {t.cta}
+              {tier.cta}
             </Link>
           </div>
         ))}
@@ -469,10 +473,11 @@ function PricingSection() {
 // ─── FAQ ───────────────────────────────────────────────────────────────
 
 function Faq() {
+  const { t } = useTranslation();
   const items = [
     {
-      q: "Hệ thống này chỉ dùng cho Grok?",
-      a: "Không. Nền tảng quản lý đa-provider: image (Aurora/Grok), video (Grok), flow tools (xử lý local), LLM gateway (route OpenAI/Claude/Gemini). 1 dashboard, 1 API key.",
+      q: "Đây có phải chỉ dành cho một provider AI duy nhất?",
+      a: "Không. Nền tảng quản lý đa-provider: image (Aurora/Grok), video, flow tools (xử lý local), LLM gateway (route OpenAI/Claude/Gemini). 1 dashboard, 1 API key.",
     },
     {
       q: "Có cần biết code không?",
@@ -495,9 +500,9 @@ function Faq() {
   return (
     <section id="faq" className="max-w-3xl mx-auto px-4 sm:px-6 py-20">
       <SectionHeader
-        eyebrow="FAQ"
-        title="Câu hỏi thường gặp"
-        subtitle="Không thấy câu trả lời? Gửi email admin@groks.io"
+        eyebrow={t("landing.faq_eyebrow", "FAQ")}
+        title={t("landing.faq_title", "Câu hỏi thường gặp")}
+        subtitle={t("landing.faq_subtitle", "Không thấy câu trả lời? Gửi email admin@groks.io")}
       />
       <div className="mt-10 space-y-2.5">
         {items.map((it, i) => (
@@ -523,6 +528,7 @@ function Faq() {
 // ─── Final CTA ─────────────────────────────────────────────────────────
 
 function FinalCta() {
+  const { t } = useTranslation();
   return (
     <section className="max-w-5xl mx-auto px-4 sm:px-6 py-20">
       <div className="relative overflow-hidden rounded-3xl p-12 text-center bg-gradient-album shadow-glow-pink">
@@ -531,23 +537,23 @@ function FinalCta() {
         <div className="relative">
           <Headphones size={48} className="mx-auto text-white/90 mb-4" />
           <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
-            Sẵn sàng phát hành<br />studio AI của riêng bạn?
+            {t("landing.final_cta_title_a", "Sẵn sàng phát hành")}<br />{t("landing.final_cta_title_b", "studio AI của riêng bạn?")}
           </h2>
           <p className="mt-4 text-white/90 max-w-xl mx-auto">
-            Đăng ký miễn phí 30 giây. Không cần thẻ. Có 10 job/ngày để chơi ngay.
+            {t("landing.final_cta_sub", "Đăng ký miễn phí 30 giây. Không cần thẻ. Có 10 job/ngày để chơi ngay.")}
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
             <Link
               to="/register"
               className="bg-white text-ink-900 font-bold rounded-lg px-7 py-3 inline-flex items-center gap-2 shadow-card-hover hover:scale-105 transition"
             >
-              <Sparkles size={18} /> Bắt đầu miễn phí
+              <Sparkles size={18} /> {t("landing.cta_start", "Bắt đầu miễn phí")}
             </Link>
             <Link
               to="/try/image"
               className="border-2 border-white/40 text-white font-bold rounded-lg px-7 py-3 inline-flex items-center gap-2 hover:bg-white/10 transition"
             >
-              <Play size={18} /> Thử không cần đăng ký
+              <Play size={18} /> {t("landing.cta_try_no_signup", "Thử không cần đăng ký")}
             </Link>
           </div>
         </div>
