@@ -391,16 +391,38 @@ async def auto_provision_project(
             "Auto-login trước khi auto-provision."
         )
 
-    # Late imports — playwright + docker are heavy and unused by other
-    # endpoints in this file.
+    # Late imports — playwright + httpx are heavier than the rest of this
+    # router file's deps, only used here.
+    import re
+    import httpx
     from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
     cdp_endpoint = f"http://grokflow-vnc-{str(profile.id).replace('-','')[:12]}:9223"
 
+    # Chromium reports its WS endpoint with `localhost:9222` regardless of
+    # the host:port we hit. Fetch + rewrite the ws URL to the container's
+    # actual address so Playwright connects to the right Chromium. Same
+    # trick the worker uses in grok_provider.py.
+    try:
+        async with httpx.AsyncClient(timeout=10) as cli:
+            resp = await cli.get(f"{cdp_endpoint}/json/version")
+            ws_url = resp.json().get("webSocketDebuggerUrl", "")
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidPayload(
+            f"Không thể kết nối CDP của profile ({type(exc).__name__}): {exc}. "
+            "Kiểm tra VNC container đang chạy chưa."
+        )
+    if not ws_url:
+        raise InvalidPayload(
+            "Chromium không trả về wsEndpoint. Profile có thể đang khởi động — đợi vài giây rồi thử lại."
+        )
+    host = cdp_endpoint.replace("http://", "").rstrip("/")
+    ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+
     slug: str | None = None
     try:
         async with async_playwright() as pw:
-            browser = await pw.chromium.connect_over_cdp(cdp_endpoint, timeout=10_000)
+            browser = await pw.chromium.connect_over_cdp(ws_url, timeout=12_000)
             ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await ctx.new_page()
             try:
