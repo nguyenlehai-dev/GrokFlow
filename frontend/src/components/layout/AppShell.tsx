@@ -96,41 +96,46 @@ export function AppShell() {
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-ink-50">
       {/* Mobile backdrop — tap to dismiss. md+ never renders this. */}
       {mobileOpen && (
         <button
           type="button"
           aria-label="Close menu"
-          className="fixed inset-0 z-30 bg-slate-900/40 md:hidden"
+          className="fixed inset-0 z-30 bg-ink-900/50 backdrop-blur-sm md:hidden animate-fade-in"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       <aside
         className={
-          // Mobile: fixed off-canvas drawer toggled by `mobileOpen`.
-          // md+: in-flow column with fixed width like before.
-          "fixed inset-y-0 left-0 z-40 w-64 border-r border-slate-200 bg-white flex flex-col " +
-          "transform transition-transform duration-200 md:static md:transform-none md:w-60 " +
+          // Mobile: fixed off-canvas drawer. md+: in-flow column.
+          "fixed inset-y-0 left-0 z-40 w-64 border-r border-ink-200/70 " +
+          "bg-white flex flex-col " +
+          "transform transition-transform duration-200 md:static md:transform-none md:w-64 " +
           (mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0")
         }
       >
-        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-          <Link to="/dashboard" className="text-lg font-semibold text-brand-600 truncate">
-            {brandName}
+        <div className="px-5 py-5 border-b border-ink-100 flex items-center justify-between">
+          <Link to="/dashboard" className="flex items-center gap-2.5 min-w-0 group">
+            {/* Brand logo mark — gradient square with the brand initial. */}
+            <span className="w-9 h-9 rounded-xl bg-gradient-brand text-white flex items-center justify-center font-bold text-base shadow-brand shrink-0">
+              {(brandName?.[0] ?? "G").toUpperCase()}
+            </span>
+            <span className="font-bold text-lg text-ink-900 truncate group-hover:text-gradient transition-all">
+              {brandName}
+            </span>
           </Link>
-          {/* Close button visible only on mobile when drawer is open */}
           <button
             type="button"
             onClick={() => setMobileOpen(false)}
-            className="md:hidden -mr-1 p-1 text-slate-500 hover:text-slate-800"
+            className="md:hidden -mr-1 p-1.5 rounded-lg text-ink-500 hover:text-ink-900 hover:bg-ink-100"
             aria-label="Close menu"
           >
             <X size={18} />
           </button>
         </div>
-        <nav className="p-2 flex-1 overflow-y-auto">
+        <nav className="p-3 flex-1 overflow-y-auto space-y-0.5">
           {visibleNav.map((entry) =>
             entry.type === "link" ? (
               <LeafLink key={entry.to} item={entry} />
@@ -143,47 +148,56 @@ export function AppShell() {
             )
           )}
         </nav>
+        {/* Sidebar footer: plan badge + user identity, lifted off the nav list */}
+        {user && (
+          <div className="border-t border-ink-100 p-3 space-y-2">
+            <div className="flex items-center gap-2.5 px-2 py-1.5">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-100 to-accent-fuchsia/20 text-brand-700 flex items-center justify-center font-semibold text-sm shrink-0">
+                {(user.email?.[0] ?? "U").toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-ink-900 truncate">{user.email}</p>
+                <p className="text-[10px] text-ink-500 uppercase tracking-wider">{user.role}</p>
+              </div>
+            </div>
+            {planName && (
+              <div className="px-2">
+                <span className="badge-brand text-[10px]">
+                  ✦ {planName}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </aside>
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:px-4 md:px-6 py-3">
+        <header className="sticky top-0 z-20 glass border-b border-ink-200/60 px-3 sm:px-4 md:px-6 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            {/* Hamburger — only on mobile (md hides). */}
             <button
               type="button"
               onClick={() => setMobileOpen(true)}
-              className="md:hidden p-1.5 text-slate-600 hover:text-slate-900 rounded hover:bg-slate-100"
+              className="md:hidden p-2 -ml-1 text-ink-600 hover:text-ink-900 rounded-lg hover:bg-ink-100"
               aria-label="Open menu"
             >
               <Menu size={20} />
             </button>
-            <div className="text-xs sm:text-sm text-slate-500 min-w-0 truncate">
-              {/* Hide the "Logged in as" prefix on the smallest screens to save space */}
-              <span className="hidden sm:inline">Logged in as </span>
-              <span className="font-medium text-slate-800">{user?.email}</span>
-              <span className="hidden sm:inline"> ({user?.role})</span>
-              {planName && (
-                <span className="ml-2 hidden md:inline-block rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
-                  {planName}
-                </span>
-              )}
-              {!isSuper && domainConfig?.hostname && (
-                <span className="ml-2 hidden lg:inline-block rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                  @{domainConfig.hostname}
-                </span>
-              )}
-            </div>
+            {!isSuper && domainConfig?.hostname && (
+              <span className="hidden lg:inline-flex badge-slate font-mono">
+                @{domainConfig.hostname}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <QuickCreateMenu />
             <NotificationBell />
-            <button onClick={onLogout} className="btn-ghost">
-              <LogOut size={16} className="sm:mr-2" />
+            <button onClick={onLogout} className="btn-ghost btn-sm" aria-label="Logout">
+              <LogOut size={15} />
               <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
+        <main className="flex-1 overflow-auto p-4 sm:p-5 md:p-7 animate-fade-in">
           <Outlet />
         </main>
       </div>
@@ -198,13 +212,22 @@ function LeafLink({ item }: { item: NavLeaf }) {
       to={item.to}
       end={item.to === "/dashboard"}
       className={({ isActive }) =>
-        `flex items-center gap-3 rounded-md px-3 py-2 text-sm transition ${
-          isActive ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"
+        `relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 ${
+          isActive
+            ? "bg-gradient-to-r from-brand-50 to-accent-fuchsia/10 text-brand-700 shadow-sm"
+            : "text-ink-600 hover:bg-ink-50 hover:text-ink-900"
         }`
       }
     >
-      <Icon size={16} />
-      {item.label}
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-gradient-brand" />
+          )}
+          <Icon size={16} className={isActive ? "text-brand-600" : ""} />
+          <span className="truncate">{item.label}</span>
+        </>
+      )}
     </NavLink>
   );
 }
@@ -242,11 +265,13 @@ function CollapsibleGroup({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm transition ${
-          hasActive ? "text-brand-700" : "text-slate-600 hover:bg-slate-50"
+        className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
+          hasActive
+            ? "text-brand-700 bg-brand-50/60"
+            : "text-ink-600 hover:bg-ink-50 hover:text-ink-900"
         }`}
       >
-        <Icon size={16} />
+        <Icon size={16} className={hasActive ? "text-brand-600" : ""} />
         <span className="flex-1 text-left">{label}</span>
         <ChevronDown
           size={14}
@@ -254,7 +279,7 @@ function CollapsibleGroup({
         />
       </button>
       {open && (
-        <div className="ml-3 pl-3 border-l border-slate-200 mt-0.5">
+        <div className="ml-3.5 pl-3 border-l-2 border-ink-100 mt-1 space-y-0.5 animate-slide-up">
           {group.items.map((item) =>
             item.type === "link" ? (
               <LeafLink key={item.to} item={item} />
