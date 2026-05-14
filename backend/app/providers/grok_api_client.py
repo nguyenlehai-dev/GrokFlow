@@ -281,39 +281,73 @@ class GrokAPIClient:
         # `f"{url}  {prompt} --mode={mode}"` and Grok parses that.
         message = f"{asset_url}  {clean_prompt} --mode={mode}"
 
-        # Grok appears to need ~1-2s to register the uploaded file as a
-        # post-equivalent. Without this sleep the videoize POST 404s with
-        # `imagine:invalid-parent-post` even though the upload succeeded.
+        # Give Grok a moment to index the upload as a post-equivalent.
         await asyncio.sleep(2.0)
 
-        video_config: dict[str, Any] = {
-            "parentPostId": file_metadata_id,
-            "aspectRatio": aspect_ratio,
-            "videoLength": duration,
-            "resolutionName": resolution,
-        }
+        # Multiple attempts: Grok's `parentPostId` is fussy. We don't know
+        # exactly what it expects (the captured working request used the
+        # fileMetadataId, but our identical-shape request 404s with
+        # `invalid-parent-post`). Try a few body variants in order and use
+        # the first that doesn't 404 on the lookup.
+        attempts = [
+            # (label, body_modification)
+            ("with_parent", {
+                "parentPostId": file_metadata_id,
+                "fileAttachments": True,
+            }),
+            ("no_parent", {
+                "fileAttachments": True,
+            }),
+            ("message_only", {}),
+        ]
 
-        body = {
-            "temporary": True,
-            "modelName": "imagine-video-gen",
-            "message": message,
-            "fileAttachments": [file_metadata_id],
-            "enableSideBySide": True,
-            "responseMetadata": {
-                "experiments": [],
-                "modelConfigOverride": {
-                    "modelMap": {
-                        "videoGenModelConfig": video_config,
-                    }
+        last_err: GrokAPIError | None = None
+        for label, variant in attempts:
+            video_config: dict[str, Any] = {
+                "aspectRatio": aspect_ratio,
+                "videoLength": duration,
+                "resolutionName": resolution,
+            }
+            if "parentPostId" in variant:
+                video_config["parentPostId"] = variant["parentPostId"]
+
+            body: dict[str, Any] = {
+                "temporary": True,
+                "modelName": "imagine-video-gen",
+                "message": message,
+                "enableSideBySide": True,
+                "responseMetadata": {
+                    "experiments": [],
+                    "modelConfigOverride": {
+                        "modelMap": {"videoGenModelConfig": video_config}
+                    },
                 },
-            },
-        }
-        return await self._submit_and_collect(
-            body=body,
-            referer_path="/imagine",
-            extract_asset=_extract_video_url,
-            asset_label="video_chunk",
-            log=log,
+            }
+            if variant.get("fileAttachments"):
+                body["fileAttachments"] = [file_metadata_id]
+
+            if log:
+                log(f"videoize attempt={label}")
+            try:
+                return await self._submit_and_collect(
+                    body=body,
+                    referer_path="/imagine",
+                    extract_asset=_extract_video_url,
+                    asset_label="video_chunk",
+                    log=log,
+                )
+            except GrokAPIError as exc:
+                # Only retry on the specific 404 we keep seeing. Other
+                # errors (network, cookie, rate-limit) should surface.
+                if exc.code == "unknown_error" and "invalid-parent-post" in exc.message:
+                    last_err = exc
+                    if log:
+                        log(f"attempt {label} → invalid-parent-post; trying next")
+                    continue
+                raise
+        # All attempts failed. Re-raise the last error so caller falls back.
+        raise last_err or GrokAPIError(
+            "unknown_error", "all videoize variants failed", retryable=True
         )
 
     async def _submit_and_collect(
