@@ -34,15 +34,33 @@ async def _assert_profile_accessible(
     """Tenant guard for any single-row Profile op done by an admin.
 
     super_admin: passes.
-    admin: passes only if the profile's owner lives in the same domain.
+    admin: passes if EITHER
+      - the profile's owner lives in the admin's domain (legacy: admin
+        manages a profile their own users created), OR
+      - the profile is explicitly assigned to the admin's domain via
+        ProfileDomainAssignment (the super_admin grants a pool profile
+        to a tenant domain — same rule that makes it appear in
+        list_profiles).
     Anyone else: caller shouldn't have hit this — endpoints gate with
     AdminUser dep first.
     """
     if admin.role == "super_admin":
         return
     owner = await db.get(User, profile.user_id)
-    if not owner or owner.domain_id != admin.domain_id:
-        raise PermissionDenied("Profile không thuộc domain bạn quản lý")
+    if owner and owner.domain_id == admin.domain_id:
+        return
+    # Assigned-to-tenant case. Mirror the visibility join used in
+    # list_profiles() so "I can see it" implies "I can act on it".
+    from app.models import ProfileDomainAssignment
+    assigned = (await db.execute(
+        select(ProfileDomainAssignment.id).where(
+            ProfileDomainAssignment.profile_id == profile.id,
+            ProfileDomainAssignment.domain_id == admin.domain_id,
+        )
+    )).first()
+    if assigned:
+        return
+    raise PermissionDenied("Profile không thuộc domain bạn quản lý")
 
 from .schemas import (
     OpenBrowserResponse,
