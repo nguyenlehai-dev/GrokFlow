@@ -184,7 +184,7 @@ function Kpi({
   label, value, sub, icon: Icon, tone = "violet",
 }: {
   label: string; value: string; sub?: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: React.ComponentType<any>;
   tone?: keyof typeof TONE_CLS;
 }) {
   const t = TONE_CLS[tone];
@@ -205,7 +205,7 @@ const QUICK_CARDS: {
   path: string;
   label: string;
   desc: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: React.ComponentType<any>;
   tone: string;
 }[] = [
   // Grok
