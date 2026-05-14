@@ -120,13 +120,25 @@ export function LandingPage() {
     <div className="min-h-screen bg-ink-950 text-ink-100 selection:bg-brand-500/30">
       <TopNav brandName={brandName} />
       <Hero brandName={brandName} />
-      <NowPlayingDemo />
+      <AppPreview />
+      <GenrePills />
       <ModuleShowcase />
+      <PlaylistCarousel
+        eyebrow="Made for you"
+        title="Mixes của tuần"
+        items={MADE_FOR_YOU}
+      />
       <ArtistSpotlight />
+      <PlaylistCarousel
+        eyebrow="Trending now"
+        title="Use cases nổi bật"
+        items={TRENDING}
+      />
       <PricingSection />
       <Faq />
       <FinalCta />
       <Footer brandName={brandName} />
+      <StickyPlayerBar />
     </div>
   );
 }
@@ -622,6 +634,331 @@ function SectionHeader({
       <p className="text-xs uppercase tracking-[0.2em] text-accent-fuchsia font-bold">{eyebrow}</p>
       <h2 className="text-3xl sm:text-5xl font-extrabold text-white mt-3 tracking-tight">{title}</h2>
       <p className="text-ink-400 mt-4 text-base sm:text-lg">{subtitle}</p>
+    </div>
+  );
+}
+
+// ─── App preview (Spotify-style mockup) ────────────────────────────────
+// Faux streaming-app shell embedded in the landing page so visitors
+// instantly recognise the "music app" framing. Sidebar (Home/Search/
+// Library + playlists), main grid (greeting + Recently played tiles +
+// Made For You row), and a docked player bar at the bottom of the
+// frame.
+
+const SIDEBAR_PLAYLISTS = [
+  "AI Image · Top Picks",
+  "Video Mixes",
+  "Flow Productivity",
+  "Gateway Routing",
+  "Aurora favourites",
+  "Liked Generations",
+  "Weekly Drop",
+];
+
+const QUICK_TILES = [
+  { name: "AI Image",       gradient: "from-violet-600 to-fuchsia-600" },
+  { name: "AI Video",       gradient: "from-pink-500 to-rose-500" },
+  { name: "Flow Tools",     gradient: "from-amber-500 to-orange-500" },
+  { name: "LLM Gateway",    gradient: "from-cyan-500 to-indigo-500" },
+  { name: "Liked Results",  gradient: "from-emerald-500 to-teal-500" },
+  { name: "Recent Jobs",    gradient: "from-purple-600 to-blue-500" },
+];
+
+const MADE_FOR_YOU_TILES = [
+  { title: "Daily Mix 1", subtitle: "Aurora · Grok-3 · Image",   gradient: "from-violet-700 via-fuchsia-600 to-pink-500" },
+  { title: "Daily Mix 2", subtitle: "Cinematic video · 4:5",     gradient: "from-rose-600 via-orange-500 to-amber-400" },
+  { title: "Daily Mix 3", subtitle: "GPT-4o · Claude · Gemini",  gradient: "from-indigo-600 via-cyan-500 to-emerald-400" },
+  { title: "Daily Mix 4", subtitle: "Flow · Cut · Merge",        gradient: "from-fuchsia-700 via-pink-500 to-rose-400" },
+];
+
+function AppPreview() {
+  return (
+    <section className="max-w-6xl mx-auto px-4 sm:px-6 -mt-8 mb-24 relative z-10">
+      {/* Glow underlay */}
+      <div className="absolute -inset-6 bg-gradient-album opacity-30 blur-3xl rounded-[40px] pointer-events-none" />
+      <div className="relative rounded-[28px] bg-gradient-to-br from-ink-900 via-ink-950 to-ink-900 border border-ink-800/80 shadow-card-dark-hover overflow-hidden">
+        {/* Window chrome */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-ink-800/70 bg-ink-900/80">
+          <span className="w-3 h-3 rounded-full bg-rose-500/80" />
+          <span className="w-3 h-3 rounded-full bg-amber-400/80" />
+          <span className="w-3 h-3 rounded-full bg-emerald-500/80" />
+          <div className="ml-3 flex-1 max-w-md mx-auto flex items-center gap-2 rounded-full bg-ink-800/80 px-3 py-1 text-xs text-ink-400">
+            <Sparkles size={11} className="text-accent-fuchsia" />
+            studio · GrokFlow workspace
+          </div>
+        </div>
+
+        {/* App body */}
+        <div className="grid grid-cols-[220px_1fr] min-h-[460px]">
+          {/* Sidebar */}
+          <aside className="bg-ink-950/70 border-r border-ink-800/70 p-4 space-y-6">
+            <div className="space-y-1.5">
+              {[
+                { icon: ListMusic, label: "Home",   active: true },
+                { icon: Globe,     label: "Search", active: false },
+                { icon: Heart,     label: "Library",active: false },
+              ].map((it) => (
+                <div
+                  key={it.label}
+                  className={`flex items-center gap-3 px-3 py-1.5 rounded-md text-sm font-semibold ${
+                    it.active ? "text-white bg-ink-800/80" : "text-ink-400 hover:text-white"
+                  }`}
+                >
+                  <it.icon size={16} className={it.active ? "text-accent-fuchsia" : ""} />
+                  {it.label}
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-ink-500 font-bold px-3 mb-2">Your library</p>
+              <div className="space-y-1 text-sm">
+                {SIDEBAR_PLAYLISTS.map((p, i) => (
+                  <div
+                    key={p}
+                    className={`px-3 py-1 rounded text-ink-400 hover:text-white truncate ${i === 0 ? "text-accent-spotify font-semibold" : ""}`}
+                  >
+                    {p}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
+
+          {/* Main */}
+          <div className="bg-gradient-to-b from-violet-900/30 via-ink-950/40 to-ink-950 p-6 overflow-hidden">
+            <p className="text-xs uppercase tracking-wider text-ink-400 font-semibold">
+              Good evening
+            </p>
+            <h3 className="text-2xl font-extrabold text-white mt-1">
+              Đâu là dự án bạn muốn chạy?
+            </h3>
+
+            {/* Quick tiles 3x2 */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mt-4">
+              {QUICK_TILES.map((q) => (
+                <div
+                  key={q.name}
+                  className="group flex items-center gap-3 rounded-md bg-ink-800/60 hover:bg-ink-700/70 transition pr-3 overflow-hidden"
+                >
+                  <div className={`w-12 h-12 bg-gradient-to-br ${q.gradient} flex items-center justify-center shrink-0`}>
+                    <Disc3 size={20} className="text-white" />
+                  </div>
+                  <span className="text-sm font-semibold text-white truncate">{q.name}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Made for you row */}
+            <div className="mt-6">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-white">Made for you</h4>
+                <span className="text-xs text-ink-400">Hôm nay</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                {MADE_FOR_YOU_TILES.map((m) => (
+                  <div key={m.title} className="rounded-lg bg-ink-800/40 p-2.5 hover:bg-ink-800/80 transition group">
+                    <div className={`aspect-square rounded-md bg-gradient-to-br ${m.gradient} relative overflow-hidden shadow-card-dark`}>
+                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.3),transparent_60%)]" />
+                      <div className="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-accent-spotify text-ink-950 flex items-center justify-center shadow-brand-lg opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition">
+                        <Play size={16} className="ml-0.5" />
+                      </div>
+                    </div>
+                    <p className="text-sm font-semibold text-white mt-2 truncate">{m.title}</p>
+                    <p className="text-[11px] text-ink-400 truncate">{m.subtitle}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Mini player bar at the bottom of the frame */}
+        <div className="border-t border-ink-800/70 bg-ink-900/95 px-4 py-2.5 flex items-center gap-4">
+          <div className="flex items-center gap-3 min-w-0 w-48">
+            <div className="w-10 h-10 rounded-md bg-gradient-album shrink-0 shadow-card-dark flex items-center justify-center">
+              <Disc3 size={18} className="text-white animate-spin" style={{ animationDuration: "8s" }} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-white truncate">Vietnamese girl · cinematic</p>
+              <p className="text-[10px] text-ink-400">Aurora · AI Image</p>
+            </div>
+          </div>
+          <div className="flex-1 max-w-xl mx-auto">
+            <div className="flex items-center justify-center gap-4 text-ink-400">
+              <button className="hover:text-white"><ListMusic size={14} /></button>
+              <button className="w-7 h-7 rounded-full bg-white text-ink-900 flex items-center justify-center hover:scale-110 transition">
+                <Pause size={13} />
+              </button>
+              <button className="hover:text-white"><Heart size={14} /></button>
+            </div>
+            <div className="flex items-center gap-2 mt-1 text-[10px] text-ink-500 font-mono">
+              <span>0:08</span>
+              <div className="flex-1 h-0.5 bg-ink-800 rounded-full overflow-hidden">
+                <div className="h-full w-[62%] bg-accent-spotify rounded-full" />
+              </div>
+              <span>0:13</span>
+            </div>
+          </div>
+          <div className="hidden sm:flex items-center gap-2 w-48 justify-end text-ink-400">
+            <Mic2 size={14} />
+            <div className="w-20 h-0.5 bg-ink-800 rounded-full overflow-hidden">
+              <div className="h-full w-[70%] bg-ink-400 rounded-full" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Genre pills ───────────────────────────────────────────────────────
+
+const GENRES = [
+  { label: "Photorealistic", gradient: "from-violet-600 to-fuchsia-600" },
+  { label: "Anime",          gradient: "from-pink-500 to-rose-500" },
+  { label: "Cinematic",      gradient: "from-amber-500 to-orange-500" },
+  { label: "3D Render",      gradient: "from-cyan-500 to-indigo-500" },
+  { label: "Logo / Brand",   gradient: "from-emerald-500 to-teal-500" },
+  { label: "Short clip",     gradient: "from-purple-600 to-blue-500" },
+  { label: "Voice clone",    gradient: "from-rose-600 to-amber-400" },
+  { label: "Lipsync",        gradient: "from-indigo-600 to-fuchsia-500" },
+  { label: "Music video",    gradient: "from-orange-500 to-pink-500" },
+  { label: "Documentary",    gradient: "from-teal-500 to-emerald-400" },
+];
+
+function GenrePills() {
+  return (
+    <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-10">
+      <p className="text-xs uppercase tracking-wider text-ink-400 font-semibold mb-3">
+        Browse by genre
+      </p>
+      <div className="flex flex-wrap gap-2.5">
+        {GENRES.map((g) => (
+          <span
+            key={g.label}
+            className={`relative overflow-hidden rounded-full px-4 py-2 text-sm font-semibold text-white cursor-pointer hover:scale-105 transition shadow-card-dark bg-gradient-to-br ${g.gradient}`}
+          >
+            {g.label}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ─── Horizontal playlist carousel (Spotify-style) ──────────────────────
+
+type PlaylistTile = {
+  title: string;
+  subtitle: string;
+  gradient: string;
+  icon?: typeof Disc3;
+};
+
+const MADE_FOR_YOU: PlaylistTile[] = [
+  { title: "Daily Mix 1", subtitle: "Aurora · photorealism",      gradient: "from-violet-700 via-fuchsia-600 to-pink-500" },
+  { title: "Daily Mix 2", subtitle: "Cinematic 4:5 video",         gradient: "from-rose-600 via-orange-500 to-amber-400" },
+  { title: "Daily Mix 3", subtitle: "LLM gateway · multi-route",   gradient: "from-indigo-600 via-cyan-500 to-emerald-400" },
+  { title: "Daily Mix 4", subtitle: "Flow productivity",           gradient: "from-fuchsia-700 via-pink-500 to-rose-400" },
+  { title: "Discover Weekly", subtitle: "Aurora drops + remix",    gradient: "from-emerald-600 via-teal-500 to-cyan-400" },
+  { title: "Release Radar",   subtitle: "Models phát hành tuần này", gradient: "from-amber-500 via-rose-500 to-fuchsia-500" },
+];
+
+const TRENDING: PlaylistTile[] = [
+  { title: "Brand campaign", subtitle: "Logo · poster · banner",  gradient: "from-violet-600 to-fuchsia-600" },
+  { title: "TikTok shorts",  subtitle: "image-to-video · 15s",    gradient: "from-pink-500 to-rose-500" },
+  { title: "E-commerce",     subtitle: "Product photoreal",       gradient: "from-orange-500 to-amber-400" },
+  { title: "AI Avatar",      subtitle: "Talking head + voice",    gradient: "from-cyan-500 to-indigo-500" },
+  { title: "Storyboard",     subtitle: "Concept → final frame",   gradient: "from-purple-600 to-pink-500" },
+  { title: "Music cover",    subtitle: "Album art · cover photo", gradient: "from-emerald-500 to-cyan-500" },
+];
+
+function PlaylistCarousel({
+  eyebrow, title, items,
+}: { eyebrow: string; title: string; items: PlaylistTile[] }) {
+  return (
+    <section className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+      <div className="flex items-end justify-between mb-5">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-accent-fuchsia font-bold">{eyebrow}</p>
+          <h3 className="text-2xl sm:text-3xl font-extrabold text-white mt-2">{title}</h3>
+        </div>
+        <a href="#modules" className="text-xs uppercase tracking-wider text-ink-400 hover:text-white font-semibold">
+          Show all
+        </a>
+      </div>
+      <div className="flex gap-4 overflow-x-auto pb-3 -mx-4 px-4 snap-x snap-mandatory">
+        {items.map((p) => (
+          <div
+            key={p.title}
+            className="group shrink-0 w-44 snap-start rounded-xl bg-ink-900/70 hover:bg-ink-800/90 transition p-3 border border-ink-800/60 shadow-card-dark"
+          >
+            <div className={`relative aspect-square rounded-lg bg-gradient-to-br ${p.gradient} overflow-hidden shadow-card-dark`}>
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.3),transparent_60%)]" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Disc3 size={36} className="text-white/80" />
+              </div>
+              <div className="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-accent-spotify text-ink-950 flex items-center justify-center shadow-brand-lg opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition">
+                <Play size={16} className="ml-0.5" />
+              </div>
+            </div>
+            <p className="text-sm font-semibold text-white mt-3 truncate">{p.title}</p>
+            <p className="text-[11px] text-ink-400 truncate">{p.subtitle}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ─── Sticky player bar (docked to viewport bottom) ─────────────────────
+// Mimics Spotify's persistent player. Dismissible. Hidden on small
+// screens to keep mobile clean.
+
+function StickyPlayerBar() {
+  const [dismissed, setDismissed] = useState(false);
+  const [playing, setPlaying] = useState(true);
+  if (dismissed) return null;
+  return (
+    <div className="hidden md:flex fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(960px,calc(100vw-2rem))] glass rounded-2xl border border-ink-800/80 shadow-card-dark-hover px-4 py-2.5 items-center gap-4 animate-slide-up">
+      <div className="flex items-center gap-3 min-w-0 w-56 shrink-0">
+        <div className="w-11 h-11 rounded-lg bg-gradient-album shrink-0 flex items-center justify-center shadow-brand">
+          <Disc3 size={20} className={`text-white ${playing ? "animate-spin" : ""}`} style={{ animationDuration: "8s" }} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-white truncate">Vietnamese girl · cinematic</p>
+          <p className="text-[10px] text-ink-400 truncate">Aurora · AI Image · 1:1</p>
+        </div>
+        <button className="text-ink-500 hover:text-accent-fuchsia">
+          <Heart size={14} />
+        </button>
+      </div>
+      <div className="flex-1">
+        <div className="flex items-center justify-center gap-4 text-ink-300">
+          <button className="hover:text-white"><ListMusic size={15} /></button>
+          <button
+            onClick={() => setPlaying((p) => !p)}
+            className="w-8 h-8 rounded-full bg-white text-ink-900 flex items-center justify-center hover:scale-110 transition shadow-glow-pink"
+          >
+            {playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+          </button>
+          <button className="hover:text-white"><Mic2 size={15} /></button>
+        </div>
+        <div className="flex items-center gap-2 mt-1 text-[10px] text-ink-500 font-mono">
+          <span>0:08</span>
+          <div className="flex-1 h-0.5 bg-ink-800 rounded-full overflow-hidden">
+            <div className="h-full w-[62%] bg-accent-spotify rounded-full" />
+          </div>
+          <span>0:13</span>
+        </div>
+      </div>
+      <button
+        onClick={() => setDismissed(true)}
+        className="text-ink-500 hover:text-white shrink-0"
+        aria-label="Dismiss player"
+      >
+        <Minus size={16} />
+      </button>
     </div>
   );
 }
