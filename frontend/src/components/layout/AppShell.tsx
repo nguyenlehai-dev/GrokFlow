@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { getAuthedNav } from "@/app/moduleRegistry";
 import { useDocumentTitle } from "@/core/useDocumentTitle";
 import { NotificationBell } from "./NotificationBell";
+import { QuickCreateMenu } from "./QuickCreateMenu";
 
 /** Map nav-group key → i18n key under "nav.<x>". Falls back to the static
  *  label if there's no translation key (e.g. for module-specific items
@@ -173,7 +174,8 @@ export function AppShell() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <QuickCreateMenu />
             <NotificationBell />
             <button onClick={onLogout} className="btn-ghost">
               <LogOut size={16} className="sm:mr-2" />

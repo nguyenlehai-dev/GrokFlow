@@ -8,6 +8,7 @@ import { RouteErrorBoundary } from "@/components/layout/RouteErrorBoundary";
 import { LoginPage } from "@/modules/auth/LoginPage";
 import { RegisterPage } from "@/modules/auth/RegisterPage";
 import { LandingPage } from "@/modules/landing/LandingPage";
+import { TryImagePage } from "@/modules/landing/TryImagePage";
 
 import { getAuthedRoutes } from "./moduleRegistry";
 
@@ -38,6 +39,13 @@ export const router = createBrowserRouter([
         <RegisterPage />
       </PublicRouteGuard>
     ),
+    errorElement: <RouteErrorBoundary />,
+  },
+  // Public Grok-Image "try-it" page. Reachable to anonymous visitors;
+  // auth state changes the quota source (anon = IP-rate-limit, auth = plan).
+  {
+    path: "/try/image",
+    element: <TryImagePage />,
     errorElement: <RouteErrorBoundary />,
   },
   {

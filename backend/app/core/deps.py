@@ -32,6 +32,29 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_current_user_optional(
+    db: DbSession,
+    authorization: str | None = Header(default=None),
+) -> User | None:
+    """Like get_current_user but returns None for anonymous callers.
+    Used by public endpoints that adapt behavior based on auth state
+    (e.g. /api/public/try-image — anon gets 2/day IP-limited, auth gets
+    plan quota)."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1]
+    payload = decode_access_token(token)
+    if not payload or "sub" not in payload:
+        return None
+    user = await db.get(User, payload["sub"])
+    if not user or user.status != "active":
+        return None
+    return user
+
+
+CurrentUserOptional = Annotated[User | None, Depends(get_current_user_optional)]
+
+
 # Role tiers:
 #   super_admin — global super-admin (all domains)
 #   admin       — per-domain admin (scoped to user.domain_id)
