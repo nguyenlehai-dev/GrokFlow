@@ -27,6 +27,8 @@ interface Domain {
   allowed_pages: string[];
   brand_name: string | null;
   require_playground_key: boolean;
+  maintenance_mode?: boolean;
+  maintenance_message?: string | null;
 }
 
 // PAGE_GROUPS is imported from pageCatalog.ts — keeps the menu hierarchy in
@@ -109,7 +111,17 @@ export function AdminDomainsTab() {
                   <td className="px-3 py-2 font-mono text-xs">{d.hostname}</td>
                   <td className="px-3 py-2 font-medium">{d.label}</td>
                   <td className="px-3 py-2">
-                    <StatusPill status={d.status} />
+                    <div className="flex flex-col gap-1">
+                      <StatusPill status={d.status} />
+                      {d.maintenance_mode && (
+                        <span
+                          className="badge-amber text-[10px] inline-flex w-fit"
+                          title={d.maintenance_message || "Đang bảo trì"}
+                        >
+                          🔧 Maintenance
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2 space-x-1">
                     <Flag on={d.allow_landing} label="landing" />
@@ -204,6 +216,8 @@ function DomainEditorModal({
   const [allowedPages, setAllowedPages] = useState<string[]>(domain?.allowed_pages ?? []);
   const [brandName, setBrandName] = useState(domain?.brand_name ?? "");
   const [requirePlaygroundKey, setRequirePlaygroundKey] = useState(domain?.require_playground_key ?? true);
+  const [maintenanceMode, setMaintenanceMode] = useState(domain?.maintenance_mode ?? false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState(domain?.maintenance_message ?? "");
 
   const togglePage = (path: string) => {
     setAllowedPages((prev) =>
@@ -220,6 +234,8 @@ function DomainEditorModal({
         allowed_pages: allowedPages,
         brand_name: brandName || null,
         require_playground_key: requirePlaygroundKey,
+        maintenance_mode: maintenanceMode,
+        maintenance_message: maintenanceMessage || null,
       };
       if (isCreate) payload.hostname = hostname;
       return isCreate
@@ -298,6 +314,40 @@ function DomainEditorModal({
               Bật: user phải dán hoặc generate key, verify mới được submit job. Tắt: vào thẳng (dùng JWT).
             </span>
           </Checkbox>
+        </section>
+
+        {/* Maintenance — per-domain. Lets the team patch one tenant in
+            isolation without taking the rest of the platform down. */}
+        <section className={`border-t pt-3 space-y-2 ${maintenanceMode ? "" : ""}`}>
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            🔧 Maintenance mode
+            {maintenanceMode && (
+              <span className="badge-amber text-[10px]">ĐANG BẬT</span>
+            )}
+          </h3>
+          <Checkbox checked={maintenanceMode} onChange={setMaintenanceMode}>
+            <strong>Bật màn hình bảo trì</strong> cho domain này
+            <span className="block text-xs text-slate-500">
+              Khi bật: user (không phải admin) vào domain sẽ thấy trang "Đang bảo trì".
+              Admin / super_admin vẫn dùng bình thường để fix. Các domain khác không bị ảnh hưởng.
+            </span>
+          </Checkbox>
+          {maintenanceMode && (
+            <div>
+              <label className="text-xs font-medium text-slate-700">Lời nhắn cho khách (tuỳ chọn)</label>
+              <textarea
+                className="input mt-1"
+                rows={3}
+                value={maintenanceMessage}
+                onChange={(e) => setMaintenanceMessage(e.target.value)}
+                placeholder="VD: Đang nâng cấp tính năng video. Dự kiến xong lúc 22h tối nay."
+                maxLength={2000}
+              />
+              <p className="text-[10px] text-slate-500 mt-1">
+                Hiển thị trong khung vàng trên trang bảo trì. Hỗ trợ xuống dòng.
+              </p>
+            </div>
+          )}
         </section>
 
         <section className="border-t pt-3 space-y-2">

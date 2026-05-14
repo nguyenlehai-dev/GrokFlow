@@ -12,6 +12,10 @@ export interface DomainConfig {
   allowed_pages: string[];
   brand_name: string | null;
   require_playground_key: boolean;
+  // Per-domain maintenance toggle. When true and the visitor is not an
+  // admin, the AppShell + public route guard render a maintenance screen.
+  maintenance_mode?: boolean;
+  maintenance_message?: string | null;
 }
 
 interface DomainState {
@@ -47,6 +51,8 @@ const DEFAULT: DomainConfig = {
   allowed_pages: [],
   brand_name: null,
   require_playground_key: true,
+  maintenance_mode: false,
+  maintenance_message: null,
 };
 
 export const useDomainStore = create<DomainState>((set, get) => ({

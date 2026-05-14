@@ -43,6 +43,8 @@ class DomainIn(BaseModel):
     allowed_pages: list[str] = Field(default_factory=list)
     brand_name: str | None = None
     require_playground_key: bool = True
+    maintenance_mode: bool = False
+    maintenance_message: str | None = Field(default=None, max_length=2000)
 
 
 class DomainUpdate(BaseModel):
@@ -56,6 +58,8 @@ class DomainUpdate(BaseModel):
     allowed_pages: list[str] | None = None
     brand_name: str | None = None
     require_playground_key: bool | None = None
+    maintenance_mode: bool | None = None
+    maintenance_message: str | None = Field(default=None, max_length=2000)
 
 
 class DomainOut(BaseModel):
@@ -71,6 +75,8 @@ class DomainOut(BaseModel):
     allowed_pages: list[str]
     brand_name: str | None
     require_playground_key: bool
+    maintenance_mode: bool = False
+    maintenance_message: str | None = None
 
     class Config:
         from_attributes = True
@@ -88,6 +94,10 @@ class DomainConfig(BaseModel):
     allowed_pages: list[str]
     brand_name: str | None
     require_playground_key: bool
+    # Per-domain maintenance window. Frontend renders the maintenance
+    # screen for non-admin users when this is true.
+    maintenance_mode: bool = False
+    maintenance_message: str | None = None
 
 
 # ---------------- Admin CRUD ----------------
@@ -115,6 +125,8 @@ async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession)
         allowed_pages=payload.allowed_pages,
         brand_name=payload.brand_name,
         require_playground_key=payload.require_playground_key,
+        maintenance_mode=payload.maintenance_mode,
+        maintenance_message=payload.maintenance_message,
     )
     db.add(d)
     await db.flush()
@@ -146,7 +158,7 @@ async def update_domain(
     for field in (
         "label", "description", "status", "allow_landing", "allow_register",
         "allow_login", "allow_all_pages", "allowed_pages", "brand_name",
-        "require_playground_key",
+        "require_playground_key", "maintenance_mode", "maintenance_message",
     ):
         v = getattr(payload, field)
         if v is not None:
@@ -212,6 +224,8 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
             allow_login=d.allow_login, allow_all_pages=d.allow_all_pages,
             allowed_pages=d.allowed_pages, brand_name=d.brand_name,
             require_playground_key=d.require_playground_key,
+            maintenance_mode=d.maintenance_mode,
+            maintenance_message=d.maintenance_message,
         )
     # Fail-open default
     return DomainConfig(
@@ -219,4 +233,5 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
         allow_landing=True, allow_register=True, allow_login=True,
         allow_all_pages=True, allowed_pages=[], brand_name=None,
         require_playground_key=True,
+        maintenance_mode=False, maintenance_message=None,
     )

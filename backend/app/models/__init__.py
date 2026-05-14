@@ -459,6 +459,14 @@ class Domain(Base, TimestampMixin):
     require_playground_key: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Per-domain maintenance window. When ON, every non-admin user landing
+    # on this hostname sees a friendly maintenance screen instead of the
+    # normal UI. Admin / super_admin still get through so they can fix.
+    # Lets the team patch one tenant in isolation without blanket downtime.
+    maintenance_mode: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    maintenance_message: Mapped[str | None] = mapped_column(Text)
 
 
 class Role(Base, TimestampMixin):

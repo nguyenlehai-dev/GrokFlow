@@ -1,5 +1,7 @@
 import { Navigate } from "react-router-dom";
 import { useDomainStore } from "@/core/domain/store";
+import { useAuthStore } from "@/core/auth/store";
+import { MaintenancePage } from "@/components/ui/MaintenancePage";
 import type { ReactNode } from "react";
 
 type PublicFlag = "allow_landing" | "allow_register" | "allow_login";
@@ -19,10 +21,19 @@ export function PublicRouteGuard({
 }) {
   const config = useDomainStore((s) => s.config);
   const loaded = useDomainStore((s) => s.loaded);
+  const user = useAuthStore((s) => s.user);
 
   // Until the config arrives, render the route — fail-open during the boot
   // tick avoids a flash of "blocked" UI for legitimate visitors.
   if (!loaded || !config) return <>{children}</>;
+
+  // Per-domain maintenance window. Admins still get through so they can
+  // finish the patch from /admin/domains; everyone else sees the screen.
+  if (config.maintenance_mode) {
+    const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+    if (!isAdmin) return <MaintenancePage />;
+  }
+
   if (config.status === "disabled") {
     return <BlockedPanel reason="Domain bị disable bởi admin" />;
   }

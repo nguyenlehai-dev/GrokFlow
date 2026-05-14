@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { api } from "@/core/api/axios";
 import { useAuthStore, userCanSeePath } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
+import { MaintenancePage } from "@/components/ui/MaintenancePage";
 import type { ReactNode } from "react";
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -13,6 +14,14 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const isPageAllowed = useDomainStore((s) => s.isPageAllowed);
   const firstAllowedPath = useDomainStore((s) => s.firstAllowedPath);
   const location = useLocation();
+
+  // Per-domain maintenance mode: non-admin users see the maintenance
+  // screen regardless of which authed route they tried to hit. Admins
+  // still get through so they can finish the patch from /admin/domains.
+  if (domainConfig?.maintenance_mode) {
+    const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+    if (!isAdmin) return <MaintenancePage />;
+  }
 
   // Refresh /me on app boot — keeps cached entitlements in sync after admin
   // changes the user's plan/overrides server-side. Skip if no token.
