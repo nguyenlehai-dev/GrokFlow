@@ -117,7 +117,7 @@ export function LandingPage() {
   const brandName = useDomainStore((s) => s.config?.brand_name) ?? "GrokFlow";
 
   return (
-    <div className="min-h-screen bg-ink-950 text-ink-100 selection:bg-brand-500/30">
+    <div className="min-h-screen bg-[#0a0a0a] text-ink-100 pb-24 md:pb-28">
       <TopNav brandName={brandName} />
       <Hero brandName={brandName} />
       <AppPreview />
@@ -190,30 +190,24 @@ function TopNav({ brandName }: { brandName: string }) {
 function Hero({ brandName }: { brandName: string }) {
   const { t } = useTranslation();
   return (
-    <section className="relative overflow-hidden">
-      {/* Animated mesh background */}
-      <div className="absolute inset-0 bg-gradient-mesh-dark pointer-events-none" />
-      <div className="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-accent-fuchsia/20 blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-brand-500/20 blur-3xl pointer-events-none" />
-      <div className="absolute top-1/2 left-1/2 w-[600px] h-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-cyan/10 blur-3xl pointer-events-none" />
-
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-24 sm:pt-28 sm:pb-32">
+    <section className="relative">
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-16 sm:pt-28 sm:pb-20">
         <div className="text-center max-w-3xl mx-auto space-y-6">
-          {/* "Now playing" pill */}
-          <div className="inline-flex items-center gap-2 rounded-full bg-ink-900/70 backdrop-blur-md border border-ink-800 px-4 py-1.5">
+          {/* "Now playing" pill — flat dark, Spotify-style. */}
+          <div className="inline-flex items-center gap-2 rounded-full bg-ink-900 px-4 py-1.5">
             <span className="flex items-end gap-0.5 h-3">
               <span className="eq-bar h-full animate-eq-bar-1 text-accent-spotify" />
               <span className="eq-bar h-full animate-eq-bar-2 text-accent-spotify" />
               <span className="eq-bar h-full animate-eq-bar-3 text-accent-spotify" />
             </span>
-            <span className="text-xs font-semibold text-ink-200">
+            <span className="text-xs font-semibold text-ink-300">
               {t("landing.now_playing", "Đang phát")}: <span className="text-white">AI Image · Aurora model</span>
             </span>
           </div>
 
-          <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight leading-[1.05]">
+          <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight leading-[1.05] text-white">
             {t("landing.hero_title_1", "Một studio.")}<br />
-            <span className="text-gradient">{t("landing.hero_title_2", "Mọi mô hình AI.")}</span>
+            {t("landing.hero_title_2", "Mọi mô hình AI.")}
           </h1>
           <p className="text-lg sm:text-xl text-ink-300 max-w-2xl mx-auto leading-relaxed">
             {brandName} — {t("landing.hero_subtitle", "Quản lý mọi dự án AI — sinh ảnh, video, văn bản, code — trong một giao diện duy nhất, theo phong cách bảng điều khiển âm nhạc.")}
@@ -262,7 +256,7 @@ function NowPlayingDemo() {
           {/* Player body */}
           <div className="p-6 sm:p-8 flex flex-col justify-between gap-6">
             <div>
-              <p className="text-xs uppercase tracking-wider text-accent-fuchsia font-semibold">
+              <p className="text-xs uppercase tracking-wider text-accent-spotify font-semibold">
                 Now Playing · Demo
               </p>
               <h3 className="text-2xl font-bold text-white mt-1">
@@ -348,7 +342,7 @@ function ModuleShowcase() {
                   </div>
                 </div>
               </div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-accent-fuchsia">{m.tagline}</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-accent-spotify">{m.tagline}</p>
               <h3 className="font-bold text-white text-lg mt-0.5">{m.label}</h3>
               <p className="text-sm text-ink-400 mt-1.5 leading-relaxed flex-1">{m.desc}</p>
               <ul className="mt-3 space-y-1">
@@ -358,7 +352,7 @@ function ModuleShowcase() {
                   </li>
                 ))}
               </ul>
-              <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-accent-fuchsia group-hover:gap-2 transition-all">
+              <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-accent-spotify group-hover:gap-2 transition-all">
                 {m.ctaText} <ArrowRight size={14} />
               </div>
             </article>
@@ -406,7 +400,7 @@ function ArtistSpotlight() {
             <div className={`w-20 h-20 rounded-full bg-gradient-to-br ${a.gradient} flex items-center justify-center shadow-glow-pink mb-4`}>
               <Mic2 size={32} className="text-white" />
             </div>
-            <p className="text-[11px] uppercase tracking-wider text-accent-fuchsia font-semibold">{a.role}</p>
+            <p className="text-[11px] uppercase tracking-wider text-accent-spotify font-semibold">{a.role}</p>
             <h3 className="text-2xl font-bold text-white mt-0.5">{a.name}</h3>
             <p className="text-sm text-ink-400 mt-2">{a.desc}</p>
             <p className="text-xs font-mono text-accent-spotify mt-3 inline-flex items-center gap-1">
@@ -525,7 +519,7 @@ function Faq() {
               className="w-full flex items-center justify-between text-left text-sm font-semibold text-white"
             >
               {it.q}
-              {open === i ? <Minus size={16} className="shrink-0 text-accent-fuchsia" /> : <Plus size={16} className="shrink-0 text-ink-400" />}
+              {open === i ? <Minus size={16} className="shrink-0 text-accent-spotify" /> : <Plus size={16} className="shrink-0 text-ink-400" />}
             </button>
             {open === i && (
               <p className="mt-3 text-sm text-ink-300 leading-relaxed animate-slide-up">{it.a}</p>
@@ -543,11 +537,9 @@ function FinalCta() {
   const { t } = useTranslation();
   return (
     <section className="max-w-5xl mx-auto px-4 sm:px-6 py-20">
-      <div className="relative overflow-hidden rounded-3xl p-12 text-center bg-gradient-album shadow-glow-pink">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_30%,rgba(255,255,255,0.25),transparent_50%)] pointer-events-none" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_70%,rgba(6,182,212,0.25),transparent_50%)] pointer-events-none" />
+      <div className="relative overflow-hidden rounded-2xl p-12 text-center" style={{ background: "linear-gradient(135deg, #1db954 0%, #166534 100%)" }}>
         <div className="relative">
-          <Headphones size={48} className="mx-auto text-white/90 mb-4" />
+          <Headphones size={48} className="mx-auto text-white mb-4" />
           <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
             {t("landing.final_cta_title_a", "Sẵn sàng phát hành")}<br />{t("landing.final_cta_title_b", "studio AI của riêng bạn?")}
           </h2>
@@ -557,13 +549,13 @@ function FinalCta() {
           <div className="mt-7 flex flex-wrap justify-center gap-3">
             <Link
               to="/register"
-              className="bg-white text-ink-900 font-bold rounded-lg px-7 py-3 inline-flex items-center gap-2 shadow-card-hover hover:scale-105 transition"
+              className="bg-black text-white font-bold rounded-full px-7 py-3 inline-flex items-center gap-2 hover:scale-105 transition"
             >
               <Sparkles size={18} /> {t("landing.cta_start", "Bắt đầu miễn phí")}
             </Link>
             <Link
               to="/try/image"
-              className="border-2 border-white/40 text-white font-bold rounded-lg px-7 py-3 inline-flex items-center gap-2 hover:bg-white/10 transition"
+              className="border-2 border-white text-white font-bold rounded-full px-7 py-3 inline-flex items-center gap-2 hover:bg-white/10 transition"
             >
               <Play size={18} /> {t("landing.cta_try_no_signup", "Thử không cần đăng ký")}
             </Link>
@@ -631,7 +623,7 @@ function SectionHeader({
 }: { eyebrow: string; title: React.ReactNode; subtitle: string }) {
   return (
     <div className="text-center max-w-2xl mx-auto">
-      <p className="text-xs uppercase tracking-[0.2em] text-accent-fuchsia font-bold">{eyebrow}</p>
+      <p className="text-xs uppercase tracking-[0.2em] text-accent-spotify font-bold">{eyebrow}</p>
       <h2 className="text-3xl sm:text-5xl font-extrabold text-white mt-3 tracking-tight">{title}</h2>
       <p className="text-ink-400 mt-4 text-base sm:text-lg">{subtitle}</p>
     </div>
@@ -673,25 +665,23 @@ const MADE_FOR_YOU_TILES = [
 
 function AppPreview() {
   return (
-    <section className="max-w-6xl mx-auto px-4 sm:px-6 -mt-8 mb-24 relative z-10">
-      {/* Glow underlay */}
-      <div className="absolute -inset-6 bg-gradient-album opacity-30 blur-3xl rounded-[40px] pointer-events-none" />
-      <div className="relative rounded-[28px] bg-gradient-to-br from-ink-900 via-ink-950 to-ink-900 border border-ink-800/80 shadow-card-dark-hover overflow-hidden">
+    <section className="max-w-6xl mx-auto px-4 sm:px-6 mb-24 relative z-10">
+      <div className="relative rounded-2xl bg-black border border-ink-800 overflow-hidden shadow-2xl">
         {/* Window chrome */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-ink-800/70 bg-ink-900/80">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-ink-800 bg-black">
           <span className="w-3 h-3 rounded-full bg-rose-500/80" />
           <span className="w-3 h-3 rounded-full bg-amber-400/80" />
           <span className="w-3 h-3 rounded-full bg-emerald-500/80" />
-          <div className="ml-3 flex-1 max-w-md mx-auto flex items-center gap-2 rounded-full bg-ink-800/80 px-3 py-1 text-xs text-ink-400">
-            <Sparkles size={11} className="text-accent-fuchsia" />
+          <div className="ml-3 flex-1 max-w-md mx-auto flex items-center gap-2 rounded-full bg-ink-900 px-3 py-1 text-xs text-ink-400">
+            <Sparkles size={11} className="text-accent-spotify" />
             studio · GrokFlow workspace
           </div>
         </div>
 
         {/* App body */}
         <div className="grid grid-cols-[220px_1fr] min-h-[460px]">
-          {/* Sidebar */}
-          <aside className="bg-ink-950/70 border-r border-ink-800/70 p-4 space-y-6">
+          {/* Sidebar — true black, Spotify-style */}
+          <aside className="bg-black border-r border-ink-900 p-4 space-y-6">
             <div className="space-y-1.5">
               {[
                 { icon: ListMusic, label: "Home",   active: true },
@@ -700,22 +690,22 @@ function AppPreview() {
               ].map((it) => (
                 <div
                   key={it.label}
-                  className={`flex items-center gap-3 px-3 py-1.5 rounded-md text-sm font-semibold ${
-                    it.active ? "text-white bg-ink-800/80" : "text-ink-400 hover:text-white"
+                  className={`flex items-center gap-3 px-3 py-1.5 rounded text-sm font-bold ${
+                    it.active ? "text-white" : "text-ink-400 hover:text-white"
                   }`}
                 >
-                  <it.icon size={16} className={it.active ? "text-accent-fuchsia" : ""} />
+                  <it.icon size={18} />
                   {it.label}
                 </div>
               ))}
             </div>
             <div>
-              <p className="text-[10px] uppercase tracking-wider text-ink-500 font-bold px-3 mb-2">Your library</p>
+              <p className="text-[11px] uppercase tracking-wider text-ink-400 font-bold px-3 mb-2">Your library</p>
               <div className="space-y-1 text-sm">
                 {SIDEBAR_PLAYLISTS.map((p, i) => (
                   <div
                     key={p}
-                    className={`px-3 py-1 rounded text-ink-400 hover:text-white truncate ${i === 0 ? "text-accent-spotify font-semibold" : ""}`}
+                    className={`px-3 py-1 rounded hover:text-white truncate ${i === 0 ? "text-white font-semibold" : "text-ink-400"}`}
                   >
                     {p}
                   </div>
@@ -724,8 +714,9 @@ function AppPreview() {
             </div>
           </aside>
 
-          {/* Main */}
-          <div className="bg-gradient-to-b from-violet-900/30 via-ink-950/40 to-ink-950 p-6 overflow-hidden">
+          {/* Main — flat dark, Spotify-style. Subtle gradient at the
+              top so it feels like an album-tinted header. */}
+          <div className="bg-gradient-to-b from-ink-800 via-ink-950 to-ink-950 p-6 overflow-hidden">
             <p className="text-xs uppercase tracking-wider text-ink-400 font-semibold">
               Good evening
             </p>
@@ -772,10 +763,11 @@ function AppPreview() {
           </div>
         </div>
 
-        {/* Mini player bar at the bottom of the frame */}
-        <div className="border-t border-ink-800/70 bg-ink-900/95 px-4 py-2.5 flex items-center gap-4">
+        {/* Mini player bar at the bottom of the frame — Spotify-style
+            true black background. */}
+        <div className="border-t border-ink-800 bg-black px-4 py-2.5 flex items-center gap-4">
           <div className="flex items-center gap-3 min-w-0 w-48">
-            <div className="w-10 h-10 rounded-md bg-gradient-album shrink-0 shadow-card-dark flex items-center justify-center">
+            <div className="w-10 h-10 rounded bg-gradient-to-br from-violet-600 to-fuchsia-600 shrink-0 flex items-center justify-center">
               <Disc3 size={18} className="text-white animate-spin" style={{ animationDuration: "8s" }} />
             </div>
             <div className="min-w-0">
@@ -880,7 +872,7 @@ function PlaylistCarousel({
     <section className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
       <div className="flex items-end justify-between mb-5">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-accent-fuchsia font-bold">{eyebrow}</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-accent-spotify font-bold">{eyebrow}</p>
           <h3 className="text-2xl sm:text-3xl font-extrabold text-white mt-2">{title}</h3>
         </div>
         <a href="#modules" className="text-xs uppercase tracking-wider text-ink-400 hover:text-white font-semibold">
@@ -920,29 +912,29 @@ function StickyPlayerBar() {
   const [playing, setPlaying] = useState(true);
   if (dismissed) return null;
   return (
-    <div className="hidden md:flex fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(960px,calc(100vw-2rem))] glass rounded-2xl border border-ink-800/80 shadow-card-dark-hover px-4 py-2.5 items-center gap-4 animate-slide-up">
-      <div className="flex items-center gap-3 min-w-0 w-56 shrink-0">
-        <div className="w-11 h-11 rounded-lg bg-gradient-album shrink-0 flex items-center justify-center shadow-brand">
-          <Disc3 size={20} className={`text-white ${playing ? "animate-spin" : ""}`} style={{ animationDuration: "8s" }} />
+    <div className="hidden md:flex fixed bottom-0 left-0 right-0 z-40 bg-black border-t border-ink-800 px-4 py-3 items-center gap-4 animate-slide-up">
+      <div className="flex items-center gap-3 min-w-0 w-72 shrink-0">
+        <div className="w-12 h-12 rounded bg-gradient-to-br from-violet-600 to-fuchsia-600 shrink-0 flex items-center justify-center">
+          <Disc3 size={22} className={`text-white ${playing ? "animate-spin" : ""}`} style={{ animationDuration: "8s" }} />
         </div>
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-white truncate">Vietnamese girl · cinematic</p>
-          <p className="text-[10px] text-ink-400 truncate">Aurora · AI Image · 1:1</p>
+          <p className="text-sm font-semibold text-white truncate">Vietnamese girl · cinematic</p>
+          <p className="text-xs text-ink-400 truncate">Aurora · AI Image · 1:1</p>
         </div>
-        <button className="text-ink-500 hover:text-accent-fuchsia">
-          <Heart size={14} />
+        <button className="text-ink-400 hover:text-accent-spotify">
+          <Heart size={16} />
         </button>
       </div>
-      <div className="flex-1">
-        <div className="flex items-center justify-center gap-4 text-ink-300">
-          <button className="hover:text-white"><ListMusic size={15} /></button>
+      <div className="flex-1 max-w-2xl mx-auto">
+        <div className="flex items-center justify-center gap-5 text-ink-300">
+          <button className="hover:text-white"><ListMusic size={16} /></button>
           <button
             onClick={() => setPlaying((p) => !p)}
-            className="w-8 h-8 rounded-full bg-white text-ink-900 flex items-center justify-center hover:scale-110 transition shadow-glow-pink"
+            className="w-9 h-9 rounded-full bg-white text-ink-950 flex items-center justify-center hover:scale-110 transition"
           >
-            {playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+            {playing ? <Pause size={15} /> : <Play size={15} className="ml-0.5" />}
           </button>
-          <button className="hover:text-white"><Mic2 size={15} /></button>
+          <button className="hover:text-white"><Mic2 size={16} /></button>
         </div>
         <div className="flex items-center gap-2 mt-1 text-[10px] text-ink-500 font-mono">
           <span>0:08</span>
@@ -952,13 +944,19 @@ function StickyPlayerBar() {
           <span>0:13</span>
         </div>
       </div>
-      <button
-        onClick={() => setDismissed(true)}
-        className="text-ink-500 hover:text-white shrink-0"
-        aria-label="Dismiss player"
-      >
-        <Minus size={16} />
-      </button>
+      <div className="hidden lg:flex items-center gap-2 w-56 justify-end text-ink-400 shrink-0">
+        <Mic2 size={16} />
+        <div className="w-24 h-1 bg-ink-800 rounded-full overflow-hidden">
+          <div className="h-full w-[70%] bg-ink-400 rounded-full" />
+        </div>
+        <button
+          onClick={() => setDismissed(true)}
+          className="ml-2 text-ink-500 hover:text-white"
+          aria-label="Dismiss player"
+        >
+          <Minus size={16} />
+        </button>
+      </div>
     </div>
   );
 }
