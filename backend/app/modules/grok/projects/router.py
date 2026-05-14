@@ -38,6 +38,24 @@ router = APIRouter(prefix="/api/grok-projects", tags=["grok-projects"])
 # ─── Schemas ───────────────────────────────────────────────────────────────
 
 
+def _sanitize_slug(raw: str) -> str:
+    """Strip anything after the slug — `?tab=...`, `#anchor`, trailing `/`.
+
+    Users tend to paste the FULL URL after `/project/`, which leaves a
+    query string attached. That breaks navigation later (`grok.com/project/<id>?tab=...`
+    becomes `grok.com/project/<id>%3Ftab%3D...` after URL-encoding).
+    """
+    s = (raw or "").strip()
+    # Remove protocol/host if pasted full URL
+    if "/project/" in s:
+        s = s.split("/project/", 1)[1]
+    # Strip everything after the slug
+    for sep in ("?", "#", "/"):
+        if sep in s:
+            s = s.split(sep, 1)[0]
+    return s.strip()
+
+
 class ProjectCreate(BaseModel):
     profile_id: uuid.UUID
     grok_project_id: str = Field(min_length=1, max_length=255)
@@ -174,7 +192,7 @@ async def create_project(
         )
     p = GrokProject(
         profile_id=payload.profile_id,
-        grok_project_id=payload.grok_project_id.strip(),
+        grok_project_id=_sanitize_slug(payload.grok_project_id),
         name=payload.name.strip(),
         description=payload.description,
     )
@@ -204,7 +222,7 @@ async def update_project(
         raise NotFound("grok_project")
     changes: dict = {}
     if payload.grok_project_id is not None:
-        p.grok_project_id = payload.grok_project_id.strip()
+        p.grok_project_id = _sanitize_slug(payload.grok_project_id)
         changes["grok_project_id"] = p.grok_project_id
     if payload.name is not None:
         p.name = payload.name.strip()
