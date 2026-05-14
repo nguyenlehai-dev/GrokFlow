@@ -189,11 +189,16 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            if job.grok_project_id and job.job_type == "image":
-                # Best-effort project-scoped flow. Falls back to /imagine
-                # internally if the chat input or response can't be
-                # located within the timeout, so a Grok UI quirk in
-                # project mode doesn't strand the job.
+            # Project-scoped chat flow only supports text-to-image — it
+            # types `/imagine <prompt>` and submits without uploading the
+            # input file. If the user provided a reference image for
+            # image-to-image, skip this path so the legacy Imagine-studio
+            # flow (`_run_image`) runs — that one DOES call _attach_files.
+            if (
+                job.grok_project_id
+                and job.job_type == "image"
+                and not job.attachments
+            ):
                 result = await self._run_image_in_project(job)
                 if result is not None:
                     return result
