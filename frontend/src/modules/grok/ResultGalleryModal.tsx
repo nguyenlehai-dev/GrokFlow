@@ -102,7 +102,7 @@ export function ResultGalleryModal({
         <div className="flex items-center justify-between text-white mb-3">
           <div>
             <div className="text-lg font-semibold">{cur?.file_name ?? "Result"}</div>
-            <div className="text-xs text-slate-300">
+            <div className="text-xs text-ink-500">
               {files.length > 0 && (
                 <>
                   Ảnh <span className="font-mono">{idx + 1}</span> / <span className="font-mono">{files.length}</span>
@@ -116,13 +116,13 @@ export function ResultGalleryModal({
             {files.length > 1 && allImages && (
               <button
                 onClick={() => setAutoPlay((a) => !a)}
-                className="p-2 rounded hover:bg-white/10"
+                className="p-2 rounded hover:bg-ink-900/10"
                 title={autoPlay ? "Tạm dừng slideshow (Space)" : "Phát slideshow tự động (Space)"}
               >
                 {autoPlay ? <Pause size={18} /> : <Play size={18} />}
               </button>
             )}
-            <button onClick={onClose} className="p-2 rounded hover:bg-white/10" title="Đóng (Esc)">
+            <button onClick={onClose} className="p-2 rounded hover:bg-ink-900/10" title="Đóng (Esc)">
               <X size={20} />
             </button>
           </div>
@@ -133,11 +133,11 @@ export function ResultGalleryModal({
           onTouchStart={onTouchStart}
           onTouchEnd={onTouchEnd}
         >
-          {isLoading && <p className="text-slate-400">Đang tải danh sách file…</p>}
+          {isLoading && <p className="text-ink-500">Đang tải danh sách file…</p>}
           {!isLoading && files.length === 0 && (
-            <p className="text-slate-400">Job này chưa có file kết quả.</p>
+            <p className="text-ink-500">Job này chưa có file kết quả.</p>
           )}
-          {cur && !blob && <p className="text-slate-400">Đang tải media…</p>}
+          {cur && !blob && <p className="text-ink-500">Đang tải media…</p>}
           {cur && blob && (() => {
             const isVideo = (cur.mime_type || "").startsWith("video/")
               || (cur.file_type === "video" && !(cur.mime_type || "").startsWith("image/"));
@@ -186,7 +186,7 @@ export function ResultGalleryModal({
                     key={i}
                     onClick={() => setIdx(i)}
                     className={`w-2 h-2 rounded-full transition-all ${
-                      i === idx ? "bg-white w-6" : "bg-white/40 hover:bg-white/70"
+                      i === idx ? "bg-ink-900 w-6" : "bg-ink-900/40 hover:bg-ink-900/70"
                     }`}
                     aria-label={`Đến ảnh ${i + 1}`}
                   />
@@ -222,7 +222,7 @@ export function ResultGalleryModal({
         )}
 
         {files.length > 1 && (
-          <p className="text-xs text-slate-400 text-center mt-2">
+          <p className="text-xs text-ink-500 text-center mt-2">
             ← → chuyển ảnh • Space play/pause • Esc đóng • vuốt trái/phải trên mobile
           </p>
         )}

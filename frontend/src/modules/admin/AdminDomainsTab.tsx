@@ -78,7 +78,7 @@ export function AdminDomainsTab() {
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Globe size={18} /> Domains
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-ink-400 mt-0.5">
             Mỗi domain có cấu hình quyền vào trang riêng. Domain <code>*</code> là fallback cho host chưa khai báo.
           </p>
         </div>
@@ -91,11 +91,11 @@ export function AdminDomainsTab() {
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">Hostname</th>
                 <th className="px-3 py-2">Label</th>
@@ -109,7 +109,7 @@ export function AdminDomainsTab() {
             </thead>
             <tbody>
               {domains?.map((d) => (
-                <tr key={d.id} className="border-t hover:bg-slate-50">
+                <tr key={d.id} className="border-t hover:bg-ink-900">
                   <td className="px-3 py-2 font-mono text-xs">{d.hostname}</td>
                   <td className="px-3 py-2 font-medium">{d.label}</td>
                   <td className="px-3 py-2">
@@ -134,7 +134,7 @@ export function AdminDomainsTab() {
                     {d.allow_all_pages ? (
                       <span className="text-emerald-700 font-medium">Tất cả</span>
                     ) : (
-                      <span className="text-slate-600">
+                      <span className="text-ink-300">
                         {d.allowed_pages.length === 0 ? "—" : `${d.allowed_pages.length} trang`}
                       </span>
                     )}
@@ -142,7 +142,7 @@ export function AdminDomainsTab() {
                   <td className="px-3 py-2">
                     <RolesCell roles={rolesByDomain[d.id] ?? []} />
                   </td>
-                  <td className="px-3 py-2 text-xs text-slate-600">{d.brand_name ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs text-ink-300">{d.brand_name ?? "—"}</td>
                   <td className="px-3 py-2 space-x-1 whitespace-nowrap">
                     <button className="btn-ghost" onClick={() => setEditing(d)}>
                       <Pencil size={14} className="inline mr-1" /> Sửa
@@ -160,7 +160,7 @@ export function AdminDomainsTab() {
               ))}
               {(domains ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={8} className="px-3 py-6 text-center text-ink-400">
                     Chưa có domain nào.
                   </td>
                 </tr>
@@ -185,7 +185,7 @@ function StatusPill({ status }: { status: string }) {
   const cls =
     status === "active"
       ? "bg-emerald-100 text-emerald-700"
-      : "bg-slate-100 text-slate-600";
+      : "bg-ink-800 text-ink-300";
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{status}</span>
   );
@@ -195,7 +195,7 @@ function Flag({ on, label }: { on: boolean; label: string }) {
   return (
     <span
       className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
-        on ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400 line-through"
+        on ? "bg-emerald-50 text-emerald-700" : "bg-ink-800 text-ink-500 line-through"
       }`}
     >
       {label}
@@ -273,7 +273,7 @@ function DomainEditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <div className="w-full max-w-2xl max-h-[95vh] overflow-auto rounded-lg bg-white p-5 shadow-xl space-y-4">
+      <div className="w-full max-w-2xl max-h-[95vh] overflow-auto rounded-lg bg-ink-900 p-5 shadow-xl space-y-4">
         <h2 className="text-lg font-semibold">
           {isCreate ? "Tạo domain mới" : `Sửa: ${domain?.hostname}`}
           {isDefault && (
@@ -293,7 +293,7 @@ function DomainEditorModal({
               placeholder="khach1.com hoặc *"
               disabled={!isCreate}
             />
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-ink-400 mt-1">
               Không có port, không có protocol. Dùng <code>*</code> cho fallback.
             </p>
           </div>
@@ -329,7 +329,7 @@ function DomainEditorModal({
           <h3 className="text-sm font-semibold">Cổng Playground</h3>
           <Checkbox checked={requirePlaygroundKey} onChange={setRequirePlaygroundKey}>
             <strong>Bắt buộc verify API key</strong> trước khi vào Grok Playground
-            <span className="block text-xs text-slate-500">
+            <span className="block text-xs text-ink-400">
               Bật: user phải dán hoặc generate key, verify mới được submit job. Tắt: vào thẳng (dùng JWT).
             </span>
           </Checkbox>
@@ -346,7 +346,7 @@ function DomainEditorModal({
           </h3>
           <Checkbox checked={maintenanceMode} onChange={setMaintenanceMode}>
             <strong>Bật màn hình bảo trì</strong> cho domain này
-            <span className="block text-xs text-slate-500">
+            <span className="block text-xs text-ink-400">
               Khi bật: user (không phải admin) vào domain sẽ thấy trang "Đang bảo trì".
               Admin / super_admin vẫn dùng bình thường để fix. Các domain khác không bị ảnh hưởng.
             </span>
@@ -354,7 +354,7 @@ function DomainEditorModal({
           {maintenanceMode && (
             <>
               <div>
-                <label className="text-xs font-medium text-slate-700">Lời nhắn cho khách (tuỳ chọn)</label>
+                <label className="text-xs font-medium text-ink-200">Lời nhắn cho khách (tuỳ chọn)</label>
                 <textarea
                   className="input mt-1"
                   rows={3}
@@ -363,7 +363,7 @@ function DomainEditorModal({
                   placeholder="VD: Đang nâng cấp tính năng video. Dự kiến xong lúc 22h tối nay."
                   maxLength={2000}
                 />
-                <p className="text-[10px] text-slate-500 mt-1">
+                <p className="text-[10px] text-ink-400 mt-1">
                   Hiển thị trong khung vàng trên trang bảo trì. Hỗ trợ xuống dòng.
                 </p>
               </div>
@@ -385,12 +385,12 @@ function DomainEditorModal({
               with a countdown. Both can be used together (toggle stays
               off until elapsed, then auto-activates client-side). */}
           <div className="border-t pt-3 mt-3 space-y-2">
-            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+            <p className="text-xs font-semibold text-ink-200 uppercase tracking-wider">
               Lên lịch trước (banner đếm ngược)
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-slate-700">
+                <label className="text-xs font-medium text-ink-200">
                   Bảo trì sau X phút
                 </label>
                 <input
@@ -402,12 +402,12 @@ function DomainEditorModal({
                   onChange={(e) => setScheduleMinutes(e.target.value)}
                   placeholder="VD: 5"
                 />
-                <p className="text-[10px] text-slate-500 mt-1">
+                <p className="text-[10px] text-ink-400 mt-1">
                   0 hoặc rỗng = không lên lịch (không hiện banner).
                 </p>
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-700">
+                <label className="text-xs font-medium text-ink-200">
                   Dòng chữ chạy trên banner
                 </label>
                 <input
@@ -417,7 +417,7 @@ function DomainEditorModal({
                   placeholder="VD: Vui lòng dừng các thao tác trước 22h00"
                   maxLength={2000}
                 />
-                <p className="text-[10px] text-slate-500 mt-1">
+                <p className="text-[10px] text-ink-400 mt-1">
                   Hiện trên top mỗi trang, chạy ngang (marquee).
                 </p>
               </div>
@@ -470,7 +470,7 @@ function DomainEditorModal({
                         onChange={toggleGroup}
                       />
                       <span className="font-semibold text-sm">{group.label}</span>
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-ink-400">
                         {allOn ? "(toàn nhóm)" : someOn ? `(${groupPaths.filter((p) => allowedPages.includes(p)).length}/${groupPaths.length})` : ""}
                       </span>
                     </label>
@@ -482,7 +482,7 @@ function DomainEditorModal({
                           onChange={() => togglePage(p.path)}
                         >
                           <span className="font-medium">{p.label}</span>
-                          <span className="text-xs text-slate-500 block">{p.path}</span>
+                          <span className="text-xs text-ink-400 block">{p.path}</span>
                         </Checkbox>
                       ))}
                     </div>
@@ -491,7 +491,7 @@ function DomainEditorModal({
               })}
             </div>
           )}
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-400">
             Admin luôn có quyền vào mọi trang, không bị giới hạn bởi cấu hình này.
           </p>
         </section>
@@ -515,7 +515,7 @@ function Checkbox({
   checked, onChange, children,
 }: { checked: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
   return (
-    <label className="flex items-start gap-2 border rounded-md px-3 py-2 cursor-pointer hover:bg-slate-50">
+    <label className="flex items-start gap-2 border rounded-md px-3 py-2 cursor-pointer hover:bg-ink-900">
       <input
         type="checkbox"
         className="mt-0.5"
@@ -551,7 +551,7 @@ function RolesCell({ roles }: { roles: RoleLite[] }) {
     <div className="text-xs" title={tooltip}>
       <Link
         to="/admin/roles"
-        className="inline-flex items-center gap-1 font-mono text-slate-700 hover:text-violet-600"
+        className="inline-flex items-center gap-1 font-mono text-ink-200 hover:text-violet-600"
       >
         <Shield size={11} /> {roles.length} role · {totalUsers} user
         <ArrowRight size={11} className="opacity-60" />
@@ -563,14 +563,14 @@ function RolesCell({ roles }: { roles: RoleLite[] }) {
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
               r.status === "active"
                 ? "bg-violet-50 text-violet-700"
-                : "bg-slate-100 text-slate-500 line-through"
+                : "bg-ink-800 text-ink-400 line-through"
             }`}
           >
             {r.name}
           </span>
         ))}
         {roles.length > preview.length && (
-          <span className="text-[10px] text-slate-400 self-center">
+          <span className="text-[10px] text-ink-500 self-center">
             +{roles.length - preview.length}
           </span>
         )}

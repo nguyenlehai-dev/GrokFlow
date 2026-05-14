@@ -32,17 +32,17 @@ export function GrokKeyLockModal() {
 
 function LockedCard({ onOpen }: { onOpen: () => void }) {
   return (
-    <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+    <div className="w-full max-w-md rounded-xl bg-ink-900 p-6 shadow-xl">
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
           <Lock size={20} className="text-amber-600" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">
+          <p className="text-xs uppercase tracking-wider text-ink-400 font-semibold">
             System Auth Required
           </p>
-          <h2 className="text-xl font-bold text-slate-900 mt-1">Playground is locked</h2>
-          <p className="text-sm text-slate-600 mt-2">
+          <h2 className="text-xl font-bold text-white mt-1">Playground is locked</h2>
+          <p className="text-sm text-ink-300 mt-2">
             Verify một Grok API Key trước khi submit job từ Playground. Bạn có thể
             generate key mới ngay tại đây, hoặc dán key đã tạo ở{" "}
             <Link to="/api-keys" className="text-violet-600 hover:underline">/api-keys</Link>.
@@ -124,31 +124,31 @@ function SystemAuthDialog({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+    <div className="w-full max-w-lg rounded-xl bg-ink-900 p-6 shadow-xl">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">System Auth</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h2 className="text-lg font-bold text-white">System Auth</h2>
+          <p className="text-xs text-ink-400 mt-0.5">
             Tạo hoặc dán Grok API Key, sau đó Verify để mở khóa Playground.
           </p>
         </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
+        <button onClick={onClose} className="text-ink-500 hover:text-ink-200">
           <X size={18} />
         </button>
       </div>
 
       <div className="mt-4 space-y-3">
         <label className="block text-sm">
-          <span className="font-medium text-slate-700">API Base URL</span>
+          <span className="font-medium text-ink-200">API Base URL</span>
           <input
             readOnly
             value="/api"
-            className="input mt-1 w-full font-mono bg-slate-50 text-slate-500"
+            className="input mt-1 w-full font-mono bg-ink-900 text-ink-400"
           />
         </label>
 
         <label className="block text-sm">
-          <span className="font-medium text-slate-700">Key Name / Identifier</span>
+          <span className="font-medium text-ink-200">Key Name / Identifier</span>
           <input
             value={keyName}
             onChange={(e) => setKeyName(e.target.value)}
@@ -158,10 +158,10 @@ function SystemAuthDialog({ onClose }: { onClose: () => void }) {
         </label>
 
         <label className="block text-sm">
-          <span className="font-medium text-slate-700">Grok API Key</span>
+          <span className="font-medium text-ink-200">Grok API Key</span>
           <div className="mt-1 flex items-stretch gap-2">
-            <div className="flex-1 flex items-center rounded-md border border-slate-300 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
-              <KeyRound size={14} className="text-slate-400" />
+            <div className="flex-1 flex items-center rounded-md border border-ink-700 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
+              <KeyRound size={14} className="text-ink-500" />
               <input
                 type="text"
                 value={keyValue}
@@ -174,7 +174,7 @@ function SystemAuthDialog({ onClose }: { onClose: () => void }) {
               type="button"
               onClick={() => generate.mutate()}
               disabled={generate.isPending}
-              className="btn-ghost border border-slate-300 inline-flex items-center gap-1.5 px-3 text-sm whitespace-nowrap"
+              className="btn-ghost border border-ink-700 inline-flex items-center gap-1.5 px-3 text-sm whitespace-nowrap"
               title="Tạo key mới — sẽ xuất hiện trong /api-keys"
             >
               {generate.isPending ? (
@@ -192,7 +192,7 @@ function SystemAuthDialog({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={() => { setKeyValue(""); setStatus("idle"); }}
-            className="btn-ghost border border-slate-300 text-sm"
+            className="btn-ghost border border-ink-700 text-sm"
           >
             Clear
           </button>
@@ -210,7 +210,7 @@ function SystemAuthDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <p className="text-xs text-slate-500 pt-1 border-t mt-2">
+        <p className="text-xs text-ink-400 pt-1 border-t mt-2">
           Key sinh ra ở đây luôn được lưu vào{" "}
           <Link to="/api-keys" className="text-violet-600 hover:underline">/api-keys</Link>{" "}
           để bạn quản lý / thu hồi sau.
@@ -246,7 +246,7 @@ function StatusPanel({ status }: { status: "idle" | "verified" | "invalid" }) {
     );
   }
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+    <div className="rounded-md border border-ink-800 bg-ink-900 p-3 text-xs text-ink-300">
       Generate key mới hoặc paste key có sẵn, sau đó bấm <strong>Verify</strong>.
       Cho đến khi verify, customer-facing flows vẫn bị khóa.
     </div>

@@ -12,31 +12,31 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    color-scheme: dark light;
   }
   body {
-    @apply bg-ink-50 text-ink-800 font-sans;
-    /* Subtle mesh on the body so any page that doesn't paint its own
-       background inherits the brand atmosphere instead of flat white. */
+    @apply bg-ink-950 text-ink-100 font-sans;
+    /* Subtle mesh — same brand hues as the gradient buttons but very
+       low opacity so cards still pop above it. */
     background-image:
-      radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.04) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(217, 70, 239, 0.03) 0px, transparent 50%),
-      radial-gradient(at 50% 100%, rgba(6, 182, 212, 0.025) 0px, transparent 50%);
+      radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.10) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(255, 45, 146, 0.08) 0px, transparent 50%),
+      radial-gradient(at 50% 100%, rgba(6, 182, 212, 0.06) 0px, transparent 50%);
     background-attachment: fixed;
   }
   ::selection {
-    @apply bg-brand-200 text-brand-900;
+    @apply bg-brand-500/30 text-white;
   }
-  /* Pretty scrollbar — only WebKit/Blink supports this but it's where most
-     of our users are. Firefox keeps its default which is already fine. */
+  /* Custom scrollbar — dark theme. */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-ink-300 rounded-full;
+    @apply bg-ink-700 rounded-full;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-ink-400;
+    @apply bg-ink-600;
   }
   ::-webkit-scrollbar-track {
     @apply bg-transparent;
@@ -47,34 +47,33 @@
 
 @layer components {
 
-  /* Buttons — gradient primary, soft ghost, tinted danger. The base class
-     captures shared shape/transition so variants are short. */
+  /* Buttons */
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2
            text-sm font-semibold transition-all duration-150
            disabled:opacity-50 disabled:cursor-not-allowed
            focus-visible:outline-none focus-visible:ring-2
            focus-visible:ring-offset-2 focus-visible:ring-brand-500
-           focus-visible:ring-offset-white;
+           focus-visible:ring-offset-ink-950;
   }
   .btn-primary {
-    @apply btn text-white bg-gradient-brand shadow-brand
-           hover:shadow-brand-lg hover:-translate-y-0.5
+    @apply btn text-white bg-gradient-album shadow-brand
+           hover:shadow-glow-pink hover:-translate-y-0.5
            active:translate-y-0 active:shadow-brand;
   }
   .btn-secondary {
-    @apply btn bg-white text-ink-800 border border-ink-200
-           shadow-card hover:border-brand-300 hover:text-brand-700
-           hover:shadow-card-hover;
+    @apply btn bg-ink-800 text-ink-100 border border-ink-700
+           shadow-card-dark hover:border-brand-400/60 hover:text-white
+           hover:bg-ink-700;
   }
   .btn-ghost {
-    @apply btn bg-transparent text-ink-700
-           hover:bg-ink-100 hover:text-ink-900;
+    @apply btn bg-transparent text-ink-300
+           hover:bg-ink-800 hover:text-ink-100;
   }
   .btn-danger {
-    @apply btn text-white shadow-card
+    @apply btn text-white shadow-card-dark
            bg-gradient-to-br from-rose-500 to-rose-600
-           hover:from-rose-600 hover:to-rose-700 hover:shadow-card-hover;
+           hover:from-rose-600 hover:to-rose-700;
   }
   .btn-sm {
     @apply px-3 py-1.5 text-xs;
@@ -83,51 +82,50 @@
     @apply px-6 py-3 text-base;
   }
 
-  /* Inputs / selects / textareas — soft border, focus glow that matches
-     the gradient. Works the same way across all form controls. */
+  /* Inputs */
   .input,
   .select,
   .textarea {
-    @apply w-full rounded-lg border border-ink-200 bg-white px-3.5 py-2.5
-           text-sm text-ink-900 placeholder:text-ink-400 shadow-card
+    @apply w-full rounded-lg border border-ink-700 bg-ink-900 px-3.5 py-2.5
+           text-sm text-ink-100 placeholder:text-ink-500 shadow-card-dark
            transition-all
            focus:outline-none focus:border-brand-400
-           focus:ring-4 focus:ring-brand-100
-           disabled:bg-ink-100 disabled:text-ink-500;
+           focus:ring-4 focus:ring-brand-500/20
+           disabled:bg-ink-800 disabled:text-ink-500;
   }
   .input-sm {
     @apply px-2.5 py-1.5 text-xs;
   }
 
-  /* Cards — the universal container. `card-gradient` adds a faint mesh
-     for hero sections. `card-glow` for interactive surfaces. */
+  /* Cards — dark surfaces. */
   .card {
-    @apply rounded-2xl border border-ink-200/70 bg-white p-5 shadow-card
-           transition-shadow;
+    @apply rounded-2xl border border-ink-800/80 bg-ink-900/60 backdrop-blur-sm
+           p-5 shadow-card-dark transition-shadow;
   }
   .card-hover {
-    @apply card hover:shadow-card-hover;
+    @apply card hover:shadow-card-dark-hover hover:border-ink-700;
   }
   .card-gradient {
-    @apply card bg-gradient-mesh border-white/60;
+    @apply card bg-gradient-mesh-dark border-ink-700;
   }
   .card-glow {
-    @apply card hover:shadow-glow hover:border-brand-200;
+    @apply card hover:shadow-glow hover:border-brand-500/40;
   }
 
-  /* Badge variants — used for statuses, tags, plan tiers. */
+  /* Badge variants — dark backgrounds with bright text. */
   .badge {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
            text-xs font-medium ring-1 ring-inset;
   }
-  .badge-brand     { @apply badge bg-brand-50 text-brand-700 ring-brand-200; }
-  .badge-emerald   { @apply badge bg-emerald-50 text-emerald-700 ring-emerald-200; }
-  .badge-amber     { @apply badge bg-amber-50 text-amber-700 ring-amber-200; }
-  .badge-rose      { @apply badge bg-rose-50 text-rose-700 ring-rose-200; }
-  .badge-cyan      { @apply badge bg-cyan-50 text-cyan-700 ring-cyan-200; }
-  .badge-slate     { @apply badge bg-ink-100 text-ink-700 ring-ink-200; }
+  .badge-brand     { @apply badge bg-brand-500/15 text-brand-300 ring-brand-500/30; }
+  .badge-emerald   { @apply badge bg-emerald-500/15 text-emerald-300 ring-emerald-500/30; }
+  .badge-amber     { @apply badge bg-amber-500/15 text-amber-300 ring-amber-500/30; }
+  .badge-rose      { @apply badge bg-rose-500/15 text-rose-300 ring-rose-500/30; }
+  .badge-cyan      { @apply badge bg-cyan-500/15 text-cyan-300 ring-cyan-500/30; }
+  .badge-slate     { @apply badge bg-ink-800 text-ink-300 ring-ink-700; }
+  .badge-pink      { @apply badge bg-pink-500/15 text-pink-300 ring-pink-500/30; }
 
-  /* Table wrapper — horizontal scroll on narrow screens. */
+  /* Table wrapper. */
   .table-scroll {
     @apply -mx-3 sm:mx-0 overflow-x-auto rounded-xl;
   }
@@ -135,86 +133,100 @@
     @apply min-w-[640px] w-full text-sm;
   }
   .table-scroll thead {
-    @apply bg-ink-50/80 text-left text-xs uppercase tracking-wider text-ink-500;
+    @apply bg-ink-900/80 text-left text-xs uppercase tracking-wider text-ink-400;
   }
   .table-scroll thead th {
     @apply px-4 py-3 font-semibold;
   }
   .table-scroll tbody tr {
-    @apply border-t border-ink-100 transition-colors hover:bg-ink-50/40;
+    @apply border-t border-ink-800 transition-colors hover:bg-ink-800/40;
   }
   .table-scroll tbody td {
-    @apply px-4 py-3;
+    @apply px-4 py-3 text-ink-200;
   }
 
-  /* Section heading used at the top of every page. */
+  /* Page header. */
   .page-header {
     @apply flex items-start justify-between gap-4 flex-wrap;
   }
   .page-title {
-    @apply text-2xl sm:text-3xl font-bold text-ink-900 tracking-tight;
+    @apply text-2xl sm:text-3xl font-bold text-white tracking-tight;
   }
   .page-subtitle {
-    @apply text-sm text-ink-500 mt-1.5 max-w-2xl;
+    @apply text-sm text-ink-400 mt-1.5 max-w-2xl;
   }
 
-  /* Stat tile — used on dashboards. Pairs an icon with a value + delta. */
+  /* Stat tile. */
   .stat {
     @apply card flex items-start justify-between gap-3;
   }
-  .stat-label { @apply text-xs uppercase tracking-wider text-ink-500 font-medium; }
-  .stat-value { @apply text-2xl font-bold text-ink-900 mt-1; }
+  .stat-label { @apply text-xs uppercase tracking-wider text-ink-400 font-medium; }
+  .stat-value { @apply text-2xl font-bold text-white mt-1; }
   .stat-icon  {
     @apply w-10 h-10 rounded-xl flex items-center justify-center
-           bg-gradient-brand text-white shadow-brand;
+           bg-gradient-album text-white shadow-brand;
   }
 
-  /* Alert / callout */
+  /* Alerts. */
   .alert {
     @apply rounded-xl p-4 text-sm flex gap-3 items-start;
   }
-  .alert-info    { @apply alert bg-brand-50 text-brand-900 border border-brand-100; }
-  .alert-warning { @apply alert bg-amber-50 text-amber-900 border border-amber-200; }
-  .alert-danger  { @apply alert bg-rose-50 text-rose-900 border border-rose-200; }
-  .alert-success { @apply alert bg-emerald-50 text-emerald-900 border border-emerald-200; }
+  .alert-info    { @apply alert bg-brand-500/15 text-brand-100 border border-brand-500/30; }
+  .alert-warning { @apply alert bg-amber-500/15 text-amber-100 border border-amber-500/30; }
+  .alert-danger  { @apply alert bg-rose-500/15 text-rose-100 border border-rose-500/30; }
+  .alert-success { @apply alert bg-emerald-500/15 text-emerald-100 border border-emerald-500/30; }
+
+  /* Music-streaming feature cards (album-art style) — used on landing
+     module/playlist showcase. */
+  .album-card {
+    @apply relative overflow-hidden rounded-2xl border border-ink-800/80
+           bg-gradient-to-br from-ink-900 to-ink-950 p-5
+           transition-all hover:-translate-y-1 hover:shadow-glow-pink
+           hover:border-brand-500/40;
+  }
 }
 
 /* ── Utility layer ──────────────────────────────────────────────────────── */
 
 @layer utilities {
 
-  /* Brand gradient text. Wrap a phrase to make it pop. */
+  /* Gradient text. */
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-brand;
+    @apply bg-clip-text text-transparent bg-gradient-album;
   }
   .text-gradient-cyan {
     @apply bg-clip-text text-transparent bg-gradient-brand-cyan;
   }
 
-  /* Glassmorphism — translucent background + blur. Used for navbars and
-     overlays that float above content. */
+  /* Glassmorphism for nav / overlays. */
   .glass {
-    background-color: rgba(255, 255, 255, 0.72);
+    background-color: rgba(2, 6, 23, 0.65);   /* ink-950 @ 65% */
     backdrop-filter: saturate(180%) blur(14px);
     -webkit-backdrop-filter: saturate(180%) blur(14px);
   }
-  .glass-dark {
-    background-color: rgba(15, 23, 42, 0.72);
-    backdrop-filter: saturate(180%) blur(14px);
-    -webkit-backdrop-filter: saturate(180%) blur(14px);
+  .glass-light {
+    background-color: rgba(255, 255, 255, 0.06);
+    backdrop-filter: saturate(160%) blur(10px);
+    -webkit-backdrop-filter: saturate(160%) blur(10px);
   }
 
-  /* Shimmer skeleton — apply to a placeholder block to indicate loading. */
+  /* Shimmer skeleton. */
   .skeleton {
-    @apply bg-ink-100 rounded animate-shimmer;
-    background-image: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%);
+    @apply bg-ink-800 rounded animate-shimmer;
+    background-image: linear-gradient(90deg, #1e293b 0%, #334155 50%, #1e293b 100%);
     background-size: 200% 100%;
   }
 
-  /* Horizontal-scroll tab bar that snaps to each tab on mobile. */
+  /* Tab bar. */
   .tabs-scroll {
-    @apply flex gap-1 border-b border-ink-200 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0;
+    @apply flex gap-1 border-b border-ink-800 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0;
     scroll-snap-type: x proximity;
   }
   .tabs-scroll > * { scroll-snap-align: start; }
+
+  /* Animated equalizer (3 bars), used near "now playing" pill on landing. */
+  .eq-bar {
+    @apply inline-block w-0.5 bg-current rounded-full origin-bottom;
+    transform: scaleY(0.35);
+  }
 }

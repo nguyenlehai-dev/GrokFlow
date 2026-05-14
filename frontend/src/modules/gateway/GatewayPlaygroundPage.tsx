@@ -241,7 +241,7 @@ function PlaygroundBody({
               placeholder="image_generation"
               {...register("function_code", { required: true })}
             />
-            <p className="text-[10px] text-slate-500 mt-0.5">
+            <p className="text-[10px] text-ink-400 mt-0.5">
               Code của API function admin đã setup (vd: image_generation, text_generation).
             </p>
           </div>
@@ -260,7 +260,7 @@ function PlaygroundBody({
         {(selectedFn?.function_type === "image" || effectiveFnCode === "image_generation") && (
           <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
             <strong className="text-blue-700">Image Generation</strong>
-            <p className="text-xs text-slate-600 mt-0.5">
+            <p className="text-xs text-ink-300 mt-0.5">
               Không upload ảnh tham chiếu thì đây là text-to-image. Upload reference URLs thì đây là image-to-image / reference-based.
             </p>
           </div>
@@ -338,7 +338,7 @@ function PlaygroundBody({
             placeholder="https://.../ref-1.png&#10;https://.../ref-2.png"
             {...register("reference_image_urls")}
           />
-          <p className="text-[10px] text-slate-500 mt-0.5">
+          <p className="text-[10px] text-ink-400 mt-0.5">
             Mỗi URL một dòng. Để trống = text-to-image.
           </p>
         </div>
@@ -389,7 +389,7 @@ function PlaygroundBody({
       <div className="card space-y-2">
         <h2 className="font-semibold">Execute Result</h2>
         {!response ? (
-          <p className="text-slate-400 text-sm">Chưa có request nào.</p>
+          <p className="text-ink-500 text-sm">Chưa có request nào.</p>
         ) : (
           <>
             <div className={`border rounded p-2 text-sm ${response.status === "succeeded" ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
@@ -398,10 +398,10 @@ function PlaygroundBody({
                   ? <CheckCircle2 size={14} className="text-emerald-600" />
                   : <AlertCircle size={14} className="text-rose-600" />}
                 <strong>{response.status}</strong>
-                <span className="text-xs text-slate-500 font-mono ml-auto">{response.gw_id}</span>
+                <span className="text-xs text-ink-400 font-mono ml-auto">{response.gw_id}</span>
               </div>
               {response.pool_key_name && (
-                <div className="text-xs text-slate-600">Pool key: {response.pool_key_name}</div>
+                <div className="text-xs text-ink-300">Pool key: {response.pool_key_name}</div>
               )}
               {response.error_message && (
                 <div className="text-xs text-rose-600 mt-1">{response.error_message}</div>
@@ -415,20 +415,20 @@ function PlaygroundBody({
                     key={i}
                     src={url}
                     alt={`output ${i + 1}`}
-                    className="w-full rounded border border-slate-200"
+                    className="w-full rounded border border-ink-800"
                   />
                 ))}
               </div>
             )}
 
             {response.response?.text && (
-              <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs whitespace-pre-wrap max-h-40 overflow-auto">
+              <div className="rounded border border-ink-800 bg-ink-900 p-2 text-xs whitespace-pre-wrap max-h-40 overflow-auto">
                 {response.response.text}
               </div>
             )}
 
             <details>
-              <summary className="text-xs text-slate-500 cursor-pointer">Xem raw JSON</summary>
+              <summary className="text-xs text-ink-400 cursor-pointer">Xem raw JSON</summary>
               <pre className="bg-slate-900 text-emerald-300 p-2 rounded text-[10px] whitespace-pre-wrap overflow-auto max-h-80 font-mono mt-1">
                 {JSON.stringify(response.response, null, 2)}
               </pre>

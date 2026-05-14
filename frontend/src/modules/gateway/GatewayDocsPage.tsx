@@ -44,9 +44,9 @@ export function GatewayDocsPage() {
             <h2 className="font-semibold mb-3">{s.title}</h2>
             <div className="space-y-2">
               {s.items.map((it) => (
-                <div key={it.path} className="flex items-start gap-2 py-1.5 border-b border-slate-100 last:border-0">
+                <div key={it.path} className="flex items-start gap-2 py-1.5 border-b border-ink-800 last:border-0">
                   {s.title === "API Docs" ? (
-                    <span className={`px-2 py-0.5 rounded text-xs font-mono font-bold flex-shrink-0 ${METHOD_CLS[it.method] ?? "bg-slate-500 text-white"}`}>
+                    <span className={`px-2 py-0.5 rounded text-xs font-mono font-bold flex-shrink-0 ${METHOD_CLS[it.method] ?? "bg-ink-9000 text-white"}`}>
                       {it.method}
                     </span>
                   ) : (
@@ -61,7 +61,7 @@ export function GatewayDocsPage() {
                       <strong className="text-sm">{it.path.slice(2)}</strong>
                     )}
                     {it.desc && (
-                      <p className="text-xs text-slate-500 mt-0.5">{it.desc}</p>
+                      <p className="text-xs text-ink-400 mt-0.5">{it.desc}</p>
                     )}
                   </div>
                 </div>

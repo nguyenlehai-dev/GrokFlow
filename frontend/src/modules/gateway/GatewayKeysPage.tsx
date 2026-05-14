@@ -62,11 +62,11 @@ export function GatewayKeysPage() {
       {createdKey && <CreatedAlert created={createdKey} onClose={() => setCreatedKey(null)} />}
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">Label</th>
                 <th className="px-3 py-2">Prefix</th>
@@ -80,17 +80,17 @@ export function GatewayKeysPage() {
             </thead>
             <tbody>
               {(data ?? []).map((k) => (
-                <tr key={k.id} className="border-t hover:bg-slate-50">
+                <tr key={k.id} className="border-t hover:bg-ink-900">
                   <td className="px-3 py-2 font-medium">{k.label}</td>
                   <td className="px-3 py-2 font-mono text-xs">{k.prefix}…</td>
                   <td className="px-3 py-2 text-xs">{k.allowed_functions.length ? k.allowed_functions.join(", ") : "all"}</td>
                   <td className="px-3 py-2 font-mono">{k.rate_limit_per_minute}</td>
                   <td className="px-3 py-2 font-mono">{k.used_today}/{k.daily_quota || "∞"}</td>
-                  <td className="px-3 py-2 text-xs text-slate-500 max-w-xs truncate">
+                  <td className="px-3 py-2 text-xs text-ink-400 max-w-xs truncate">
                     {k.webhook_url ? <span className="text-emerald-700">✓</span> : "—"}
                   </td>
                   <td className="px-3 py-2">
-                    <span className={`text-xs px-2 py-0.5 rounded ${k.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded ${k.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-ink-800 text-ink-400"}`}>
                       {k.status}
                     </span>
                   </td>
@@ -108,7 +108,7 @@ export function GatewayKeysPage() {
                 </tr>
               ))}
               {(data ?? []).length === 0 && (
-                <tr><td colSpan={8} className="px-3 py-6 text-center text-slate-500">Chưa có gateway key. Click "Issue Key" để tạo.</td></tr>
+                <tr><td colSpan={8} className="px-3 py-6 text-center text-ink-400">Chưa có gateway key. Click "Issue Key" để tạo.</td></tr>
               )}
             </tbody>
           </table>
@@ -136,7 +136,7 @@ function CreatedAlert({ created, onClose }: { created: GwKeyCreated; onClose: ()
         <AlertCircle size={20} className="text-amber-600 mt-0.5 flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold">Key "{created.label}" đã tạo</h3>
-          <p className="text-sm text-slate-700 mt-1">
+          <p className="text-sm text-ink-200 mt-1">
             Lưu plain key NGAY — backend chỉ show 1 lần duy nhất:
           </p>
           <div className="mt-2 flex items-center gap-2 bg-slate-900 text-emerald-400 font-mono text-xs px-3 py-2 rounded">
@@ -147,7 +147,7 @@ function CreatedAlert({ created, onClose }: { created: GwKeyCreated; onClose: ()
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1500);
               }}
-              className="p-1 rounded hover:bg-slate-700 text-slate-300"
+              className="p-1 rounded hover:bg-slate-700 text-ink-500"
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
@@ -211,7 +211,7 @@ function EditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <form onSubmit={handleSubmit((v) => save.mutate(v))} className="w-full max-w-lg rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <form onSubmit={handleSubmit((v) => save.mutate(v))} className="w-full max-w-lg rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">{isCreate ? "Issue gateway key" : `Sửa: ${k?.label}`}</h2>
 
         <div>
@@ -223,7 +223,7 @@ function EditorModal({
           <label className="text-sm font-medium">Allowed functions (codes, comma)</label>
           <input className="input font-mono text-xs" {...register("allowed_functions")}
             placeholder="image_generation, text_generation" />
-          <p className="text-[10px] text-slate-500 mt-0.5">
+          <p className="text-[10px] text-ink-400 mt-0.5">
             Để trống = mọi function. Available: {functions.map((f) => f.code).join(", ")}
           </p>
         </div>

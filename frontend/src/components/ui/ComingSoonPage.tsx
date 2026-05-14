@@ -11,8 +11,8 @@ export function ComingSoonPage({
           <Construction size={24} className="text-amber-600" />
         </div>
         <div>
-          <h2 className="font-semibold text-slate-900">Sắp ra mắt</h2>
-          <p className="text-sm text-slate-600 mt-1">
+          <h2 className="font-semibold text-white">Sắp ra mắt</h2>
+          <p className="text-sm text-ink-300 mt-1">
             {description ?? `Tính năng "${title}" đang được phát triển. Quay lại sau nhé!`}
           </p>
         </div>

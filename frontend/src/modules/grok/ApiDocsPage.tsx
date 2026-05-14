@@ -458,7 +458,7 @@ const BADGES: Record<Endpoint["auth"], { label: string; cls: string }> = {
   jwt:    { label: "JWT",    cls: "bg-blue-100 text-blue-700" },
   apikey: { label: "APIKEY", cls: "bg-purple-100 text-purple-700" },
   admin:  { label: "ADMIN",  cls: "bg-rose-100 text-rose-700" },
-  any:    { label: "PUBLIC", cls: "bg-slate-100 text-slate-700" },
+  any:    { label: "PUBLIC", cls: "bg-ink-800 text-ink-200" },
 };
 
 const METHOD_CLS: Record<Endpoint["method"], string> = {
@@ -483,7 +483,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={onClick}
-      className="absolute top-2 right-2 p-1.5 rounded hover:bg-slate-700 text-slate-300"
+      className="absolute top-2 right-2 p-1.5 rounded hover:bg-slate-700 text-ink-500"
       title={copied ? "Đã copy" : "Copy"}
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -504,24 +504,24 @@ function CodeBlock({ children }: { children: string }) {
 
 function ParametersTable({ params }: { params: Param[] }) {
   return (
-    <div className="overflow-hidden rounded-md border border-slate-200">
+    <div className="overflow-hidden rounded-md border border-ink-800">
       <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-left">
-          <tr className="text-slate-600">
+        <thead className="bg-ink-900 text-left">
+          <tr className="text-ink-300">
             <th className="px-3 py-2 font-semibold w-1/4">Name</th>
             <th className="px-3 py-2 font-semibold w-1/4">Type</th>
             <th className="px-3 py-2 font-semibold">Description</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-200">
+        <tbody className="divide-y divide-ink-800">
           {params.map((p) => (
             <tr key={p.name}>
               <td className="px-3 py-2 font-mono text-rose-600 align-top">
                 {p.name}
                 {p.required && <span className="ml-1 text-rose-500" title="required">*</span>}
               </td>
-              <td className="px-3 py-2 font-mono text-slate-500 text-xs align-top">{p.type}</td>
-              <td className="px-3 py-2 text-slate-700 align-top">{p.description}</td>
+              <td className="px-3 py-2 font-mono text-ink-400 text-xs align-top">{p.type}</td>
+              <td className="px-3 py-2 text-ink-200 align-top">{p.description}</td>
             </tr>
           ))}
         </tbody>
@@ -543,7 +543,7 @@ function EndpointCard({ ep, apiBase }: { ep: Endpoint; apiBase: string }) {
   -H "Authorization: Bearer YOUR_TOKEN"`);
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div className="rounded-lg border border-ink-800 bg-ink-900 shadow-sm">
       {/* Header: method badge + title */}
       <div className="px-4 pt-4 pb-2 flex items-center gap-3">
         <span
@@ -551,7 +551,7 @@ function EndpointCard({ ep, apiBase }: { ep: Endpoint; apiBase: string }) {
         >
           {ep.method}
         </span>
-        <h3 className="text-base font-semibold text-slate-900">{ep.title}</h3>
+        <h3 className="text-base font-semibold text-white">{ep.title}</h3>
         <span
           className={`ml-auto px-2 py-0.5 rounded text-[10px] font-semibold ${BADGES[ep.auth].cls}`}
         >
@@ -563,27 +563,27 @@ function EndpointCard({ ep, apiBase }: { ep: Endpoint; apiBase: string }) {
       <div className="px-4 pb-3">
         <div className="rounded-md bg-slate-900 text-slate-100 px-3 py-2 font-mono text-sm overflow-x-auto">
           {ep.path}
-          {ep.query && <span className="text-slate-400">{ep.query}</span>}
+          {ep.query && <span className="text-ink-500">{ep.query}</span>}
         </div>
       </div>
 
       {/* Description */}
       {ep.summary && (
-        <p className="px-4 pb-3 text-sm text-slate-600 leading-relaxed">{ep.summary}</p>
+        <p className="px-4 pb-3 text-sm text-ink-300 leading-relaxed">{ep.summary}</p>
       )}
 
       {/* Parameters */}
       {ep.parameters && ep.parameters.length > 0 && (
         <div className="px-4 pb-3 space-y-2">
-          <h4 className="text-sm font-semibold text-slate-800">Parameters</h4>
+          <h4 className="text-sm font-semibold text-ink-100">Parameters</h4>
           <ParametersTable params={ep.parameters} />
         </div>
       )}
 
       {/* Request Example (curl) */}
       <div className="px-4 pb-3 space-y-2">
-        <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-          <Code2 size={14} className="text-slate-600" />
+        <h4 className="text-sm font-semibold text-ink-100 flex items-center gap-1.5">
+          <Code2 size={14} className="text-ink-300" />
           Request Example
         </h4>
         <CodeBlock>{curlExample}</CodeBlock>
@@ -591,7 +591,7 @@ function EndpointCard({ ep, apiBase }: { ep: Endpoint; apiBase: string }) {
 
       {/* Response Format */}
       <div className="px-4 pb-4 space-y-2">
-        <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+        <h4 className="text-sm font-semibold text-ink-100 flex items-center gap-1.5">
           <CheckCircle2 size={14} className="text-emerald-600" />
           Response Format
         </h4>
@@ -620,7 +620,7 @@ export function ApiDocsPage() {
     <div className="space-y-6 max-w-5xl">
       <div>
         <h1 className="page-title">API Reference</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-ink-400 mt-1">
           Tất cả endpoint dùng JSON. Mỗi endpoint hiển thị Parameters, Request Example (curl), và Response Format.
         </p>
       </div>
@@ -630,12 +630,12 @@ export function ApiDocsPage() {
         <div className="grid md:grid-cols-2 gap-3 text-sm">
           <div className="border-l-4 border-blue-400 pl-3">
             <div className="font-semibold text-blue-700 mb-1">JWT (web UI)</div>
-            <p className="text-slate-600">Login → token 24h → Header:</p>
+            <p className="text-ink-300">Login → token 24h → Header:</p>
             <code className="text-xs">Authorization: Bearer eyJhbGc...</code>
           </div>
           <div className="border-l-4 border-purple-400 pl-3">
             <div className="font-semibold text-purple-700 mb-1">API Key (SDK / server)</div>
-            <p className="text-slate-600">Tạo trong tab API Keys, dùng:</p>
+            <p className="text-ink-300">Tạo trong tab API Keys, dùng:</p>
             <code className="text-xs">Authorization: Bearer uxpm_live_xxx</code>
           </div>
         </div>
@@ -643,7 +643,7 @@ export function ApiDocsPage() {
 
       {GROUPS.map((g) => (
         <section key={g.title} className="space-y-3">
-          <h2 className="text-lg font-semibold text-slate-900">{g.title}</h2>
+          <h2 className="text-lg font-semibold text-white">{g.title}</h2>
           <div className="space-y-3">
             {g.endpoints.map((ep) => (
               <EndpointCard key={`${ep.method}-${ep.path}`} ep={ep} apiBase={apiBase} />
@@ -655,7 +655,7 @@ export function ApiDocsPage() {
       <section className="card space-y-2">
         <h2 className="font-semibold">Error Codes</h2>
         <table className="w-full text-sm">
-          <thead className="text-left text-slate-500 text-xs uppercase">
+          <thead className="text-left text-ink-400 text-xs uppercase">
             <tr>
               <th className="py-1">HTTP</th><th>Code</th><th>Mô tả</th>
             </tr>
@@ -674,10 +674,10 @@ export function ApiDocsPage() {
 
       <section className="card space-y-2">
         <h2 className="font-semibold">Job error_message Format</h2>
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-ink-300">
           Trường <code>error_message</code> trên job có dạng <code>[code] message</code>. Code có thể là:
         </p>
-        <ul className="text-sm text-slate-600 space-y-0.5">
+        <ul className="text-sm text-ink-300 space-y-0.5">
           <li><code>cookie_expired</code> — admin cần Auto-login lại profile.</li>
           <li><code>captcha_required</code> — admin mở VNC giải captcha thủ công.</li>
           <li><code>provider_blocked</code> — account không có quyền (cần Pro/Heavy).</li>
@@ -689,7 +689,7 @@ export function ApiDocsPage() {
 
       <section className="card">
         <h2 className="font-semibold mb-2">OpenAPI / Swagger</h2>
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-ink-300">
           Schema đầy đủ tại{" "}
           <a href={`${apiBase}/docs`} target="_blank" rel="noreferrer" className="text-brand-600 underline">
             {apiBase}/docs

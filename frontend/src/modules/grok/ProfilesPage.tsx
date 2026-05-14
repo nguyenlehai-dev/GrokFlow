@@ -110,11 +110,11 @@ export function ProfilesPage() {
       )}
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Provider</th>
@@ -184,7 +184,7 @@ export function ProfilesPage() {
                         />
                       )}
                     </td>
-                    <td className="px-4 py-2 text-slate-500 text-xs">
+                    <td className="px-4 py-2 text-ink-400 text-xs">
                       {p.last_used_at ? new Date(p.last_used_at).toLocaleString() : "—"}
                     </td>
                     {isAdmin && (
@@ -209,7 +209,7 @@ export function ProfilesPage() {
               })}
               {data?.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 6 : 5} className="px-4 py-6 text-center text-slate-500">
+                  <td colSpan={isAdmin ? 6 : 5} className="px-4 py-6 text-center text-ink-400">
                     {isAdmin ? "Chưa có profile nào. Bấm 'Tạo profile' để bắt đầu." : "Pool đang trống — admin chưa setup profile nào."}
                   </td>
                 </tr>
@@ -251,7 +251,7 @@ function CreateProfileModal({ onClose }: { onClose: () => void }) {
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-sm rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-sm rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">Tạo Chrome Profile (admin)</h2>
         <div>
           <label className="text-sm font-medium">Name</label>
@@ -273,7 +273,7 @@ function CreateProfileModal({ onClose }: { onClose: () => void }) {
             className="input"
             {...register("max_concurrent_jobs", { required: true, min: 1, max: 16 })}
           />
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-ink-400 mt-1">
             Mỗi tab ≈ 150 MB RAM. Khuyến nghị 4-8 cho account có quyền video; account thường 1-2.
           </p>
         </div>

@@ -72,7 +72,7 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="relative rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
+        className="relative rounded-md p-1.5 text-ink-300 hover:bg-ink-800"
         aria-label={`${unread} thông báo chưa đọc`}
       >
         <Bell size={18} />
@@ -84,8 +84,8 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1 w-80 z-50 rounded-lg border border-slate-200 bg-white shadow-xl overflow-hidden">
-          <header className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
+        <div className="absolute right-0 mt-1 w-80 z-50 rounded-lg border border-ink-800 bg-ink-900 shadow-xl overflow-hidden">
+          <header className="flex items-center justify-between px-3 py-2 border-b border-ink-800">
             <h3 className="font-semibold text-sm">Thông báo</h3>
             {unread > 0 && (
               <button
@@ -101,24 +101,24 @@ export function NotificationBell() {
 
           <div className="max-h-96 overflow-y-auto">
             {(data?.items ?? []).length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-slate-500">
+              <p className="px-3 py-6 text-center text-sm text-ink-400">
                 Chưa có thông báo nào.
               </p>
             ) : (
-              <ul className="divide-y divide-slate-100">
+              <ul className="divide-y divide-ink-800">
                 {data!.items.map((n) => {
                   const visual = SEVERITY_VISUAL[n.severity] ?? SEVERITY_VISUAL.info;
                   const Icon = visual.icon;
                   const isUnread = !n.read_at;
                   const rowClass = `flex gap-3 px-3 py-2.5 ${
                     isUnread ? "bg-violet-50/50" : ""
-                  } hover:bg-slate-50 cursor-pointer text-left transition`;
+                  } hover:bg-ink-900 cursor-pointer text-left transition`;
                   const inner = (
                     <>
                       <Icon size={16} className={`${visual.color} flex-shrink-0 mt-0.5`} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <p className={`text-sm ${isUnread ? "font-semibold" : ""} text-slate-800`}>
+                          <p className={`text-sm ${isUnread ? "font-semibold" : ""} text-ink-100`}>
                             {n.title}
                           </p>
                           {isUnread && (
@@ -126,9 +126,9 @@ export function NotificationBell() {
                           )}
                         </div>
                         {n.body && (
-                          <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.body}</p>
+                          <p className="text-xs text-ink-400 mt-0.5 line-clamp-2">{n.body}</p>
                         )}
-                        <p className="text-[10px] text-slate-400 mt-0.5">
+                        <p className="text-[10px] text-ink-500 mt-0.5">
                           {new Date(n.created_at).toLocaleString("vi-VN")}
                         </p>
                       </div>
@@ -157,11 +157,11 @@ export function NotificationBell() {
             )}
           </div>
 
-          <footer className="border-t border-slate-100 px-3 py-2 text-center">
+          <footer className="border-t border-ink-800 px-3 py-2 text-center">
             <Link
               to="/settings"
               onClick={() => setOpen(false)}
-              className="text-xs text-slate-500 hover:text-slate-700"
+              className="text-xs text-ink-400 hover:text-ink-200"
             >
               Cấu hình thông báo →
             </Link>

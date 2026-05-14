@@ -220,11 +220,11 @@ export function JobsPage() {
 
       {/* Table */}
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">ID</th>
                 <th className="px-3 py-2">Provider</th>
@@ -243,7 +243,7 @@ export function JobsPage() {
                 const retryable = ["failed", "cancelled"].includes(j.status);
                 const deletable = !["running", "processing_provider", "uploading_result"].includes(j.status);
                 return (
-                  <tr key={j.id} className="border-t hover:bg-slate-50">
+                  <tr key={j.id} className="border-t hover:bg-ink-900">
                     <td className="px-3 py-2 font-mono text-xs">{j.id.slice(0, 8)}</td>
                     <td className="px-3 py-2">{j.provider}</td>
                     <td className="px-3 py-2">{j.job_type}</td>
@@ -256,14 +256,14 @@ export function JobsPage() {
                       )}
                     </td>
                     <td className="px-3 py-2"><StatusBadge status={j.status} /></td>
-                    <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">
+                    <td className="px-3 py-2 text-ink-400 text-xs whitespace-nowrap">
                       {new Date(j.created_at).toLocaleString()}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div className="flex items-center gap-1">
                         {/* View — opens detail drawer with logs + result */}
                         <button
-                          className="p-1.5 rounded hover:bg-slate-200 text-slate-600"
+                          className="p-1.5 rounded hover:bg-ink-700 text-ink-300"
                           title="Xem chi tiết"
                           onClick={() => setDrawerId(j.id)}
                         >
@@ -281,7 +281,7 @@ export function JobsPage() {
                         )}
                         {/* Edit (queued/pending only) */}
                         <button
-                          className={`p-1.5 rounded ${editable ? "hover:bg-amber-100 text-amber-600" : "text-slate-300 cursor-not-allowed"}`}
+                          className={`p-1.5 rounded ${editable ? "hover:bg-amber-100 text-amber-600" : "text-ink-500 cursor-not-allowed"}`}
                           title={editable ? "Sửa prompt" : "Job đã chạy không sửa được"}
                           disabled={!editable}
                           onClick={() => editable && setEditJob(j)}
@@ -290,7 +290,7 @@ export function JobsPage() {
                         </button>
                         {/* Retry (failed/cancelled) */}
                         <button
-                          className={`p-1.5 rounded ${retryable ? "hover:bg-blue-100 text-blue-600" : "text-slate-300 cursor-not-allowed"}`}
+                          className={`p-1.5 rounded ${retryable ? "hover:bg-blue-100 text-blue-600" : "text-ink-500 cursor-not-allowed"}`}
                           title={retryable ? "Retry" : "Chỉ retry được job failed/cancelled"}
                           disabled={!retryable}
                           onClick={() => retryable && retry.mutate(j.id)}
@@ -311,7 +311,7 @@ export function JobsPage() {
                         )}
                         {/* Delete (terminal only) */}
                         <button
-                          className={`p-1.5 rounded ${deletable ? "hover:bg-rose-100 text-rose-600" : "text-slate-300 cursor-not-allowed"}`}
+                          className={`p-1.5 rounded ${deletable ? "hover:bg-rose-100 text-rose-600" : "text-ink-500 cursor-not-allowed"}`}
                           title={deletable ? "Xóa vĩnh viễn" : "Job đang chạy, hủy trước"}
                           disabled={!deletable}
                           onClick={() => {
@@ -327,7 +327,7 @@ export function JobsPage() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={7} className="px-3 py-6 text-center text-ink-400">
                     Không có job phù hợp filter.
                   </td>
                 </tr>
@@ -336,9 +336,9 @@ export function JobsPage() {
           </table>
 
           {/* Pagination */}
-          <div className="flex items-center justify-between border-t px-3 py-2 bg-slate-50 text-sm">
+          <div className="flex items-center justify-between border-t px-3 py-2 bg-ink-900 text-sm">
             <div className="flex items-center gap-2">
-              <span className="text-slate-500">Mỗi trang:</span>
+              <span className="text-ink-400">Mỗi trang:</span>
               <select
                 className="input w-auto py-1 text-xs"
                 value={pageSize}
@@ -347,7 +347,7 @@ export function JobsPage() {
                 {PAGE_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-            <div className="text-slate-500 text-xs">
+            <div className="text-ink-400 text-xs">
               {total === 0 ? "0" : `${offset + 1}–${Math.min(offset + items.length, total)}`} / {total}
             </div>
             <div className="flex items-center gap-1">

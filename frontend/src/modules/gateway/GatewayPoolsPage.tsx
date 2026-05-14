@@ -78,9 +78,9 @@ export function GatewayPoolsPage() {
         <div className="card space-y-2">
           <h2 className="font-semibold">Pools</h2>
           {isLoading ? (
-            <p className="text-slate-500 text-sm">Đang tải...</p>
+            <p className="text-ink-400 text-sm">Đang tải...</p>
           ) : (pools ?? []).length === 0 ? (
-            <p className="text-slate-500 text-sm">Chưa có pool nào.</p>
+            <p className="text-ink-400 text-sm">Chưa có pool nào.</p>
           ) : (
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {pools!.map((p) => (
@@ -90,19 +90,19 @@ export function GatewayPoolsPage() {
                   className={`w-full text-left border rounded p-2 transition ${
                     activeId === p.id
                       ? "border-brand-500 bg-brand-50"
-                      : "border-slate-200 hover:bg-slate-50"
+                      : "border-ink-800 hover:bg-ink-900"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <strong className="truncate">{p.name}</strong>
-                    <span className={`text-xs px-2 py-0.5 rounded ${p.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded ${p.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-ink-800 text-ink-400"}`}>
                       {p.status}
                     </span>
                   </div>
-                  <div className="text-xs text-slate-500 mt-0.5">
+                  <div className="text-xs text-ink-400 mt-0.5">
                     {p.vendor_name} · {p.function_name ?? "—"}
                   </div>
-                  <div className="text-xs text-slate-500 font-mono">
+                  <div className="text-xs text-ink-400 font-mono">
                     {p.model ?? "no model"} · keys: {p.keys_active}/{p.keys_total}
                   </div>
                 </button>
@@ -119,7 +119,7 @@ export function GatewayPoolsPage() {
           {activeId ? (
             <PoolKeysPanel poolId={activeId} />
           ) : (
-            <p className="text-slate-500 text-sm">Chọn pool bên trái để xem/thêm API keys.</p>
+            <p className="text-ink-400 text-sm">Chọn pool bên trái để xem/thêm API keys.</p>
           )}
         </div>
 
@@ -129,7 +129,7 @@ export function GatewayPoolsPage() {
           {pools && pools.length > 0 ? (
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {pools.map((p) => (
-                <div key={p.id} className="border border-slate-200 rounded p-3">
+                <div key={p.id} className="border border-ink-800 rounded p-3">
                   <div className="flex items-center justify-between gap-2">
                     <strong>{p.name}</strong>
                     <div className="flex gap-1">
@@ -144,14 +144,14 @@ export function GatewayPoolsPage() {
                       </button>
                     </div>
                   </div>
-                  <div className="text-xs text-slate-500 mt-1">{p.vendor_name}</div>
+                  <div className="text-xs text-ink-400 mt-1">{p.vendor_name}</div>
                   <div className="text-xs">Model: <span className="font-mono">{p.model ?? "n/a"}</span></div>
                   <div className="text-xs">API Keys: {p.keys_active}/{p.keys_total}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-slate-500 text-sm">Chưa có pool.</p>
+            <p className="text-ink-400 text-sm">Chưa có pool.</p>
           )}
         </div>
       </div>
@@ -203,21 +203,21 @@ function PoolKeysPanel({ poolId }: { poolId: string }) {
         </button>
       )}
       {isLoading ? (
-        <p className="text-slate-500 text-sm">Đang tải...</p>
+        <p className="text-ink-400 text-sm">Đang tải...</p>
       ) : (
         <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
           {(keys ?? []).map((k) => (
-            <div key={k.id} className="border border-slate-200 rounded p-2">
+            <div key={k.id} className="border border-ink-800 rounded p-2">
               <div className="flex items-center justify-between gap-2">
                 <strong className="text-sm">{k.name}</strong>
-                <span className={`text-xs px-2 py-0.5 rounded ${k.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                <span className={`text-xs px-2 py-0.5 rounded ${k.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-ink-800 text-ink-400"}`}>
                   {k.status}
                 </span>
               </div>
-              <div className="text-xs text-slate-500 font-mono">
+              <div className="text-xs text-ink-400 font-mono">
                 {k.key_prefix}… {k.project_id && `· ${k.project_id}`}
               </div>
-              <div className="text-xs text-slate-500 flex items-center justify-between mt-1">
+              <div className="text-xs text-ink-400 flex items-center justify-between mt-1">
                 <span>Priority {k.priority} · {k.used_count} calls</span>
                 <button
                   onClick={() => confirm(`Xóa key ${k.name}?`) && remove.mutate(k.id)}
@@ -229,7 +229,7 @@ function PoolKeysPanel({ poolId }: { poolId: string }) {
             </div>
           ))}
           {(keys ?? []).length === 0 && (
-            <p className="text-slate-400 text-xs text-center py-2">Chưa có key.</p>
+            <p className="text-ink-500 text-xs text-center py-2">Chưa có key.</p>
           )}
         </div>
       )}
@@ -251,7 +251,7 @@ function AddKeyForm({ poolId, onDone }: { poolId: string; onDone: () => void }) 
     onError: (e: any) => toast(extractError(e), "error"),
   });
   return (
-    <form onSubmit={handleSubmit((v) => save.mutate({ ...v, priority: Number(v.priority) }))} className="space-y-2 p-2 border border-slate-200 rounded bg-slate-50">
+    <form onSubmit={handleSubmit((v) => save.mutate({ ...v, priority: Number(v.priority) }))} className="space-y-2 p-2 border border-ink-800 rounded bg-ink-900">
       <input className="input text-sm" placeholder="Name (Gemini Key 01)" {...register("name", { required: true })} />
       <input className="input text-sm font-mono" placeholder="API key" type="password" {...register("api_key", { required: true })} />
       <div className="grid grid-cols-2 gap-2">
@@ -309,7 +309,7 @@ function PoolEditorModal({
   });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <form onSubmit={handleSubmit((v) => save.mutate(v))} className="w-full max-w-md rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <form onSubmit={handleSubmit((v) => save.mutate(v))} className="w-full max-w-md rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">{isCreate ? "Tạo pool" : `Sửa: ${pool?.name}`}</h2>
         <div>
           <label className="text-sm font-medium">Vendor</label>
@@ -355,7 +355,7 @@ function PoolEditorModal({
             <label className="text-sm font-medium">Cooldown (s)</label>
             <input className="input" type="number" min={10} max={86400}
               {...register("cooldown_seconds", { valueAsNumber: true })} />
-            <p className="text-[10px] text-slate-500 mt-0.5">
+            <p className="text-[10px] text-ink-400 mt-0.5">
               Khi key 429, ngừng dùng trong N giây rồi tự thử lại.
             </p>
           </div>
@@ -365,7 +365,7 @@ function PoolEditorModal({
             <label className="text-sm font-medium">Cost / 1M input tokens (¢)</label>
             <input className="input" type="number" min={0}
               {...register("cost_per_million_input_cents", { valueAsNumber: true })} />
-            <p className="text-[10px] text-slate-500 mt-0.5">
+            <p className="text-[10px] text-ink-400 mt-0.5">
               VD Gemini Flash: 7 (=$0.07/M)
             </p>
           </div>
@@ -373,7 +373,7 @@ function PoolEditorModal({
             <label className="text-sm font-medium">Cost / 1M output tokens (¢)</label>
             <input className="input" type="number" min={0}
               {...register("cost_per_million_output_cents", { valueAsNumber: true })} />
-            <p className="text-[10px] text-slate-500 mt-0.5">
+            <p className="text-[10px] text-ink-400 mt-0.5">
               VD Gemini Flash: 30 (=$0.30/M)
             </p>
           </div>

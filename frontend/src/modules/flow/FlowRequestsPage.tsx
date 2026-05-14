@@ -36,7 +36,7 @@ const STATUS_VISUAL: Record<string, { color: string; bg: string; icon: typeof Ch
   failed:     { color: "text-rose-700",    bg: "bg-rose-50",    icon: AlertCircle },
   processing: { color: "text-violet-700",  bg: "bg-violet-50",  icon: Loader2 },
   pending:    { color: "text-amber-700",   bg: "bg-amber-50",   icon: Loader2 },
-  uploading:  { color: "text-slate-700",   bg: "bg-slate-50",   icon: Loader2 },
+  uploading:  { color: "text-ink-200",   bg: "bg-ink-900",   icon: Loader2 },
 };
 
 const PAGE_SIZE = 20;
@@ -116,7 +116,7 @@ export function FlowRequestsPage() {
           <h1 className="page-title flex items-center gap-2">
             <Activity size={22} className="text-violet-600" /> Flow — Requests
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-ink-400 mt-0.5">
             Theo dõi vòng đời mọi job xử lý video. Tự refresh 5s khi có job đang chạy, 30s khi tất cả đã terminal.
           </p>
         </div>
@@ -131,11 +131,11 @@ export function FlowRequestsPage() {
       {/* Filter bar */}
       <div className="card flex flex-wrap items-end gap-3 p-3">
         <label className="flex-1 min-w-[180px]">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">
             Search
           </span>
-          <div className="mt-1 flex items-center rounded-md border border-slate-300 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
-            <Search className="h-3.5 w-3.5 text-slate-400" />
+          <div className="mt-1 flex items-center rounded-md border border-ink-700 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
+            <Search className="h-3.5 w-3.5 text-ink-500" />
             <input
               className="w-full bg-transparent px-2 py-1.5 text-sm outline-none"
               placeholder="ID, lỗi, filename, params..."
@@ -145,7 +145,7 @@ export function FlowRequestsPage() {
           </div>
         </label>
         <label className="block min-w-[150px]">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tool</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">Tool</span>
           <select
             className="input mt-1 w-full text-sm"
             value={toolFilter}
@@ -158,7 +158,7 @@ export function FlowRequestsPage() {
           </select>
         </label>
         <label className="block min-w-[150px]">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">Status</span>
           <select
             className="input mt-1 w-full text-sm"
             value={statusFilter}
@@ -186,7 +186,7 @@ export function FlowRequestsPage() {
       {/* Job rows */}
       <div className="space-y-2">
         {filtered.length === 0 ? (
-          <div className="card text-center text-sm text-slate-500 py-12">
+          <div className="card text-center text-sm text-ink-400 py-12">
             {data?.jobs.length === 0
               ? "Chưa có job nào. Tạo job từ /flow/cut, /flow/merge, …"
               : "Không có job nào khớp bộ lọc."}
@@ -198,7 +198,7 @@ export function FlowRequestsPage() {
 
       {/* Pagination */}
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between text-sm text-slate-600 pt-2">
+        <div className="flex items-center justify-between text-sm text-ink-300 pt-2">
           <span>
             {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} / {total.toLocaleString()}
           </span>
@@ -246,7 +246,7 @@ function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-semibold text-slate-900">
+              <span className="font-semibold text-white">
                 {tool?.shortLabel ?? job.operation}
               </span>
               <span
@@ -255,7 +255,7 @@ function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
                 {job.status}
               </span>
             </div>
-            <div className="mt-0.5 text-xs text-slate-500 font-mono">
+            <div className="mt-0.5 text-xs text-ink-400 font-mono">
               {job.id.slice(0, 8)} · {new Date(job.created_at).toLocaleString("vi-VN")}
               {job.duration !== null && job.duration > 0 && (
                 <> · {job.duration.toFixed(1)}s</>
@@ -291,11 +291,11 @@ function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
       {/* Inflight progress */}
       {isInflight && job.progress > 0 && job.progress < 100 && (
         <div>
-          <div className="flex justify-between text-[11px] text-slate-500">
+          <div className="flex justify-between text-[11px] text-ink-400">
             <span>Progress</span>
             <span>{Math.round(job.progress)}%</span>
           </div>
-          <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-slate-100">
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-ink-800">
             <div
               className="h-full bg-violet-500 transition-all"
               style={{ width: `${job.progress}%` }}
@@ -308,8 +308,8 @@ function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-xs">
         {job.input_files && job.input_files.length > 0 && (
           <div>
-            <span className="text-slate-500 font-semibold uppercase tracking-wide">Input</span>
-            <ul className="mt-1 space-y-0.5 text-slate-700 font-mono">
+            <span className="text-ink-400 font-semibold uppercase tracking-wide">Input</span>
+            <ul className="mt-1 space-y-0.5 text-ink-200 font-mono">
               {job.input_files.map((f) => (
                 <li key={f.object_key} className="truncate">{f.filename}</li>
               ))}
@@ -318,13 +318,13 @@ function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
         )}
         {job.params && Object.keys(job.params).length > 0 && (
           <div>
-            <span className="text-slate-500 font-semibold uppercase tracking-wide">Params</span>
-            <div className="mt-1 font-mono text-slate-700">
+            <span className="text-ink-400 font-semibold uppercase tracking-wide">Params</span>
+            <div className="mt-1 font-mono text-ink-200">
               {Object.entries(job.params)
                 .filter(([k]) => k !== "_owner")
                 .map(([k, v]) => (
                   <span key={k} className="mr-3 inline-block">
-                    <span className="text-slate-400">{k}=</span>{String(v)}
+                    <span className="text-ink-500">{k}=</span>{String(v)}
                   </span>
                 ))}
             </div>
@@ -335,7 +335,7 @@ function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
       {/* Output preview (completed) — inline video for mp4, link for others */}
       {job.status === "completed" && job.output_url && (
         <details className="text-sm">
-          <summary className="cursor-pointer text-slate-500 hover:text-slate-700">
+          <summary className="cursor-pointer text-ink-400 hover:text-ink-200">
             Xem output
           </summary>
           <div className="mt-2">
@@ -343,13 +343,13 @@ function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
               <video
                 src={job.output_url}
                 controls
-                className="w-full max-w-md rounded border border-slate-200"
+                className="w-full max-w-md rounded border border-ink-800"
               />
             ) : job.output_url.match(/\.(png|jpe?g|gif|webp)$/i) ? (
               <img
                 src={job.output_url}
                 alt="output"
-                className="max-w-md rounded border border-slate-200"
+                className="max-w-md rounded border border-ink-800"
               />
             ) : (
               <a

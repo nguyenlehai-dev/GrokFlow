@@ -40,6 +40,6 @@ export function AdminGuard({ children }: { children: ReactNode }) {
   }, []);
 
   if (me?.role !== "admin" && me?.role !== "super_admin") return <Navigate to="/dashboard" replace />;
-  if (!verified) return <p className="text-slate-500">Đang xác thực quyền admin...</p>;
+  if (!verified) return <p className="text-ink-400">Đang xác thực quyền admin...</p>;
   return <>{children}</>;
 }

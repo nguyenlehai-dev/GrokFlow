@@ -67,25 +67,25 @@ export function ProjectsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-3xl max-h-[92vh] rounded-xl bg-white shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-3xl max-h-[92vh] rounded-xl bg-ink-900 shadow-2xl flex flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b px-5 py-3 bg-gradient-to-r from-violet-50 to-fuchsia-50">
           <div>
             <h2 className="font-semibold inline-flex items-center gap-2">
               <Layers size={18} className="text-violet-600" /> Projects của profile
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-ink-400 mt-0.5">
               <code className="font-mono">{profileName}</code> · Mỗi project = 1 workspace
               riêng trong Grok account, có thể assign cho 1 hoặc nhiều domain.
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-200">
             <X size={18} />
           </button>
         </header>
 
         <div className="flex-1 overflow-auto p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-ink-300">
               {projects?.length ?? 0} project — bấm + để đăng ký project mới đã tạo trên grok.com
             </p>
             <div className="flex gap-1.5">
@@ -98,7 +98,7 @@ export function ProjectsModal({
               </button>
               <button
                 onClick={() => setAutoProvision(true)}
-                className="inline-flex items-center gap-1.5 rounded-md bg-white border border-slate-300 text-slate-700 px-3 py-1.5 text-sm font-semibold hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 rounded-md bg-ink-900 border border-ink-700 text-ink-200 px-3 py-1.5 text-sm font-semibold hover:bg-ink-900"
                 title="(Beta) Tự động dùng VNC browser tạo project — đang fragile với Grok UI changes"
               >
                 <Wand2 size={14} /> Tự động <span className="text-[9px] font-bold uppercase tracking-wider px-1 rounded bg-amber-100 text-amber-700">Beta</span>
@@ -107,7 +107,7 @@ export function ProjectsModal({
           </div>
 
           {isLoading ? (
-            <p className="text-sm text-slate-500">Đang tải…</p>
+            <p className="text-sm text-ink-400">Đang tải…</p>
           ) : (projects ?? []).length === 0 ? (
             <EmptyState onCreate={() => setCreating(true)} />
           ) : (
@@ -129,7 +129,7 @@ export function ProjectsModal({
           )}
         </div>
 
-        <footer className="border-t px-5 py-3 bg-slate-50 text-xs text-slate-500 flex items-center justify-between">
+        <footer className="border-t px-5 py-3 bg-ink-900 text-xs text-ink-400 flex items-center justify-between">
           <span>
             Tip: tạo project trên{" "}
             <a href="https://grok.com" target="_blank" rel="noreferrer" className="text-violet-600 hover:underline inline-flex items-center gap-0.5">
@@ -184,11 +184,11 @@ function ProjectRow({
   onDelete: () => void;
 }) {
   return (
-    <li className="rounded-lg ring-1 ring-slate-200 hover:ring-violet-300 bg-white p-3.5 flex items-start justify-between gap-3 transition">
+    <li className="rounded-lg ring-1 ring-ink-800 hover:ring-violet-300 bg-ink-900 p-3.5 flex items-start justify-between gap-3 transition">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-slate-800">{p.name}</span>
-          <code className="text-[11px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+          <span className="font-semibold text-ink-100">{p.name}</span>
+          <code className="text-[11px] font-mono text-ink-400 bg-ink-800 px-1.5 py-0.5 rounded">
             {p.grok_project_id}
           </code>
           <a
@@ -202,7 +202,7 @@ function ProjectRow({
           </a>
         </div>
         {p.description && (
-          <p className="text-xs text-slate-500 mt-1 line-clamp-2">{p.description}</p>
+          <p className="text-xs text-ink-400 mt-1 line-clamp-2">{p.description}</p>
         )}
         <div className="mt-2">
           <button
@@ -227,10 +227,10 @@ function ProjectRow({
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50 py-10 text-center">
-      <Layers size={32} className="mx-auto text-slate-300" />
-      <p className="mt-3 font-semibold text-slate-800">Profile này chưa có project nào</p>
-      <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+    <div className="rounded-xl border-2 border-dashed border-ink-800 bg-ink-900/50 py-10 text-center">
+      <Layers size={32} className="mx-auto text-ink-500" />
+      <p className="mt-3 font-semibold text-ink-100">Profile này chưa có project nào</p>
+      <p className="text-xs text-ink-400 mt-1 max-w-md mx-auto">
         Mở grok.com → tạo project (sidebar trái) → copy URL slug sau{" "}
         <code className="font-mono">/project/</code>. Quay lại đây bấm "Thêm project" + dán slug.
       </p>
@@ -342,16 +342,16 @@ function ProjectEditorModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-lg max-h-[92vh] rounded-xl bg-white shadow-xl flex flex-col">
+      <div className="w-full max-w-lg max-h-[92vh] rounded-xl bg-ink-900 shadow-xl flex flex-col">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="font-semibold">{isEdit ? `Sửa: ${project!.name}` : "Thêm project"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-200">
             <X size={18} />
           </button>
         </div>
         <div className="flex-1 overflow-auto p-4 space-y-4">
           <label className="block text-sm">
-            <span className="font-medium text-slate-700">
+            <span className="font-medium text-ink-200">
               Grok project slug <span className="text-rose-500">*</span>
             </span>
             <input
@@ -365,13 +365,13 @@ function ProjectEditorModal({
                 <strong>Cách lấy slug:</strong>{" "}
                 Vào <a href="https://grok.com" target="_blank" rel="noreferrer" className="underline">grok.com</a> →
                 bấm <strong>+ New Project</strong> ở sidebar → khi URL đổi thành
-                <code className="font-mono bg-white px-1 rounded mx-0.5">grok.com/project/abc-123-...</code>
+                <code className="font-mono bg-ink-900 px-1 rounded mx-0.5">grok.com/project/abc-123-...</code>
                 → copy phần sau <code className="font-mono">/project/</code> → paste vào đây.
               </div>
             )}
           </label>
           <label className="block text-sm">
-            <span className="font-medium text-slate-700">
+            <span className="font-medium text-ink-200">
               Tên project <span className="text-rose-500">*</span>
             </span>
             <input
@@ -382,7 +382,7 @@ function ProjectEditorModal({
             />
           </label>
           <label className="block text-sm">
-            <span className="font-medium text-slate-700">Mô tả (tùy chọn)</span>
+            <span className="font-medium text-ink-200">Mô tả (tùy chọn)</span>
             <textarea
               className="input mt-1"
               rows={2}
@@ -398,15 +398,15 @@ function ProjectEditorModal({
           <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-3">
             <div className="flex items-center gap-1.5 mb-2">
               <Globe size={14} className="text-violet-600" />
-              <span className="text-sm font-semibold text-slate-800">
+              <span className="text-sm font-semibold text-ink-100">
                 Gán cho domain & tài khoản
               </span>
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-ink-400">
                 · 2 cấp: domain (tất cả user) → tài khoản (riêng từng người)
               </span>
             </div>
             {tenantDomains.length === 0 ? (
-              <p className="text-xs text-slate-500 italic">
+              <p className="text-xs text-ink-400 italic">
                 Chưa có domain tenant — tạo ở /admin/domains trước.
               </p>
             ) : (
@@ -423,7 +423,7 @@ function ProjectEditorModal({
                 ))}
               </div>
             )}
-            <div className="mt-3 rounded-md bg-white/70 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
+            <div className="mt-3 rounded-md bg-ink-900/70 px-3 py-2 text-[11px] text-ink-300 leading-relaxed">
               <strong>Quy tắc auto-pick lúc submit job:</strong><br />
               1. Nếu user có <Pin size={9} className="inline text-violet-600" />{" "}
               pin tới project này → dùng project đó<br />
@@ -432,7 +432,7 @@ function ProjectEditorModal({
             </div>
           </section>
         </div>
-        <div className="flex justify-end gap-2 border-t px-4 py-3 bg-slate-50">
+        <div className="flex justify-end gap-2 border-t px-4 py-3 bg-ink-900">
           <button onClick={onClose} className="btn-ghost">Hủy</button>
           <button
             onClick={() => save.mutate()}
@@ -483,7 +483,7 @@ function DomainRow({
   const pinnedInDomain = (users ?? []).filter((u) => selectedUserIds.has(u.id)).length;
 
   return (
-    <div className="rounded-md bg-white border border-slate-200 overflow-hidden">
+    <div className="rounded-md bg-ink-900 border border-ink-800 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-1.5">
         <input
           type="checkbox"
@@ -496,8 +496,8 @@ function DomainRow({
           onClick={() => setOpen(!open)}
           className="flex-1 min-w-0 flex items-center gap-2 text-left"
         >
-          <span className="text-sm font-medium text-slate-800">{domain.label}</span>
-          <code className="text-[11px] font-mono text-slate-500">{domain.hostname}</code>
+          <span className="text-sm font-medium text-ink-100">{domain.label}</span>
+          <code className="text-[11px] font-mono text-ink-400">{domain.hostname}</code>
           {pinnedInDomain > 0 && (
             <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded-full">
               <Pin size={9} /> {pinnedInDomain} user pinned
@@ -507,32 +507,32 @@ function DomainRow({
         <button
           type="button"
           onClick={() => setOpen(!open)}
-          className="text-slate-400 hover:text-slate-700"
+          className="text-ink-500 hover:text-ink-200"
         >
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
       </div>
       {open && (
-        <div className="border-t border-slate-100 bg-slate-50/50 px-3 py-2">
+        <div className="border-t border-ink-800 bg-ink-900/50 px-3 py-2">
           {isLoading ? (
-            <p className="text-xs text-slate-500 italic">Đang tải tài khoản…</p>
+            <p className="text-xs text-ink-400 italic">Đang tải tài khoản…</p>
           ) : (users ?? []).length === 0 ? (
-            <p className="text-xs text-slate-500 italic">
+            <p className="text-xs text-ink-400 italic">
               Domain này chưa có user nào.
             </p>
           ) : (
             <ul className="space-y-1">
               {users!.map((u) => (
                 <li key={u.id}>
-                  <label className="flex items-center gap-2 rounded px-2 py-1 hover:bg-white cursor-pointer">
+                  <label className="flex items-center gap-2 rounded px-2 py-1 hover:bg-ink-900 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={selectedUserIds.has(u.id)}
                       onChange={() => onToggleUser(u.id)}
                     />
-                    <UserIcon size={11} className="text-slate-400 flex-shrink-0" />
-                    <span className="text-xs font-mono text-slate-700 flex-1 truncate">{u.email}</span>
-                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                    <UserIcon size={11} className="text-ink-500 flex-shrink-0" />
+                    <span className="text-xs font-mono text-ink-200 flex-1 truncate">{u.email}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-ink-400 font-semibold">
                       {u.role}
                     </span>
                   </label>
@@ -540,7 +540,7 @@ function DomainRow({
               ))}
             </ul>
           )}
-          <p className="text-[10px] text-slate-500 mt-1.5 italic">
+          <p className="text-[10px] text-ink-400 mt-1.5 italic">
             Tick user = pin riêng người đó vào project này (ưu tiên hơn domain-wide).
           </p>
         </div>
@@ -621,18 +621,18 @@ function AutoProvisionModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-lg max-h-[92vh] rounded-xl bg-white shadow-xl flex flex-col">
+      <div className="w-full max-w-lg max-h-[92vh] rounded-xl bg-ink-900 shadow-xl flex flex-col">
         <div className="flex items-center justify-between border-b px-4 py-3 bg-gradient-to-r from-violet-50 to-fuchsia-50">
           <div>
             <h3 className="font-semibold inline-flex items-center gap-2">
               <Wand2 size={16} className="text-violet-600" /> Auto-provision project
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-ink-400 mt-0.5">
               Profile <code className="font-mono">{profileName}</code> · GrokFlow sẽ tự mở Grok
               trong VNC, tạo project, capture slug.
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-200">
             <X size={18} />
           </button>
         </div>
@@ -646,7 +646,7 @@ function AutoProvisionModal({
           </div>
 
           <label className="block text-sm">
-            <span className="font-medium text-slate-700">
+            <span className="font-medium text-ink-200">
               Tên project <span className="text-rose-500">*</span>
             </span>
             <input
@@ -655,13 +655,13 @@ function AutoProvisionModal({
               onChange={(e) => setName(e.target.value)}
               placeholder="vd: Khách ABC - Production"
             />
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-ink-400 mt-1">
               Tên này sẽ hiện trên Grok sidebar + trong GrokFlow.
             </p>
           </label>
 
           <label className="block text-sm">
-            <span className="font-medium text-slate-700">Mô tả (tùy chọn)</span>
+            <span className="font-medium text-ink-200">Mô tả (tùy chọn)</span>
             <textarea
               className="input mt-1"
               rows={2}
@@ -675,12 +675,12 @@ function AutoProvisionModal({
           <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-3">
             <div className="flex items-center gap-1.5 mb-2">
               <Globe size={14} className="text-violet-600" />
-              <span className="text-sm font-semibold text-slate-800">
+              <span className="text-sm font-semibold text-ink-100">
                 Gán cho domain & tài khoản (tùy chọn)
               </span>
             </div>
             {tenantDomains.length === 0 ? (
-              <p className="text-xs text-slate-500 italic">Chưa có domain tenant.</p>
+              <p className="text-xs text-ink-400 italic">Chưa có domain tenant.</p>
             ) : (
               <div className="space-y-1.5 max-h-64 overflow-auto">
                 {tenantDomains.map((d) => (
@@ -705,7 +705,7 @@ function AutoProvisionModal({
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t px-4 py-3 bg-slate-50">
+        <div className="flex justify-end gap-2 border-t px-4 py-3 bg-ink-900">
           <button onClick={onClose} className="btn-ghost" disabled={provision.isPending}>
             Hủy
           </button>
@@ -765,38 +765,38 @@ function AssignDomainsModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-xl flex flex-col max-h-[80vh]">
+      <div className="w-full max-w-md rounded-xl bg-ink-900 shadow-xl flex flex-col max-h-[80vh]">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h3 className="font-semibold inline-flex items-center gap-2">
               <Globe size={16} className="text-violet-600" /> Assign domains
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-ink-400 mt-0.5">
               Project <code className="font-mono">{project.name}</code> → các tenant
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-200">
             <X size={18} />
           </button>
         </div>
         <div className="flex-1 overflow-auto p-4">
           {isLoading ? (
-            <p className="text-sm text-slate-500">Đang tải…</p>
+            <p className="text-sm text-ink-400">Đang tải…</p>
           ) : domains.length === 0 ? (
-            <p className="text-sm text-slate-500">Chưa có domain tenant nào.</p>
+            <p className="text-sm text-ink-400">Chưa có domain tenant nào.</p>
           ) : (
             <ul className="space-y-1.5">
               {domains.map((d) => (
                 <li key={d.id}>
-                  <label className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 cursor-pointer hover:bg-slate-50">
+                  <label className="flex items-center gap-2 rounded-md border border-ink-800 px-3 py-2 cursor-pointer hover:bg-ink-900">
                     <input
                       type="checkbox"
                       checked={effective.has(d.id)}
                       onChange={() => toggle(d.id)}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-slate-800">{d.label}</div>
-                      <code className="text-[11px] font-mono text-slate-500">{d.hostname}</code>
+                      <div className="text-sm font-medium text-ink-100">{d.label}</div>
+                      <code className="text-[11px] font-mono text-ink-400">{d.hostname}</code>
                     </div>
                   </label>
                 </li>

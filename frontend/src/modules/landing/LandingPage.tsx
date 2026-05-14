@@ -1,15 +1,23 @@
+/**
+ * Public landing — dark-mode music-streaming aesthetic.
+ *
+ * The platform handles multiple AI providers (image / video / flow tools /
+ * gateway), so we frame each module as an "album" the user can browse,
+ * and the demo widget as a "now playing" player. This file is intentionally
+ * self-contained — sections are local components below.
+ */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
-  Check, Image as ImageIcon, Video, Zap, Shield, Code2, Sparkles,
-  Wand2, Scissors, Cpu, ArrowRight, PlayCircle, Crown, Star,
-  Globe, BookOpen, Terminal, Lock, Webhook, BarChart3,
-  Users, Briefcase, Palette, Plus, Minus,
-  Rocket,
+  Check, Image as ImageIcon, Video, Wand2, Scissors, Cpu,
+  ArrowRight, Play, Sparkles, Star,
+  Globe, Plus, Minus, Headphones, Heart, Disc3,
+  ListMusic, Mic2, Pause,
 } from "lucide-react";
 import { useDomainStore } from "@/core/domain/store";
 
-// ─── Pricing tiers (in sync with backend/entitlements/catalog.py) ─────────
+// ─── Pricing tiers (in sync with backend/entitlements/catalog.py) ──────
 
 type Tier = {
   code: string;
@@ -19,7 +27,6 @@ type Tier = {
   description: string;
   highlight?: boolean;
   features: string[];
-  limits: { label: string; value: string }[];
   cta: string;
   ctaTo: string;
 };
@@ -27,847 +34,588 @@ type Tier = {
 const TIERS: Tier[] = [
   {
     code: "free", name: "Free", priceVnd: 0,
-    description: "Dùng thử miễn phí — tạo ảnh chất lượng cơ bản",
-    features: [
-      "Tạo job ảnh", "Aspect ratio cơ bản",
-      "2 lượt thử /try/image không cần đăng ký",
-    ],
-    limits: [
-      { label: "Job mỗi ngày", value: "10" },
-      { label: "Job mỗi tháng", value: "100" },
-      { label: "API Key", value: "1" },
-      { label: "Profile", value: "1" },
-    ],
+    description: "Bắt đầu miễn phí, không cần thẻ",
+    features: ["10 job/ngày", "Aspect ratio cơ bản", "1 API key", "Hỗ trợ Discord"],
     cta: "Đăng ký miễn phí", ctaTo: "/register",
   },
   {
     code: "basic", name: "Basic", priceVnd: 199000,
-    description: "Cá nhân + freelancer — ảnh + video cơ bản",
-    features: [
-      "Tạo ảnh + video", "Image-to-image",
-      "Fun mode", "Full aspect ratios", "Hỗ trợ Discord",
-    ],
-    limits: [
-      { label: "Job mỗi ngày", value: "50" },
-      { label: "Job mỗi tháng", value: "1,000" },
-      { label: "API Key", value: "2" },
-      { label: "Profile", value: "2" },
-    ],
-    cta: "Chọn gói Basic", ctaTo: "/register?plan=basic",
+    description: "Cá nhân, freelancer — ảnh + video cơ bản",
+    features: ["Image + Video", "Image-to-image", "Full aspect ratios", "Email support"],
+    cta: "Lên Basic", ctaTo: "/register?plan=basic",
   },
   {
-    code: "pro", name: "Pro", priceVnd: 599000,
-    description: "Cho team — chất lượng cao, full API, audit log",
-    highlight: true,
-    features: [
-      "Tất cả tính năng Basic",
-      "Image quality cao",
-      "Video 720p + 10s + Custom mode",
-      "Image-to-video",
-      "Public API v1",
-      "Webhooks + Audit log",
-    ],
-    limits: [
-      { label: "Job mỗi ngày", value: "200" },
-      { label: "Job mỗi tháng", value: "5,000" },
-      { label: "API Key", value: "5" },
-      { label: "Profile", value: "5" },
-    ],
-    cta: "Chọn gói Pro", ctaTo: "/register?plan=pro",
+    code: "pro", name: "Pro", priceVnd: 499000, highlight: true,
+    description: "Sản xuất nội dung chuyên nghiệp",
+    features: ["Quality mode", "Concurrent jobs", "Webhook", "API key pool", "Priority queue"],
+    cta: "Lên Pro · phổ biến", ctaTo: "/register?plan=pro",
   },
   {
-    code: "enterprise", name: "Enterprise",
-    priceVnd: null, priceLabel: "Liên hệ",
-    description: "Doanh nghiệp — không giới hạn, hỗ trợ ưu tiên",
-    features: [
-      "Tất cả tính năng Pro", "Spicy mode 18+",
-      "SLA + Hỗ trợ 24/7", "Custom plan",
-      "Multi-domain branding", "Account manager",
-    ],
-    limits: [
-      { label: "Job mỗi ngày", value: "2,000" },
-      { label: "Job mỗi tháng", value: "50,000" },
-      { label: "API Key", value: "20" },
-      { label: "Profile", value: "20" },
-    ],
-    cta: "Liên hệ Sale", ctaTo: "/register?plan=enterprise",
+    code: "premium", name: "Premium", priceVnd: null, priceLabel: "Tuỳ chỉnh",
+    description: "Team / agency — quota cao, SLA, white-label",
+    features: ["Unlimited concurrent", "White-label brand", "Dedicated profile pool", "SLA 99.9%"],
+    cta: "Liên hệ", ctaTo: "/register?plan=premium",
   },
 ];
 
-const formatVnd = (n: number) => new Intl.NumberFormat("vi-VN").format(n) + "₫";
+// ─── Module catalog (rendered as album-art cards) ──────────────────────
 
-// ─── Page ──────────────────────────────────────────────────────────────────
+type ModuleCard = {
+  label: string;
+  tagline: string;
+  desc: string;
+  icon: typeof ImageIcon;
+  // Album-art gradient (CSS class). Each module owns its own tone.
+  gradient: string;
+  ctaText: string;
+  to: string;
+  features: readonly string[];
+  badge?: string;
+};
+
+const MODULES: readonly ModuleCard[] = [
+  {
+    label: "AI Image", tagline: "Generate · Edit · Stylize",
+    desc: "Aurora · Grok-2 · Grok-3 — full aspect ratios, speed/quality mode, image-to-image.",
+    icon: ImageIcon,
+    gradient: "from-violet-600 via-fuchsia-600 to-pink-500",
+    ctaText: "Thử ngay", to: "/try/image",
+    badge: "Free",
+    features: ["Aurora model", "Image-to-image", "5 tỉ lệ", "Quality mode (Pro)"],
+  },
+  {
+    label: "AI Video", tagline: "Text · Image · Remix",
+    desc: "Text-to-video & image-to-video. 480p/720p, 3-15s, fun + custom mode.",
+    icon: Video,
+    gradient: "from-pink-500 via-rose-500 to-orange-500",
+    ctaText: "Cần Basic+", to: "/register?plan=basic",
+    badge: "199k+",
+    features: ["Text-to-video", "Image-to-video", "Fun mode", "Đến 15s"],
+  },
+  {
+    label: "Flow Tools", tagline: "Cut · Merge · Resize",
+    desc: "Cắt ghép video, đổi tỉ lệ, tách audio. Xử lý local trong browser, không cần Adobe.",
+    icon: Scissors,
+    gradient: "from-amber-500 via-orange-500 to-rose-500",
+    ctaText: "Mở trong app", to: "/register",
+    features: ["Cut video", "Merge audio", "Resize", "Trích frames"],
+  },
+  {
+    label: "LLM Gateway", tagline: "Route · Pool · Stream",
+    desc: "1 API key — auto route OpenAI / Gemini / Claude / Grok. Pool + rotation tự động.",
+    icon: Cpu,
+    gradient: "from-cyan-500 via-sky-500 to-indigo-500",
+    ctaText: "Cần Pro+", to: "/register?plan=pro",
+    badge: "v1",
+    features: ["Multi-provider", "Key rotation", "Rate limit", "Async + sync"],
+  },
+];
+
+// ─── Page ──────────────────────────────────────────────────────────────
 
 export function LandingPage() {
   const brandName = useDomainStore((s) => s.config?.brand_name) ?? "GrokFlow";
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="min-h-screen bg-ink-950 text-ink-100 selection:bg-brand-500/30">
       <TopNav brandName={brandName} />
-      <Hero />
-      <TrustStrip />
-      <ModulesSection />
-      <HowItWorksSection />
-      <UseCasesSection />
-      <StatsSection />
-      <FeaturesGridSection brandName={brandName} />
+      <Hero brandName={brandName} />
+      <NowPlayingDemo />
+      <ModuleShowcase />
+      <ArtistSpotlight />
       <PricingSection />
-      <FaqSection />
-      <FinalCtaSection />
+      <Faq />
+      <FinalCta />
       <Footer brandName={brandName} />
     </div>
   );
 }
 
-// ─── Top nav ───────────────────────────────────────────────────────────────
+// ─── Top nav ───────────────────────────────────────────────────────────
 
 function TopNav({ brandName }: { brandName: string }) {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
-    const on = () => setScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", on, { passive: true });
-    return () => window.removeEventListener("scroll", on);
+    const onScroll = () => setScrolled(window.scrollY > 30);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
   return (
-    <header
-      className={`sticky top-0 z-30 transition ${
+    <nav
+      className={`sticky top-0 z-30 transition-all border-b ${
         scrolled
-          ? "bg-white/85 backdrop-blur-lg border-b border-slate-200/70"
-          : "bg-transparent"
+          ? "glass border-ink-800/60"
+          : "border-transparent"
       }`}
     >
-      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-        <Link to="/" className="text-xl font-bold inline-flex items-center gap-1.5">
-          <Wand2 size={22} className="text-violet-600" />
-          <span className="bg-gradient-to-r from-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+        <Link to="/" className="flex items-center gap-2.5 group">
+          <span className="w-9 h-9 rounded-xl bg-gradient-album text-white flex items-center justify-center font-bold shadow-brand">
+            {brandName[0].toUpperCase()}
+          </span>
+          <span className="font-bold text-lg text-white group-hover:text-gradient transition-all">
             {brandName}
           </span>
         </Link>
-        <nav className="hidden md:flex items-center gap-5 text-sm text-slate-600">
-          <a href="#modules" className="hover:text-violet-600">Tính năng</a>
-          <a href="#how" className="hover:text-violet-600">Cách dùng</a>
-          <a href="#pricing" className="hover:text-violet-600">Bảng giá</a>
-          <a href="#faq" className="hover:text-violet-600">FAQ</a>
-        </nav>
+        <div className="hidden md:flex items-center gap-7 text-sm text-ink-300">
+          <a href="#modules" className="hover:text-white transition">Sản phẩm</a>
+          <a href="#pricing" className="hover:text-white transition">Gói cước</a>
+          <a href="#faq" className="hover:text-white transition">FAQ</a>
+        </div>
         <div className="flex items-center gap-2">
-          <Link
-            to="/try/image"
-            className="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium text-violet-700 hover:bg-violet-50"
-          >
-            <Sparkles size={13} /> Thử miễn phí
-          </Link>
-          <Link to="/login" className="text-sm text-slate-600 hover:text-slate-900 px-2.5 py-1.5 hidden sm:inline">
-            Đăng nhập
-          </Link>
-          <Link
-            to="/register"
-            className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-4 py-2 text-sm font-semibold hover:from-violet-700 hover:to-fuchsia-700 shadow-sm"
-          >
-            Đăng ký
-          </Link>
+          <Link to="/login" className="btn-ghost btn-sm">Đăng nhập</Link>
+          <Link to="/register" className="btn-primary btn-sm">Dùng thử</Link>
         </div>
       </div>
-    </header>
+    </nav>
   );
 }
 
-// ─── Hero ──────────────────────────────────────────────────────────────────
+// ─── Hero ──────────────────────────────────────────────────────────────
 
-function Hero() {
+function Hero({ brandName }: { brandName: string }) {
+  const { t } = useTranslation();
   return (
     <section className="relative overflow-hidden">
-      {/* Decorative gradient blobs */}
-      <div className="absolute inset-0 -z-10">
-        <div className="absolute -top-24 -left-24 w-96 h-96 bg-violet-300/30 rounded-full blur-3xl" />
-        <div className="absolute -top-12 right-0 w-[28rem] h-[28rem] bg-fuchsia-300/30 rounded-full blur-3xl" />
-        <div className="absolute top-72 left-1/3 w-80 h-80 bg-cyan-300/20 rounded-full blur-3xl" />
-      </div>
-      <div className="max-w-6xl mx-auto px-4 py-16 sm:py-24 text-center">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-violet-200 bg-white/70 backdrop-blur-sm text-violet-700 text-xs font-semibold">
-          <Star size={12} className="text-amber-500" />
-          v0.5 ra mắt · Public try-image · LLM Gateway · Flow tools
-        </span>
-        <h1 className="mt-6 text-4xl sm:text-5xl md:text-6xl font-bold leading-[1.05] tracking-tight max-w-4xl mx-auto">
-          Tạo ảnh & video AI{" "}
-          <span className="bg-gradient-to-r from-violet-600 via-fuchsia-600 to-rose-500 bg-clip-text text-transparent">
-            mượt như Grok
-          </span>
-          <br />
-          <span className="bg-gradient-to-r from-cyan-600 to-emerald-500 bg-clip-text text-transparent">
-            đơn giản như REST API
-          </span>
-        </h1>
-        <p className="mt-5 text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
-          Một platform cho mọi nhu cầu sinh AI: image, video, video editing,
-          LLM gateway đa-provider. Không tự lo browser, không solve captcha,
-          không lo cookie expiry.
-        </p>
-        <div className="mt-8 flex gap-3 justify-center flex-wrap">
-          <Link
-            to="/try/image"
-            className="group inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-6 py-3.5 text-base font-semibold shadow-lg shadow-violet-200 hover:shadow-xl hover:from-violet-700 hover:to-fuchsia-700 transition"
-          >
-            <PlayCircle size={18} /> Thử tạo ảnh miễn phí
-            <ArrowRight size={14} className="group-hover:translate-x-0.5 transition" />
-          </Link>
-          <Link
-            to="#how"
-            className="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3.5 text-base font-semibold text-slate-800 border border-slate-200 hover:bg-slate-50 transition"
-          >
-            <BookOpen size={16} /> Xem cách dùng
-          </Link>
-        </div>
-        <div className="mt-6 flex items-center justify-center gap-3 text-xs text-slate-500 flex-wrap">
-          <Pill>✓ Không cần thẻ tín dụng</Pill>
-          <Pill>✓ 2 ảnh miễn phí ngay trình duyệt</Pill>
-          <Pill>✓ Đăng ký = 10 job / ngày</Pill>
-        </div>
+      {/* Animated mesh background */}
+      <div className="absolute inset-0 bg-gradient-mesh-dark pointer-events-none" />
+      <div className="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-accent-fuchsia/20 blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-brand-500/20 blur-3xl pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 w-[600px] h-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-cyan/10 blur-3xl pointer-events-none" />
 
-        {/* Mock product preview */}
-        <div className="mt-12 max-w-4xl mx-auto">
-          <ProductPreview />
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-24 sm:pt-28 sm:pb-32">
+        <div className="text-center max-w-3xl mx-auto space-y-6">
+          {/* "Now playing" pill */}
+          <div className="inline-flex items-center gap-2 rounded-full bg-ink-900/70 backdrop-blur-md border border-ink-800 px-4 py-1.5">
+            <span className="flex items-end gap-0.5 h-3">
+              <span className="eq-bar h-full animate-eq-bar-1 text-accent-spotify" />
+              <span className="eq-bar h-full animate-eq-bar-2 text-accent-spotify" />
+              <span className="eq-bar h-full animate-eq-bar-3 text-accent-spotify" />
+            </span>
+            <span className="text-xs font-semibold text-ink-200">
+              {t("landing.now_playing", "Đang phát")}: <span className="text-white">AI Image · Aurora model</span>
+            </span>
+          </div>
+
+          <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight leading-[1.05]">
+            {t("landing.hero_title_1", "Một studio.")}<br />
+            <span className="text-gradient">{t("landing.hero_title_2", "Mọi mô hình AI.")}</span>
+          </h1>
+          <p className="text-lg sm:text-xl text-ink-300 max-w-2xl mx-auto leading-relaxed">
+            {brandName} — {t("landing.hero_subtitle", "Quản lý mọi dự án AI — sinh ảnh, video, văn bản, code — trong một giao diện duy nhất, theo phong cách bảng điều khiển âm nhạc.")}
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <Link to="/register" className="btn-primary btn-lg">
+              <Sparkles size={18} /> {t("landing.cta_start", "Bắt đầu miễn phí")}
+              <ArrowRight size={18} />
+            </Link>
+            <Link to="/try/image" className="btn-secondary btn-lg">
+              <Play size={18} /> {t("landing.cta_explore", "Khám phá studio")}
+            </Link>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-4 text-sm text-ink-400">
+            <span className="inline-flex items-center gap-1.5">
+              <Check size={14} className="text-accent-spotify" /> Không cần thẻ
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Check size={14} className="text-accent-spotify" /> 10 job/ngày free
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Check size={14} className="text-accent-spotify" /> Multi-tenant native
+            </span>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700">
-      {children}
-    </span>
-  );
-}
+// ─── Now-playing demo widget ───────────────────────────────────────────
 
-function ProductPreview() {
-  // A stylized "screenshot" of the playground UI — pure CSS, no real asset.
+function NowPlayingDemo() {
+  const [playing, setPlaying] = useState(true);
   return (
-    <div className="relative">
-      <div className="absolute inset-0 bg-gradient-to-br from-violet-500/20 via-fuchsia-500/20 to-cyan-500/20 rounded-2xl blur-2xl -z-10" />
-      <div className="rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-        {/* Window chrome */}
-        <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-slate-200 bg-slate-50">
-          <span className="w-2.5 h-2.5 rounded-full bg-rose-400" />
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-          <span className="ml-3 text-xs text-slate-500 font-mono">/try/image</span>
-        </div>
-        {/* Body */}
-        <div className="grid sm:grid-cols-2 gap-0 text-left">
-          <div className="p-5 border-r border-slate-100 space-y-3">
-            <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Prompt</div>
-            <div className="font-mono text-sm text-slate-700 bg-slate-50 rounded-md p-3 border border-slate-200 leading-relaxed">
-              A dragon flying over Ha Long Bay at sunset,<br />
-              <span className="text-violet-600">watercolor style</span>, cinematic lighting
+    <section className="max-w-5xl mx-auto px-4 sm:px-6 -mt-12 mb-20 relative z-10">
+      <div className="rounded-3xl bg-gradient-to-br from-ink-900 via-ink-900 to-ink-950 border border-ink-800/80 shadow-card-dark-hover overflow-hidden">
+        <div className="grid md:grid-cols-[280px_1fr] gap-0">
+          {/* Album art preview */}
+          <div className="relative aspect-square md:aspect-auto bg-gradient-album overflow-hidden">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.3),transparent_50%)]" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Disc3 size={120} className={`text-white/80 ${playing ? "animate-spin" : ""}`} style={{ animationDuration: "8s" }} />
             </div>
-            <div className="flex gap-1.5 flex-wrap">
-              {["1:1", "16:9", "9:16"].map((a, i) => (
-                <span key={a} className={`text-[11px] px-2 py-0.5 rounded-md ${i === 1 ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-700"}`}>
-                  {a}
-                </span>
-              ))}
-            </div>
-            <button className="w-full bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white py-2 rounded-md text-sm font-semibold inline-flex items-center justify-center gap-1.5">
-              <Sparkles size={14} /> Tạo ảnh
-            </button>
-            <p className="text-[11px] text-emerald-600 font-medium">✓ Còn 2/2 lượt thử miễn phí</p>
           </div>
-          <div className="aspect-square sm:aspect-auto bg-gradient-to-br from-amber-200 via-rose-300 to-violet-400 relative">
-            <div className="absolute bottom-3 left-3 right-3 text-[10px] text-white/90 font-mono bg-black/30 backdrop-blur-sm rounded px-2 py-1">
-              <ImageIcon size={9} className="inline" /> grok-2 · 15.3s · 1024×576
+          {/* Player body */}
+          <div className="p-6 sm:p-8 flex flex-col justify-between gap-6">
+            <div>
+              <p className="text-xs uppercase tracking-wider text-accent-fuchsia font-semibold">
+                Now Playing · Demo
+              </p>
+              <h3 className="text-2xl font-bold text-white mt-1">
+                Vietnamese girl, cinematic light
+              </h3>
+              <p className="text-sm text-ink-400 mt-1">
+                AI Image · Aurora model · 1:1 · Quality
+              </p>
+            </div>
+            {/* Progress bar */}
+            <div className="space-y-1.5">
+              <div className="h-1 bg-ink-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-album rounded-full transition-all duration-1000"
+                  style={{ width: playing ? "62%" : "0%" }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-ink-500 font-mono">
+                <span>0:08</span>
+                <span>0:13</span>
+              </div>
+            </div>
+            {/* Controls */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button className="w-9 h-9 rounded-full border border-ink-700 text-ink-300 hover:text-white hover:border-white flex items-center justify-center transition">
+                  <Heart size={15} />
+                </button>
+                <button className="w-9 h-9 rounded-full border border-ink-700 text-ink-300 hover:text-white hover:border-white flex items-center justify-center transition">
+                  <ListMusic size={15} />
+                </button>
+              </div>
+              <button
+                onClick={() => setPlaying((p) => !p)}
+                className="w-14 h-14 rounded-full bg-gradient-album text-white flex items-center justify-center shadow-brand hover:scale-105 active:scale-95 transition"
+              >
+                {playing ? <Pause size={22} /> : <Play size={22} className="ml-0.5" />}
+              </button>
+              <Link to="/try/image" className="btn-secondary btn-sm">
+                Tự thử <ArrowRight size={14} />
+              </Link>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── Trust strip ───────────────────────────────────────────────────────────
-
-function TrustStrip() {
-  const items = [
-    { icon: Rocket, label: "Self-hosted ready" },
-    { icon: Lock, label: "JWT + API Key auth" },
-    { icon: Webhook, label: "Webhook callback" },
-    { icon: BarChart3, label: "Audit log + stats" },
-    { icon: Globe, label: "Multi-tenant per-domain" },
-    { icon: Code2, label: "REST + OpenAPI" },
-  ];
-  return (
-    <section className="border-y border-slate-200 bg-slate-50/50">
-      <div className="max-w-6xl mx-auto px-4 py-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 text-xs text-slate-600">
-        {items.map((it) => (
-          <div key={it.label} className="inline-flex items-center gap-1.5 justify-center">
-            <it.icon size={14} className="text-violet-500" />
-            <span className="font-medium">{it.label}</span>
-          </div>
-        ))}
-      </div>
+      <p className="text-center text-xs text-ink-500 mt-3">
+        ↑ Đây là preview UI — bấm <strong>Tự thử</strong> để generate ảnh thật ngay không cần đăng ký.
+      </p>
     </section>
   );
 }
 
-// ─── Modules ───────────────────────────────────────────────────────────────
+// ─── Module showcase (album-art style) ─────────────────────────────────
 
-type ModuleCard = {
-  label: string;
-  desc: string;
-  icon: typeof ImageIcon;
-  tone: keyof typeof TONE;
-  to: string;
-  ctaText: string;
-  badge?: string;
-  features: readonly string[];
-};
-
-const MODULES: readonly ModuleCard[] = [
-  {
-    label: "Grok Image",
-    desc: "Aurora · Grok-2 · Grok-3 model. Full aspect ratios. Speed / Quality mode.",
-    icon: ImageIcon, tone: "violet",
-    to: "/try/image", ctaText: "Thử ngay",
-    badge: "Public",
-    features: ["Aurora model", "Image-to-image", "5 aspect ratios", "Quality mode (Pro)"],
-  },
-  {
-    label: "Grok Video",
-    desc: "Text-to-video & image-to-video. Render 480p/720p. Duration 3-15s.",
-    icon: Video, tone: "fuchsia",
-    to: "/register?plan=basic", ctaText: "Cần Basic",
-    badge: "199k+",
-    features: ["Text-to-video", "Image-to-video", "Fun + Custom mode", "Duration tới 15s"],
-  },
-  {
-    label: "Flow Tools",
-    desc: "Cut / merge / resize / extract audio. Xử lý local, không cần Adobe.",
-    icon: Scissors, tone: "amber",
-    to: "/register", ctaText: "Trong app",
-    features: ["Cut video", "Merge / replace audio", "Resize + crop", "Extract frames"],
-  },
-  {
-    label: "LLM Gateway",
-    desc: "1 API key — route giữa OpenAI, Gemini, Claude. Pool + rotation tự động.",
-    icon: Cpu, tone: "cyan",
-    to: "/register?plan=pro", ctaText: "Cần Pro",
-    badge: "v1",
-    features: ["Multi-provider", "Pool + key rotation", "Per-function rate limit", "Async + sync mode"],
-  },
-];
-
-function ModulesSection() {
+function ModuleShowcase() {
   return (
-    <section id="modules" className="max-w-6xl mx-auto px-4 py-20">
+    <section id="modules" className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
       <SectionHeader
-        eyebrow="4 module · 1 platform"
-        title="Mọi thứ AI bạn cần, không phải chuyển tool"
-        subtitle="Đăng nhập một lần dùng được hết. Quota theo gói. Anonymous được thử Grok Image trực tiếp trên web."
+        eyebrow="4 module · 1 nền tảng"
+        title={<>Mọi công cụ AI bạn cần,<br /><span className="text-gradient">trong một dashboard.</span></>}
+        subtitle="Đăng nhập 1 lần dùng được hết. Quota chia theo gói. Khách anonymous được thử AI Image ngay trên web."
       />
-      <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {MODULES.map((m) => {
-          const t = TONE[m.tone];
-          return (
-            <Link
-              key={m.label}
-              to={m.to}
-              className={`group rounded-xl bg-white p-5 ring-1 ${t.ring} hover:shadow-xl hover:-translate-y-1 transition flex flex-col`}
-            >
-              <div className="flex items-center justify-between">
-                <div className={`w-11 h-11 rounded-lg ${t.bg} ${t.text} flex items-center justify-center`}>
-                  <m.icon size={22} />
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mt-10">
+        {MODULES.map((m) => (
+          <Link key={m.label} to={m.to} className="group block">
+            <article className="album-card h-full flex flex-col">
+              {/* Album art */}
+              <div className={`relative aspect-square rounded-xl bg-gradient-to-br ${m.gradient} overflow-hidden mb-4 shadow-card-dark`}>
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.3),transparent_60%)]" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <m.icon size={56} className="text-white drop-shadow-lg" strokeWidth={1.5} />
                 </div>
                 {m.badge && (
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full ${t.bg} ${t.text}`}>
+                  <span className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full bg-black/40 backdrop-blur px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
                     {m.badge}
                   </span>
                 )}
+                {/* Play overlay on hover */}
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                  <div className="w-14 h-14 rounded-full bg-white text-ink-900 flex items-center justify-center shadow-glow-pink">
+                    <Play size={22} className="ml-0.5" />
+                  </div>
+                </div>
               </div>
-              <h3 className="font-bold text-slate-900 mt-3">{m.label}</h3>
-              <p className="text-sm text-slate-600 mt-1 leading-snug">{m.desc}</p>
-              <ul className="mt-3 space-y-1 text-xs text-slate-600">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-accent-fuchsia">{m.tagline}</p>
+              <h3 className="font-bold text-white text-lg mt-0.5">{m.label}</h3>
+              <p className="text-sm text-ink-400 mt-1.5 leading-relaxed flex-1">{m.desc}</p>
+              <ul className="mt-3 space-y-1">
                 {m.features.map((f) => (
-                  <li key={f} className="flex items-start gap-1">
-                    <Check size={12} className="text-emerald-500 mt-0.5 flex-shrink-0" /> {f}
+                  <li key={f} className="flex items-start gap-1.5 text-xs text-ink-300">
+                    <Check size={12} className="text-accent-spotify mt-0.5 shrink-0" /> {f}
                   </li>
                 ))}
               </ul>
-              <p className={`mt-4 text-xs font-semibold ${t.text} inline-flex items-center gap-1`}>
-                {m.ctaText} <ArrowRight size={11} className="group-hover:translate-x-0.5 transition" />
-              </p>
-            </Link>
-          );
-        })}
+              <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-accent-fuchsia group-hover:gap-2 transition-all">
+                {m.ctaText} <ArrowRight size={14} />
+              </div>
+            </article>
+          </Link>
+        ))}
       </div>
     </section>
   );
 }
 
-// ─── How it works ──────────────────────────────────────────────────────────
+// ─── Artist spotlight (AI model spotlight) ─────────────────────────────
 
-function HowItWorksSection() {
-  const steps = [
+function ArtistSpotlight() {
+  const artists = [
     {
-      n: 1, icon: Sparkles, title: "Thử miễn phí ngay",
-      desc: "Vào /try/image, gõ prompt → tạo ảnh. 2 lượt/IP, không cần email.",
-      to: "/try/image",
+      name: "Aurora", role: "Image generation",
+      desc: "Mô hình ảnh chủ lực của Grok — photoreal, anime, art style.",
+      gradient: "from-violet-600 to-fuchsia-600",
+      stats: "Top-1 cho realism",
     },
     {
-      n: 2, icon: Users, title: "Đăng ký 30 giây",
-      desc: "Email + password, chọn gói (hoặc dùng Free). Nhận quota theo gói.",
-      to: "/register",
+      name: "Grok-3", role: "Video gen",
+      desc: "Image-to-video với motion coherent, lên đến 15 giây.",
+      gradient: "from-pink-500 to-rose-500",
+      stats: "Pro+ access",
     },
     {
-      n: 3, icon: Terminal, title: "Tạo API Key",
-      desc: "Trong dashboard, click Tạo API Key. Copy key uxpm_live_..., paste vào app của bạn.",
-      to: "/register",
-    },
-    {
-      n: 4, icon: Rocket, title: "Ship production",
-      desc: "POST /api/jobs với Bearer key → poll status → tải file. Webhook nếu cần.",
-      to: "/register",
+      name: "GPT-4o / Claude", role: "LLM Gateway",
+      desc: "Route giữa nhiều LLM provider, fallback tự động.",
+      gradient: "from-cyan-500 to-indigo-500",
+      stats: "Multi-provider",
     },
   ];
   return (
-    <section id="how" className="bg-gradient-to-b from-violet-50/40 to-white border-y border-slate-200">
-      <div className="max-w-6xl mx-auto px-4 py-20">
-        <SectionHeader
-          eyebrow="Cách dùng · 4 bước"
-          title="Từ zero đến production trong 5 phút"
-          subtitle="Không phải setup browser, không phải mua proxy. GrokFlow lo phần khó."
-        />
-        <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {steps.map((s) => (
-            <div
-              key={s.n}
-              className="relative rounded-xl bg-white p-5 ring-1 ring-slate-200"
-            >
-              <div className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white flex items-center justify-center font-bold shadow-md">
-                {s.n}
-              </div>
-              <s.icon size={22} className="text-violet-600" />
-              <h3 className="font-bold mt-3">{s.title}</h3>
-              <p className="text-sm text-slate-600 mt-1 leading-snug">{s.desc}</p>
+    <section className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
+      <SectionHeader
+        eyebrow="Artist Spotlight"
+        title={<>Mô hình AI <span className="text-gradient">đỉnh nhất</span> hiện nay</>}
+        subtitle="Chúng tôi tích hợp mọi provider hàng đầu trong 1 platform — bạn chọn, hệ thống route."
+      />
+      <div className="grid md:grid-cols-3 gap-5 mt-10">
+        {artists.map((a) => (
+          <div key={a.name} className="album-card">
+            <div className={`w-20 h-20 rounded-full bg-gradient-to-br ${a.gradient} flex items-center justify-center shadow-glow-pink mb-4`}>
+              <Mic2 size={32} className="text-white" />
             </div>
-          ))}
-        </div>
-
-        {/* Code preview */}
-        <div className="mt-10 max-w-3xl mx-auto rounded-xl bg-slate-900 text-slate-100 p-5 shadow-xl overflow-hidden">
-          <div className="flex items-center gap-2 mb-3 text-xs text-slate-400 font-mono">
-            <Terminal size={12} /> curl — tạo job ảnh
+            <p className="text-[11px] uppercase tracking-wider text-accent-fuchsia font-semibold">{a.role}</p>
+            <h3 className="text-2xl font-bold text-white mt-0.5">{a.name}</h3>
+            <p className="text-sm text-ink-400 mt-2">{a.desc}</p>
+            <p className="text-xs font-mono text-accent-spotify mt-3 inline-flex items-center gap-1">
+              <Star size={11} fill="currentColor" /> {a.stats}
+            </p>
           </div>
-          <pre className="text-[12px] leading-relaxed overflow-x-auto">
-            <code>
-              <span className="text-violet-300">curl</span> -X POST{" "}
-              <span className="text-emerald-300">https://your-domain/api/jobs</span> \{"\n"}
-              {"  "}-H <span className="text-amber-300">"Authorization: Bearer uxpm_live_..."</span> \{"\n"}
-              {"  "}-H <span className="text-amber-300">"Content-Type: application/json"</span> \{"\n"}
-              {"  "}-d{" "}
-              <span className="text-amber-300">{`'{`}</span>{"\n"}
-              <span className="text-amber-300">{`    "provider": "grok",`}</span>{"\n"}
-              <span className="text-amber-300">{`    "job_type": "image",`}</span>{"\n"}
-              <span className="text-amber-300">{`    "prompt": "A dragon over Ha Long Bay",`}</span>{"\n"}
-              <span className="text-amber-300">{`    "options": { "aspect": "16:9" }`}</span>{"\n"}
-              <span className="text-amber-300">{`  }'`}</span>
-            </code>
-          </pre>
-        </div>
+        ))}
       </div>
     </section>
   );
 }
 
-// ─── Use cases ─────────────────────────────────────────────────────────────
+// ─── Pricing ───────────────────────────────────────────────────────────
 
-const USE_CASES = [
-  {
-    icon: Briefcase, tone: "violet",
-    title: "Agency / Studio",
-    desc: "Một dashboard cho cả team. Quota theo gói, audit log đầy đủ, tách per-client qua domain.",
-    items: ["Multi-domain branding", "Per-domain audit log", "Role-based access", "Webhook tích hợp CRM"],
-  },
-  {
-    icon: Code2, tone: "cyan",
-    title: "Developer / Indie hacker",
-    desc: "REST API sạch, SDK curl/JS/Python. Quota minh bạch, không bị throttle bất ngờ.",
-    items: ["OpenAPI / Swagger", "Bearer API key", "Webhook callback", "Self-host được"],
-  },
-  {
-    icon: Palette, tone: "fuchsia",
-    title: "Content creator",
-    desc: "Tạo thumbnails, video ngắn cho social. Free trial sẵn, nâng cấp Basic là đủ dùng.",
-    items: ["Thumbnail YouTube", "Reels / Shorts", "Banner ads", "Story Instagram"],
-  },
-];
-
-function UseCasesSection() {
-  return (
-    <section className="max-w-6xl mx-auto px-4 py-20">
-      <SectionHeader
-        eyebrow="Đối tượng phù hợp"
-        title="Xây bởi builders, cho builders"
-      />
-      <div className="mt-12 grid md:grid-cols-3 gap-5">
-        {USE_CASES.map((u) => {
-          const t = TONE[u.tone];
-          return (
-            <div key={u.title} className={`rounded-xl p-6 ring-1 ${t.ring} ${t.bg}/40 hover:shadow-md transition`}>
-              <div className={`w-11 h-11 rounded-lg bg-white ${t.text} flex items-center justify-center mb-3 shadow-sm`}>
-                <u.icon size={22} />
-              </div>
-              <h3 className="font-bold text-slate-900">{u.title}</h3>
-              <p className="text-sm text-slate-600 mt-1 leading-snug">{u.desc}</p>
-              <ul className="mt-4 space-y-1.5 text-sm text-slate-700">
-                {u.items.map((i) => (
-                  <li key={i} className="flex items-start gap-1.5">
-                    <Check size={14} className={`${t.text} mt-0.5 flex-shrink-0`} /> {i}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
+function fmtVnd(n: number): string {
+  return n.toLocaleString("vi-VN") + " ₫";
 }
-
-// ─── Stats ─────────────────────────────────────────────────────────────────
-
-function StatsSection() {
-  const stats = [
-    { value: "<15s", label: "Render ảnh trung bình" },
-    { value: "99.9%", label: "Uptime backend" },
-    { value: "4", label: "Module tích hợp" },
-    { value: "5+", label: "Aspect ratios" },
-  ];
-  return (
-    <section className="bg-gradient-to-br from-violet-600 via-fuchsia-600 to-rose-500 text-white">
-      <div className="max-w-6xl mx-auto px-4 py-14">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-          {stats.map((s) => (
-            <div key={s.label}>
-              <div className="text-3xl md:text-4xl font-bold">{s.value}</div>
-              <div className="text-xs opacity-80 mt-1 font-medium">{s.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ─── Features grid ─────────────────────────────────────────────────────────
-
-const FEATURES = [
-  { icon: ImageIcon,  tone: "violet",  title: "Image AI chất lượng cao", desc: "Aurora · Grok-2 · Grok-3. Aspect 1:1, 16:9, 9:16, 4:3, 3:4. Quality mode trên Pro." },
-  { icon: Video,      tone: "fuchsia", title: "Video 720p sẵn sàng",    desc: "Text-to-video + Image-to-video. Duration 3/6/9/15s. Fun + Custom mode." },
-  { icon: Cpu,        tone: "cyan",    title: "LLM Gateway",            desc: "Multi-provider routing: OpenAI · Gemini · Claude. Pool + key rotation tự động." },
-  { icon: Scissors,   tone: "amber",   title: "Flow video editing",     desc: "Cut · merge · resize · audio. Xử lý local cho privacy + tốc độ." },
-  { icon: Zap,        tone: "rose",    title: "REST API đơn giản",      desc: "POST → poll → tải file. Webhook callback. SDK curl / JS / Python sẵn." },
-  { icon: Shield,     tone: "emerald", title: "Quota + Audit Log",      desc: "Rate limit phút + cap ngày. Audit log đầy đủ. Multi-tenant per-domain." },
-  { icon: Webhook,    tone: "violet",  title: "Webhook callback",       desc: "Bắn HTTP POST tới app của bạn khi job xong. Signed payload HMAC-SHA256." },
-  { icon: Lock,       tone: "slate",   title: "Self-hosted friendly",   desc: "Docker compose 1-shot. Backup restic + Google Drive sẵn. SSH deploy." },
-  { icon: BarChart3,  tone: "cyan",    title: "Dashboard + analytics",  desc: "Stats theo job/profile/domain. Revenue chart. Per-tenant breakdown." },
-];
-
-function FeaturesGridSection({ brandName }: { brandName: string }) {
-  return (
-    <section className="max-w-6xl mx-auto px-4 py-20">
-      <SectionHeader
-        eyebrow="Tính năng đầy đủ"
-        title={`Vì sao chọn ${brandName}`}
-        subtitle="Built for builders — không chỉ là wrapper API. Quản trị, observability, multi-tenant đều có sẵn."
-      />
-      <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {FEATURES.map((f) => {
-          const t = TONE[f.tone];
-          return (
-            <div key={f.title} className="rounded-xl bg-white p-5 ring-1 ring-slate-200 hover:shadow-md hover:-translate-y-0.5 transition">
-              <div className={`w-10 h-10 rounded-lg ${t.bg} ${t.text} flex items-center justify-center mb-3`}>
-                <f.icon size={20} />
-              </div>
-              <h3 className="font-bold text-slate-900">{f.title}</h3>
-              <p className="text-sm text-slate-600 mt-1 leading-snug">{f.desc}</p>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-// ─── Pricing ───────────────────────────────────────────────────────────────
 
 function PricingSection() {
   return (
-    <section id="pricing" className="bg-gradient-to-b from-slate-50 to-white border-y border-slate-200">
-      <div className="max-w-6xl mx-auto px-4 py-20">
-        <SectionHeader
-          eyebrow="Pricing"
-          title="Bảng giá đơn giản, minh bạch"
-          subtitle="Chọn gói phù hợp với khối lượng công việc. Nâng cấp / hạ cấp bất cứ lúc nào."
-        />
-        <div className="mt-12 grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {TIERS.map((t) => <PricingCard key={t.code} tier={t} />)}
-        </div>
-        <p className="mt-8 text-center text-sm text-slate-500">
-          Giá đã bao gồm VAT. Thanh toán mỗi tháng (hoặc năm để được giảm). Hủy bất cứ lúc nào ·{" "}
-          <Link to="/pricing" className="text-violet-600 hover:underline font-medium">
-            Xem chi tiết entitlements
-          </Link>
-        </p>
+    <section id="pricing" className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
+      <SectionHeader
+        eyebrow="Gói cước"
+        title={<>Premium <span className="text-gradient">subscription.</span></>}
+        subtitle="Hủy bất kỳ lúc nào. Không lock-in. Free tier không cần thẻ."
+      />
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 mt-10">
+        {TIERS.map((t) => (
+          <div
+            key={t.code}
+            className={`album-card flex flex-col h-full ${
+              t.highlight ? "ring-2 ring-accent-fuchsia shadow-glow-pink" : ""
+            }`}
+          >
+            {t.highlight && (
+              <span className="badge-pink text-[10px] w-fit mb-3">⭐ Phổ biến nhất</span>
+            )}
+            <h3 className="text-xl font-bold text-white">{t.name}</h3>
+            <p className="text-sm text-ink-400 mt-1 min-h-[40px]">{t.description}</p>
+            <div className="mt-4 mb-5">
+              {t.priceVnd === 0 ? (
+                <span className="text-4xl font-extrabold text-white">Free</span>
+              ) : t.priceVnd === null ? (
+                <span className="text-3xl font-extrabold text-white">{t.priceLabel}</span>
+              ) : (
+                <span>
+                  <span className="text-4xl font-extrabold text-white">{fmtVnd(t.priceVnd)}</span>
+                  <span className="text-sm text-ink-400">/tháng</span>
+                </span>
+              )}
+            </div>
+            <ul className="space-y-2 flex-1">
+              {t.features.map((f) => (
+                <li key={f} className="flex items-start gap-2 text-sm text-ink-200">
+                  <Check size={14} className="text-accent-spotify mt-0.5 shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+            <Link
+              to={t.ctaTo}
+              className={`mt-6 ${
+                t.highlight ? "btn-primary" : "btn-secondary"
+              } w-full justify-center`}
+            >
+              {t.cta}
+            </Link>
+          </div>
+        ))}
       </div>
     </section>
   );
 }
 
-function PricingCard({ tier }: { tier: Tier }) {
-  const priceDisplay =
-    tier.priceLabel ??
-    (tier.priceVnd === 0 ? "Miễn phí" : tier.priceVnd ? formatVnd(tier.priceVnd) : "Liên hệ");
+// ─── FAQ ───────────────────────────────────────────────────────────────
 
+function Faq() {
+  const items = [
+    {
+      q: "Hệ thống này chỉ dùng cho Grok?",
+      a: "Không. Nền tảng quản lý đa-provider: image (Aurora/Grok), video (Grok), flow tools (xử lý local), LLM gateway (route OpenAI/Claude/Gemini). 1 dashboard, 1 API key.",
+    },
+    {
+      q: "Có cần biết code không?",
+      a: "Không. UI đầy đủ để submit job, xem kết quả, quản lý profile. Khi cần auto hoá, dùng API key của bạn.",
+    },
+    {
+      q: "Free tier hạn chế thế nào?",
+      a: "10 job/ngày, 100 job/tháng. Aspect ratio cơ bản, model speed. Đủ để thử + làm demo. Upgrade khi cần production.",
+    },
+    {
+      q: "Multi-tenant nghĩa là gì?",
+      a: "Bạn có thể tạo nhiều 'domain' — mỗi domain là 1 tenant riêng, có brand riêng, quota riêng, user riêng. Phù hợp khi resell hoặc làm white-label.",
+    },
+    {
+      q: "Dữ liệu của tôi có an toàn?",
+      a: "Cookies, API key, ảnh được lưu mã hoá. Backup hàng ngày. Tuân thủ GDPR. Server đặt tại VN, tiếng Việt support.",
+    },
+  ];
+  const [open, setOpen] = useState<number | null>(0);
   return (
-    <div
-      className={`relative rounded-2xl bg-white p-5 flex flex-col transition ${
-        tier.highlight
-          ? "ring-2 ring-violet-500 shadow-2xl shadow-violet-200 lg:scale-[1.03] z-10"
-          : "ring-1 ring-slate-200 hover:shadow-lg"
-      }`}
-    >
-      {tier.highlight && (
-        <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 text-[10px] font-bold rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white tracking-wider shadow-md">
-          PHỔ BIẾN NHẤT
-        </span>
-      )}
-      <h3 className="text-xl font-bold text-slate-900">{tier.name}</h3>
-      <p className="text-xs text-slate-500 mt-1 min-h-[2.5rem]">{tier.description}</p>
-
-      <div className="mt-3">
-        <span className={`text-3xl font-bold ${tier.highlight ? "text-violet-700" : "text-slate-900"}`}>
-          {priceDisplay}
-        </span>
-        {tier.priceVnd && tier.priceVnd > 0 && (
-          <span className="text-sm text-slate-500"> / tháng</span>
-        )}
-      </div>
-
-      <ul className="mt-4 space-y-1.5 text-sm flex-1">
-        {tier.features.map((f) => (
-          <li key={f} className="flex items-start gap-2 text-slate-700">
-            <Check size={15} className="text-emerald-500 mt-0.5 flex-shrink-0" />
-            <span>{f}</span>
-          </li>
-        ))}
-      </ul>
-
-      <div className="mt-4 pt-3 border-t border-slate-100 space-y-1 text-xs">
-        {tier.limits.map((l) => (
-          <div key={l.label} className="flex justify-between text-slate-600">
-            <span>{l.label}</span>
-            <span className="font-mono font-semibold text-slate-900">{l.value}</span>
-          </div>
-        ))}
-      </div>
-
-      <Link
-        to={tier.ctaTo}
-        className={`mt-5 block text-center px-4 py-2.5 rounded-lg font-semibold transition ${
-          tier.highlight
-            ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-700 hover:to-fuchsia-700 shadow-md"
-            : "bg-slate-100 text-slate-900 hover:bg-slate-200"
-        }`}
-      >
-        {tier.cta}
-      </Link>
-    </div>
-  );
-}
-
-// ─── FAQ ───────────────────────────────────────────────────────────────────
-
-const FAQ: { q: string; a: string }[] = [
-  {
-    q: "Anonymous được tạo bao nhiêu ảnh?",
-    a: "2 ảnh / IP / 24h trên /try/image. Hết lượt → đăng ký miễn phí để có 10 ảnh/ngày (gói Free).",
-  },
-  {
-    q: "Có thể self-host không?",
-    a: "Có. GrokFlow ship docker-compose.yml + setup scripts đầy đủ. Backup restic + Google Drive sẵn. Cần VPS 4GB RAM, Docker 24+, Ubuntu 22.04+.",
-  },
-  {
-    q: "Hủy gói có hoàn tiền không?",
-    a: "Hủy giữa chu kỳ vẫn dùng được tới hết chu kỳ, không hoàn tiền pro-rata. Sau đó tự rớt về Free plan, dữ liệu giữ nguyên.",
-  },
-  {
-    q: "API key có lộ thì sao?",
-    a: "Vào dashboard /api-keys → bấm Revoke ngay. Key bị revoke trả 401 lập tức. Recommended: 1 key / môi trường (dev / prod / CI) để cô lập.",
-  },
-  {
-    q: "Quality mode khác Speed thế nào?",
-    a: "Speed = ưu tiên thời gian (~15s). Quality = ưu tiên chi tiết (~45s, cần Pro plan). Aspect + size giữ nguyên.",
-  },
-  {
-    q: "Có hỗ trợ video dài hơn 15s không?",
-    a: "Hiện tại tối đa 15s (giới hạn Grok). Cho video dài, dùng Flow Tools cắt + merge nhiều clip 15s lại.",
-  },
-  {
-    q: "LLM Gateway gọi được model nào?",
-    a: "OpenAI (GPT-4o, o1), Anthropic Claude, Google Gemini, Grok LLM. Pool tự rotate key khi gặp rate-limit.",
-  },
-  {
-    q: "Webhook signing thế nào?",
-    a: "HMAC-SHA256 dùng webhook_secret bạn cấu hình. Header X-Signature trả về dạng sha256=hex. Verify với secret server-side.",
-  },
-];
-
-function FaqSection() {
-  return (
-    <section id="faq" className="max-w-4xl mx-auto px-4 py-20">
+    <section id="faq" className="max-w-3xl mx-auto px-4 sm:px-6 py-20">
       <SectionHeader
         eyebrow="FAQ"
         title="Câu hỏi thường gặp"
+        subtitle="Không thấy câu trả lời? Gửi email admin@groks.io"
       />
-      <div className="mt-10 space-y-3">
-        {FAQ.map((it, i) => <FaqItem key={i} q={it.q} a={it.a} />)}
+      <div className="mt-10 space-y-2.5">
+        {items.map((it, i) => (
+          <div key={i} className="card-hover">
+            <button
+              type="button"
+              onClick={() => setOpen(open === i ? null : i)}
+              className="w-full flex items-center justify-between text-left text-sm font-semibold text-white"
+            >
+              {it.q}
+              {open === i ? <Minus size={16} className="shrink-0 text-accent-fuchsia" /> : <Plus size={16} className="shrink-0 text-ink-400" />}
+            </button>
+            {open === i && (
+              <p className="mt-3 text-sm text-ink-300 leading-relaxed animate-slide-up">{it.a}</p>
+            )}
+          </div>
+        ))}
       </div>
     </section>
   );
 }
 
-function FaqItem({ q, a }: { q: string; a: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="rounded-xl bg-white ring-1 ring-slate-200 overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition text-left"
-      >
-        <span className="font-semibold text-slate-800">{q}</span>
-        {open ? <Minus size={16} className="text-violet-600 flex-shrink-0" /> : <Plus size={16} className="text-slate-400 flex-shrink-0" />}
-      </button>
-      {open && (
-        <div className="px-5 pb-4 text-sm text-slate-600 leading-relaxed border-t border-slate-100 pt-3">
-          {a}
-        </div>
-      )}
-    </div>
-  );
-}
+// ─── Final CTA ─────────────────────────────────────────────────────────
 
-// ─── Final CTA ─────────────────────────────────────────────────────────────
-
-function FinalCtaSection() {
+function FinalCta() {
   return (
-    <section className="max-w-4xl mx-auto px-4 py-20 text-center">
-      <div className="rounded-3xl bg-gradient-to-br from-violet-600 via-fuchsia-600 to-rose-500 text-white p-10 shadow-2xl">
-        <Crown size={32} className="mx-auto text-amber-200" />
-        <h2 className="text-3xl md:text-4xl font-bold mt-4">Sẵn sàng build production?</h2>
-        <p className="mt-3 opacity-90 max-w-xl mx-auto">
-          Đăng ký 30 giây. Free tier không cần thẻ. Có API key ngay, copy vào app
-          của bạn, ship trong cùng buổi chiều.
-        </p>
-        <div className="mt-7 flex justify-center gap-3 flex-wrap">
-          <Link
-            to="/register"
-            className="inline-flex items-center gap-2 rounded-lg bg-white text-violet-700 px-6 py-3 text-base font-bold hover:bg-violet-50 shadow-lg"
-          >
-            Đăng ký miễn phí <ArrowRight size={16} />
-          </Link>
-          <Link
-            to="/try/image"
-            className="inline-flex items-center gap-2 rounded-lg bg-white/15 backdrop-blur-sm border border-white/40 text-white px-6 py-3 text-base font-semibold hover:bg-white/25"
-          >
-            <Sparkles size={16} /> Thử trước đã
-          </Link>
+    <section className="max-w-5xl mx-auto px-4 sm:px-6 py-20">
+      <div className="relative overflow-hidden rounded-3xl p-12 text-center bg-gradient-album shadow-glow-pink">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_30%,rgba(255,255,255,0.25),transparent_50%)] pointer-events-none" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_70%,rgba(6,182,212,0.25),transparent_50%)] pointer-events-none" />
+        <div className="relative">
+          <Headphones size={48} className="mx-auto text-white/90 mb-4" />
+          <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+            Sẵn sàng phát hành<br />studio AI của riêng bạn?
+          </h2>
+          <p className="mt-4 text-white/90 max-w-xl mx-auto">
+            Đăng ký miễn phí 30 giây. Không cần thẻ. Có 10 job/ngày để chơi ngay.
+          </p>
+          <div className="mt-7 flex flex-wrap justify-center gap-3">
+            <Link
+              to="/register"
+              className="bg-white text-ink-900 font-bold rounded-lg px-7 py-3 inline-flex items-center gap-2 shadow-card-hover hover:scale-105 transition"
+            >
+              <Sparkles size={18} /> Bắt đầu miễn phí
+            </Link>
+            <Link
+              to="/try/image"
+              className="border-2 border-white/40 text-white font-bold rounded-lg px-7 py-3 inline-flex items-center gap-2 hover:bg-white/10 transition"
+            >
+              <Play size={18} /> Thử không cần đăng ký
+            </Link>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-// ─── Footer ────────────────────────────────────────────────────────────────
+// ─── Footer ────────────────────────────────────────────────────────────
 
 function Footer({ brandName }: { brandName: string }) {
   return (
-    <footer className="bg-slate-900 text-slate-300">
-      <div className="max-w-6xl mx-auto px-4 py-12">
-        <div className="grid sm:grid-cols-4 gap-8 text-sm">
-          <div className="sm:col-span-1">
-            <Link to="/" className="font-bold text-lg inline-flex items-center gap-1.5">
-              <Wand2 size={18} className="text-violet-400" />
-              <span className="text-white">{brandName}</span>
-            </Link>
-            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-              AI image/video API + LLM Gateway + Flow tools. Self-hosted ready.
-              Made in Vietnam.
-            </p>
+    <footer className="border-t border-ink-800/70 mt-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 grid md:grid-cols-4 gap-8 text-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-7 h-7 rounded-lg bg-gradient-album text-white flex items-center justify-center font-bold text-xs">
+              {brandName[0]}
+            </span>
+            <span className="font-bold text-white">{brandName}</span>
           </div>
-          <FooterCol title="Sản phẩm">
-            <FooterLink to="/try/image">Thử Grok Image</FooterLink>
-            <FooterLink to="/pricing">Bảng giá</FooterLink>
-            <FooterLink href="#modules">Tính năng</FooterLink>
-            <FooterLink href="#how">Cách dùng</FooterLink>
-          </FooterCol>
-          <FooterCol title="Tài khoản">
-            <FooterLink to="/login">Đăng nhập</FooterLink>
-            <FooterLink to="/register">Đăng ký</FooterLink>
-            <FooterLink to="/pricing">Plans + entitlements</FooterLink>
-            <FooterLink href="#faq">FAQ</FooterLink>
-          </FooterCol>
-          <FooterCol title="Hỗ trợ">
-            <FooterLink to="/terms">Điều khoản dịch vụ</FooterLink>
-            <FooterLink to="/privacy">Chính sách bảo mật</FooterLink>
-            <FooterLink href="mailto:support@grokflow.io">support@grokflow.io</FooterLink>
-          </FooterCol>
+          <p className="text-ink-400 text-xs leading-relaxed">
+            Multi-tenant AI studio. Image, Video, Flow, Gateway. Một nền tảng.
+          </p>
         </div>
-        <div className="mt-10 pt-6 border-t border-slate-800 flex justify-between items-center text-xs text-slate-500">
-          <span>© {new Date().getFullYear()} {brandName}. All rights reserved.</span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            All systems operational
-          </span>
+        <div>
+          <p className="font-semibold text-ink-200 mb-3">Sản phẩm</p>
+          <ul className="space-y-2 text-ink-400">
+            <li><Link to="/try/image" className="hover:text-white">Try Image</Link></li>
+            <li><a href="#modules" className="hover:text-white">Modules</a></li>
+            <li><a href="#pricing" className="hover:text-white">Pricing</a></li>
+          </ul>
         </div>
+        <div>
+          <p className="font-semibold text-ink-200 mb-3">Tài nguyên</p>
+          <ul className="space-y-2 text-ink-400">
+            <li><a href="#faq" className="hover:text-white">FAQ</a></li>
+            <li><a href="/terms" className="hover:text-white">Điều khoản</a></li>
+            <li><a href="/privacy" className="hover:text-white">Bảo mật</a></li>
+          </ul>
+        </div>
+        <div>
+          <p className="font-semibold text-ink-200 mb-3">Liên hệ</p>
+          <ul className="space-y-2 text-ink-400">
+            <li><a href="mailto:admin@groks.io" className="hover:text-white">admin@groks.io</a></li>
+            <li className="inline-flex items-center gap-1">
+              <Globe size={12} /> Server tại VN
+            </li>
+          </ul>
+        </div>
+      </div>
+      <div className="border-t border-ink-800/70 py-5 text-center text-xs text-ink-500">
+        © {new Date().getFullYear()} {brandName}. All rights reserved.
       </div>
     </footer>
   );
 }
 
-function FooterCol({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="font-semibold text-white mb-2">{title}</p>
-      <ul className="space-y-1.5 text-slate-400">{children}</ul>
-    </div>
-  );
-}
+// ─── Reusable section header ───────────────────────────────────────────
 
-function FooterLink({ to, href, children }: { to?: string; href?: string; children: React.ReactNode }) {
-  if (to) return <li><Link to={to} className="hover:text-violet-400 transition">{children}</Link></li>;
-  return <li><a href={href} className="hover:text-violet-400 transition">{children}</a></li>;
-}
-
-// ─── Reusable section header ───────────────────────────────────────────────
-
-function SectionHeader({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle?: string }) {
+function SectionHeader({
+  eyebrow, title, subtitle,
+}: { eyebrow: string; title: React.ReactNode; subtitle: string }) {
   return (
     <div className="text-center max-w-2xl mx-auto">
-      <p className="text-xs uppercase tracking-wider text-violet-600 font-bold">{eyebrow}</p>
-      <h2 className="mt-2 text-3xl md:text-4xl font-bold text-slate-900 leading-tight">{title}</h2>
-      {subtitle && <p className="mt-3 text-slate-600">{subtitle}</p>}
+      <p className="text-xs uppercase tracking-[0.2em] text-accent-fuchsia font-bold">{eyebrow}</p>
+      <h2 className="text-3xl sm:text-5xl font-extrabold text-white mt-3 tracking-tight">{title}</h2>
+      <p className="text-ink-400 mt-4 text-base sm:text-lg">{subtitle}</p>
     </div>
   );
 }
-
-// ─── Tone palette (shared) ─────────────────────────────────────────────────
-
-const TONE: Record<string, { bg: string; text: string; ring: string }> = {
-  violet:  { bg: "bg-violet-50",  text: "text-violet-600",  ring: "ring-violet-200"  },
-  fuchsia: { bg: "bg-fuchsia-50", text: "text-fuchsia-600", ring: "ring-fuchsia-200" },
-  cyan:    { bg: "bg-cyan-50",    text: "text-cyan-600",    ring: "ring-cyan-200"    },
-  amber:   { bg: "bg-amber-50",   text: "text-amber-600",   ring: "ring-amber-200"   },
-  emerald: { bg: "bg-emerald-50", text: "text-emerald-600", ring: "ring-emerald-200" },
-  rose:    { bg: "bg-rose-50",    text: "text-rose-600",    ring: "ring-rose-200"    },
-  slate:   { bg: "bg-slate-100",  text: "text-slate-700",   ring: "ring-slate-200"   },
-};

@@ -159,14 +159,14 @@ export function ApiKeysPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setHelp(true)}
-              className="inline-flex items-center gap-1.5 rounded-md bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-2 text-sm font-medium border border-white/30"
+              className="inline-flex items-center gap-1.5 rounded-md bg-ink-900/10 hover:bg-ink-900/20 backdrop-blur-sm px-3 py-2 text-sm font-medium border border-white/30"
               title="Xem hướng dẫn dùng API key"
             >
               <BookOpen size={14} /> Hướng dẫn
             </button>
             <button
               onClick={() => setOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md bg-white/15 hover:bg-white/25 backdrop-blur-sm px-4 py-2 text-sm font-medium"
+              className="inline-flex items-center gap-1.5 rounded-md bg-ink-900/15 hover:bg-ink-900/25 backdrop-blur-sm px-4 py-2 text-sm font-medium"
             >
               <Plus size={16} /> Tạo API Key
             </button>
@@ -181,11 +181,11 @@ export function ApiKeysPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200 flex flex-wrap items-end gap-3">
+      <div className="rounded-lg bg-ink-900 p-3 ring-1 ring-ink-800 flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[220px]">
-          <label className="text-xs font-medium text-slate-600">Tìm key</label>
-          <div className="mt-1 flex items-center rounded-md border border-slate-300 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
-            <Search size={14} className="text-slate-400" />
+          <label className="text-xs font-medium text-ink-300">Tìm key</label>
+          <div className="mt-1 flex items-center rounded-md border border-ink-700 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
+            <Search size={14} className="text-ink-500" />
             <input
               className="w-full bg-transparent px-2 py-1.5 text-sm outline-none"
               placeholder="Tên, prefix, email user, domain..."
@@ -195,7 +195,7 @@ export function ApiKeysPage() {
           </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-slate-600">Status</label>
+          <label className="text-xs font-medium text-ink-300">Status</label>
           <select
             className="input mt-1 w-32 text-sm"
             value={statusFilter}
@@ -206,7 +206,7 @@ export function ApiKeysPage() {
         </div>
         {isSuper && (
           <div className="min-w-[200px]">
-            <label className="text-xs font-medium text-slate-600">Domain</label>
+            <label className="text-xs font-medium text-ink-300">Domain</label>
             <select
               className="input mt-1 w-full text-sm"
               value={domainFilter}
@@ -219,14 +219,14 @@ export function ApiKeysPage() {
             </select>
           </div>
         )}
-        <div className="text-xs text-slate-500">
+        <div className="text-xs text-ink-400">
           {filtered.length} / {keys?.length ?? 0} key
         </div>
       </div>
 
       {/* Table — grouped when super_admin */}
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : isSuper && groupedByDomain ? (
         <div className="space-y-4">
           {groupedByDomain.length === 0 ? (
@@ -263,7 +263,7 @@ export function ApiKeysPage() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md bg-white/15 backdrop-blur-sm px-3 py-2">
+    <div className="rounded-md bg-ink-900/15 backdrop-blur-sm px-3 py-2">
       <p className="opacity-80">{label}</p>
       <p className="font-bold text-lg leading-tight">{value.toLocaleString()}</p>
     </div>
@@ -272,8 +272,8 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function EmptyState() {
   return (
-    <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white py-12 text-center text-sm text-slate-500">
-      <Key size={32} className="mx-auto text-slate-300" />
+    <div className="rounded-xl border-2 border-dashed border-ink-800 bg-ink-900 py-12 text-center text-sm text-ink-400">
+      <Key size={32} className="mx-auto text-ink-500" />
       <p className="mt-2">Không có key nào khớp filter.</p>
     </div>
   );
@@ -289,11 +289,11 @@ function DomainGroup({
 }) {
   const active = items.filter((k) => k.status === "active").length;
   return (
-    <div className="rounded-lg ring-1 ring-slate-200 bg-white overflow-hidden">
-      <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+    <div className="rounded-lg ring-1 ring-ink-800 bg-ink-900 overflow-hidden">
+      <div className="px-4 py-2.5 bg-ink-900 border-b border-ink-800 flex items-center gap-2">
         <Globe size={14} className="text-violet-600" />
-        <span className="font-mono text-sm font-semibold text-slate-800">{hostname}</span>
-        <span className="text-xs text-slate-500">
+        <span className="font-mono text-sm font-semibold text-ink-100">{hostname}</span>
+        <span className="text-xs text-ink-400">
           {items.length} key · {active} active
         </span>
       </div>
@@ -313,9 +313,9 @@ function KeysTable({
   embedded?: boolean;
 }) {
   return (
-    <div className={embedded ? "overflow-x-auto" : "rounded-lg ring-1 ring-slate-200 bg-white overflow-x-auto"}>
+    <div className={embedded ? "overflow-x-auto" : "rounded-lg ring-1 ring-ink-800 bg-ink-900 overflow-x-auto"}>
       <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-left">
+        <thead className="bg-ink-900 text-left">
           <tr>
             <th className="px-4 py-2">Name / Prefix</th>
             {showOwner && <th className="px-4 py-2">Owner</th>}
@@ -329,7 +329,7 @@ function KeysTable({
         <tbody>
           {items.length === 0 && (
             <tr>
-              <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+              <td colSpan={6} className="px-4 py-6 text-center text-ink-400">
                 Chưa có API key nào.
               </td>
             </tr>
@@ -337,28 +337,28 @@ function KeysTable({
           {items.map((k) => {
             const usagePct = k.daily_limit > 0 ? (k.used_today / k.daily_limit) * 100 : 0;
             return (
-              <tr key={k.id} className="border-t border-slate-100 hover:bg-slate-50 align-top">
+              <tr key={k.id} className="border-t border-ink-800 hover:bg-ink-900 align-top">
                 <td className="px-4 py-2.5">
-                  <div className="font-medium text-slate-800">{k.name}</div>
-                  <code className="text-[11px] font-mono text-slate-500">{k.key_prefix}…</code>
+                  <div className="font-medium text-ink-100">{k.name}</div>
+                  <code className="text-[11px] font-mono text-ink-400">{k.key_prefix}…</code>
                 </td>
                 {showOwner && (
                   <td className="px-4 py-2.5 text-xs">
-                    <div className="inline-flex items-center gap-1 text-slate-700">
-                      <Mail size={11} className="text-slate-400" />
-                      {k.user_email ?? <span className="italic text-slate-400">(deleted)</span>}
+                    <div className="inline-flex items-center gap-1 text-ink-200">
+                      <Mail size={11} className="text-ink-500" />
+                      {k.user_email ?? <span className="italic text-ink-500">(deleted)</span>}
                     </div>
                   </td>
                 )}
                 {showDomain && (
                   <td className="px-4 py-2.5 text-xs">
                     {k.domain_hostname ? (
-                      <span className="inline-flex items-center gap-1 font-mono text-slate-700">
-                        <Globe size={11} className="text-slate-400" />
+                      <span className="inline-flex items-center gap-1 font-mono text-ink-200">
+                        <Globe size={11} className="text-ink-500" />
                         {k.domain_hostname}
                       </span>
                     ) : (
-                      <span className="italic text-slate-400">—</span>
+                      <span className="italic text-ink-500">—</span>
                     )}
                   </td>
                 )}
@@ -377,10 +377,10 @@ function KeysTable({
                   </div>
                 </td>
                 <td className="px-4 py-2.5 text-xs">
-                  <div className="font-mono text-slate-700">
+                  <div className="font-mono text-ink-200">
                     {k.used_today}/{k.daily_limit}
                   </div>
-                  <div className="mt-0.5 h-1 w-20 rounded-full bg-slate-200 overflow-hidden">
+                  <div className="mt-0.5 h-1 w-20 rounded-full bg-ink-700 overflow-hidden">
                     <div
                       className={`h-full ${
                         usagePct >= 90 ? "bg-rose-500"
@@ -494,7 +494,7 @@ function CreatedModal({ value, onClose }: { value: { name: string; api_key: stri
   return (
     <Modal title="Copy ngay — key chỉ hiển thị 1 lần" onClose={onClose}>
       <div className="space-y-3">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-ink-300">
           Key cho <strong>{value.name}</strong>. Sau khi đóng dialog, key này không xem lại được nữa.
         </p>
         <pre className="rounded-md bg-slate-900 p-3 text-xs text-slate-100 whitespace-pre-wrap break-all">
@@ -522,10 +522,10 @@ function Modal({ title, children, onClose, maxWidth = "max-w-lg" }: {
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className={`w-full ${maxWidth} max-h-[92vh] rounded-lg bg-white shadow-xl flex flex-col`}>
+      <div className={`w-full ${maxWidth} max-h-[92vh] rounded-lg bg-ink-900 shadow-xl flex flex-col`}>
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="font-semibold">{title}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-300"><X size={18} /></button>
         </div>
         <div className="p-4 overflow-auto">{children}</div>
       </div>
@@ -585,7 +585,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           <code className="font-mono">Authorization: Bearer &lt;key&gt;</code>.
           Job sẽ chạy <strong>dưới account chủ sở hữu key</strong>, không phụ thuộc JWT của browser:
           <CodeBlock code={CURL_EXAMPLES.submitJob} />
-          <p className="text-xs text-slate-500 mt-2">
+          <p className="text-xs text-ink-400 mt-2">
             Response trả về <code>job_id</code> + <code>status</code> = <code>queued</code>.
           </p>
         </Step>
@@ -594,7 +594,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
         <Step n={4} icon={Terminal} title="Poll status / lấy kết quả">
           Job xử lý async — bạn poll cho tới khi <code>status=success</code>:
           <CodeBlock code={CURL_EXAMPLES.pollStatus} />
-          <p className="text-xs text-slate-500 mt-2">
+          <p className="text-xs text-ink-400 mt-2">
             Khi xong, <code>result_url</code> sẽ trỏ tới{" "}
             <code className="font-mono">/api/files/&lt;file-id&gt;/download</code>.
             Dùng cùng Bearer key để tải file.
@@ -638,14 +638,14 @@ function Step({
 }) {
   return (
     <section>
-      <h3 className="flex items-center gap-2 font-semibold text-slate-800 mb-1.5">
+      <h3 className="flex items-center gap-2 font-semibold text-ink-100 mb-1.5">
         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold">
           {n}
         </span>
-        <Icon size={14} className="text-slate-500" />
+        <Icon size={14} className="text-ink-400" />
         {title}
       </h3>
-      <div className="pl-8 text-slate-600 leading-relaxed text-xs">{children}</div>
+      <div className="pl-8 text-ink-300 leading-relaxed text-xs">{children}</div>
     </section>
   );
 }

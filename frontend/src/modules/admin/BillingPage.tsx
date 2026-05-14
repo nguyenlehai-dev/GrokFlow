@@ -82,9 +82,9 @@ const STATUS_STYLE: Record<string, string> = {
   pending:   "bg-amber-100 text-amber-700",
   success:   "bg-emerald-100 text-emerald-700",
   paid:      "bg-emerald-100 text-emerald-700",
-  draft:     "bg-slate-100 text-slate-700",
-  cancelled: "bg-slate-100 text-slate-700",
-  expired:   "bg-slate-100 text-slate-700",
+  draft:     "bg-ink-800 text-ink-200",
+  cancelled: "bg-ink-800 text-ink-200",
+  expired:   "bg-ink-800 text-ink-200",
   failed:    "bg-rose-100 text-rose-700",
   past_due:  "bg-rose-100 text-rose-700",
   refunded:  "bg-purple-100 text-purple-700",
@@ -92,7 +92,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 function StatusPill({ status }: { status: string }) {
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_STYLE[status] ?? "bg-slate-100 text-slate-700"}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_STYLE[status] ?? "bg-ink-800 text-ink-200"}`}>
       {status}
     </span>
   );
@@ -148,14 +148,14 @@ export function BillingPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setHelp(true)}
-              className="inline-flex items-center gap-1.5 rounded-md bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-2 text-sm font-medium border border-white/30"
+              className="inline-flex items-center gap-1.5 rounded-md bg-ink-900/10 hover:bg-ink-900/20 backdrop-blur-sm px-3 py-2 text-sm font-medium border border-white/30"
               title="Hướng dẫn billing"
             >
               <BookOpen size={14} /> Hướng dẫn
             </button>
             <Link
               to="/pricing"
-              className="inline-flex items-center gap-1.5 rounded-md bg-white/15 hover:bg-white/25 backdrop-blur-sm px-4 py-2 text-sm font-medium border border-white/30"
+              className="inline-flex items-center gap-1.5 rounded-md bg-ink-900/15 hover:bg-ink-900/25 backdrop-blur-sm px-4 py-2 text-sm font-medium border border-white/30"
             >
               <Crown size={14} /> Đổi gói / Nâng cấp
             </Link>
@@ -165,18 +165,18 @@ export function BillingPage() {
 
       {/* SYSTEM-WIDE BILLING — admin / super_admin only */}
       {isAdmin && (
-        <section className="rounded-xl bg-white ring-1 ring-slate-200 overflow-hidden">
+        <section className="rounded-xl bg-ink-900 ring-1 ring-ink-800 overflow-hidden">
           <button
             onClick={() => setOpenSystem(!openSystem)}
-            className="w-full flex items-center justify-between px-5 py-3 hover:bg-slate-50 transition border-b border-slate-200"
+            className="w-full flex items-center justify-between px-5 py-3 hover:bg-ink-900 transition border-b border-ink-800"
           >
             <div className="flex items-center gap-2 text-left">
               <Crown size={16} className="text-amber-600" />
               <div>
-                <h2 className="font-semibold text-slate-800">
+                <h2 className="font-semibold text-ink-100">
                   {isSuper ? "Toàn bộ subscriptions / payments / invoices" : "Billing trong domain"}
                 </h2>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-ink-400">
                   3 tab: Subscriptions · Payments · Invoices — CRUD đầy đủ
                 </p>
               </div>
@@ -184,7 +184,7 @@ export function BillingPage() {
             {openSystem ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
           </button>
           {openSystem && (
-            <div className="p-5 bg-slate-50/30">
+            <div className="p-5 bg-ink-900/30">
               <AdminBillingTab />
             </div>
           )}
@@ -194,16 +194,16 @@ export function BillingPage() {
       {help && <BillingHelpModal onClose={() => setHelp(false)} isSuper={isSuper} />}
 
       {/* PERSONAL BILLING — everyone */}
-      <section className="rounded-xl bg-white ring-1 ring-slate-200 overflow-hidden">
+      <section className="rounded-xl bg-ink-900 ring-1 ring-ink-800 overflow-hidden">
         <button
           onClick={() => setOpenPersonal(!openPersonal)}
-          className="w-full flex items-center justify-between px-5 py-3 hover:bg-slate-50 transition border-b border-slate-200"
+          className="w-full flex items-center justify-between px-5 py-3 hover:bg-ink-900 transition border-b border-ink-800"
         >
           <div className="flex items-center gap-2 text-left">
             <Wallet size={16} className="text-emerald-600" />
             <div>
-              <h2 className="font-semibold text-slate-800">Gói của bạn</h2>
-              <p className="text-xs text-slate-500">
+              <h2 className="font-semibold text-ink-100">Gói của bạn</h2>
+              <p className="text-xs text-ink-400">
                 Subscription cá nhân, hóa đơn + thanh toán của tài khoản{" "}
                 <code className="font-mono">{me?.email}</code>
               </p>
@@ -214,7 +214,7 @@ export function BillingPage() {
         {openPersonal && (
           <div className="p-5 space-y-5">
             {isLoading ? (
-              <p className="text-slate-500 text-sm">Đang tải...</p>
+              <p className="text-ink-400 text-sm">Đang tải...</p>
             ) : (
               <PersonalBillingBody
                 data={data}
@@ -250,10 +250,10 @@ function PersonalBillingBody({
 
       {data?.pending_subscriptions && data.pending_subscriptions.length > 0 && (
         <section className="rounded-md ring-1 ring-amber-200 bg-amber-50/50 p-4 space-y-3">
-          <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+          <h3 className="font-semibold text-ink-100 flex items-center gap-2">
             <Clock size={16} className="text-amber-600" /> Đơn chờ xử lý
           </h3>
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-ink-300">
             Đơn đã đặt nhưng chưa thanh toán. Hoàn tất chuyển khoản, admin sẽ kích hoạt trong 1h.
           </p>
           <div className="divide-y divide-amber-200">
@@ -267,12 +267,12 @@ function PersonalBillingBody({
       <div className="grid gap-5 lg:grid-cols-2">
         <DataCard title="Hóa đơn gần đây" icon={FileText}>
           {data?.recent_invoices?.length === 0 ? (
-            <p className="text-sm text-slate-500 italic px-3 py-6 text-center">
+            <p className="text-sm text-ink-400 italic px-3 py-6 text-center">
               Chưa có hóa đơn nào.
             </p>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-slate-600 text-xs">
+              <thead className="bg-ink-900 text-left text-ink-300 text-xs">
                 <tr>
                   <th className="px-3 py-2">Mã HĐ</th>
                   <th className="px-3 py-2">Ngày</th>
@@ -281,11 +281,11 @@ function PersonalBillingBody({
                   <th className="px-3 py-2"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-ink-800">
                 {data?.recent_invoices?.map((i) => (
-                  <tr key={i.id} className="hover:bg-slate-50">
+                  <tr key={i.id} className="hover:bg-ink-900">
                     <td className="px-3 py-2 font-mono text-xs">{i.invoice_number}</td>
-                    <td className="px-3 py-2 text-slate-600 text-xs">{formatDate(i.issued_at ?? i.created_at)}</td>
+                    <td className="px-3 py-2 text-ink-300 text-xs">{formatDate(i.issued_at ?? i.created_at)}</td>
                     <td className="px-3 py-2 font-semibold">{formatVnd(i.total)}</td>
                     <td className="px-3 py-2"><StatusPill status={i.status} /></td>
                     <td className="px-3 py-2">
@@ -304,12 +304,12 @@ function PersonalBillingBody({
 
         <DataCard title="Lịch sử thanh toán" icon={Wallet}>
           {data?.recent_payments?.length === 0 ? (
-            <p className="text-sm text-slate-500 italic px-3 py-6 text-center">
+            <p className="text-sm text-ink-400 italic px-3 py-6 text-center">
               Chưa có thanh toán nào.
             </p>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-slate-600 text-xs">
+              <thead className="bg-ink-900 text-left text-ink-300 text-xs">
                 <tr>
                   <th className="px-3 py-2">Ngày</th>
                   <th className="px-3 py-2">Số tiền</th>
@@ -317,10 +317,10 @@ function PersonalBillingBody({
                   <th className="px-3 py-2">Trạng thái</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-ink-800">
                 {data?.recent_payments?.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="px-3 py-2 text-slate-600 text-xs">{formatDate(p.paid_at ?? p.created_at)}</td>
+                  <tr key={p.id} className="hover:bg-ink-900">
+                    <td className="px-3 py-2 text-ink-300 text-xs">{formatDate(p.paid_at ?? p.created_at)}</td>
                     <td className="px-3 py-2 font-semibold">{formatVnd(p.amount)}</td>
                     <td className="px-3 py-2 capitalize text-xs">{p.provider}</td>
                     <td className="px-3 py-2"><StatusPill status={p.status} /></td>
@@ -339,8 +339,8 @@ function DataCard({
   title, icon: Icon, children,
 }: { title: string; icon: any; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg ring-1 ring-slate-200 bg-white overflow-hidden">
-      <h3 className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 font-semibold text-slate-800 text-sm flex items-center gap-2">
+    <div className="rounded-lg ring-1 ring-ink-800 bg-ink-900 overflow-hidden">
+      <h3 className="px-4 py-2.5 border-b border-ink-800 bg-ink-900 font-semibold text-ink-100 text-sm flex items-center gap-2">
         <Icon size={14} /> {title}
       </h3>
       <div className="overflow-x-auto">{children}</div>
@@ -353,11 +353,11 @@ function CurrentSubscriptionCard({
 }: { sub: Subscription | null | undefined; onCancel: (id: string) => void }) {
   if (!sub) {
     return (
-      <div className="rounded-lg ring-1 ring-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
-        <h3 className="font-semibold mb-2 flex items-center gap-2 text-slate-800">
-          <AlertCircle size={16} className="text-slate-400" /> Chưa có subscription
+      <div className="rounded-lg ring-1 ring-ink-800 bg-gradient-to-br from-slate-50 to-white p-5">
+        <h3 className="font-semibold mb-2 flex items-center gap-2 text-ink-100">
+          <AlertCircle size={16} className="text-ink-500" /> Chưa có subscription
         </h3>
-        <p className="text-sm text-slate-600 mb-3">
+        <p className="text-sm text-ink-300 mb-3">
           Bạn đang dùng <strong>Free plan</strong>. Nâng cấp để mở khóa video, image-to-X, API public,
           quota cao hơn và nhiều hơn nữa.
         </p>
@@ -370,14 +370,14 @@ function CurrentSubscriptionCard({
     <div className="rounded-lg ring-1 ring-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="font-semibold flex items-center gap-2 text-slate-800">
+          <h3 className="font-semibold flex items-center gap-2 text-ink-100">
             <CheckCircle2 size={16} className="text-emerald-600" /> Subscription hiện tại
           </h3>
           <div className="mt-2 flex items-center gap-2">
-            <span className="text-2xl font-bold text-slate-900">{sub.plan_name}</span>
+            <span className="text-2xl font-bold text-white">{sub.plan_name}</span>
             <StatusPill status={sub.status} />
           </div>
-          <p className="text-sm text-slate-600 mt-1">
+          <p className="text-sm text-ink-300 mt-1">
             <strong className="text-emerald-700">{formatVnd(sub.amount)}</strong>{" "}
             / {sub.billing_cycle === "yearly" ? "năm" : "tháng"}
           </p>
@@ -413,11 +413,11 @@ function PendingRow({ sub, onCancel }: { sub: Subscription; onCancel: (id: strin
     <div className="py-2 flex items-center justify-between flex-wrap gap-2">
       <div>
         <div className="font-medium text-sm">{sub.plan_name} · {sub.billing_cycle}</div>
-        <div className="text-xs text-slate-500 font-mono">{sub.id.slice(0, 8)}</div>
+        <div className="text-xs text-ink-400 font-mono">{sub.id.slice(0, 8)}</div>
       </div>
       <div className="text-right">
         <div className="font-semibold">{formatVnd(sub.amount)}</div>
-        <div className="text-xs text-slate-500">{formatDate(sub.created_at)}</div>
+        <div className="text-xs text-ink-400">{formatDate(sub.created_at)}</div>
       </div>
       <button
         onClick={() => onCancel(sub.id)}
@@ -432,7 +432,7 @@ function PendingRow({ sub, onCancel }: { sub: Subscription; onCancel: (id: strin
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div>
-      <div className="text-xs text-slate-500">{label}</div>
+      <div className="text-xs text-ink-400">{label}</div>
       <div className={`mt-0.5 text-sm ${mono ? "font-mono" : ""}`}>{value}</div>
     </div>
   );
@@ -443,13 +443,13 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
 function BillingHelpModal({ onClose, isSuper }: { onClose: () => void; isSuper: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-3xl max-h-[92vh] rounded-lg bg-white shadow-xl flex flex-col">
+      <div className="w-full max-w-3xl max-h-[92vh] rounded-lg bg-ink-900 shadow-xl flex flex-col">
         <div className="flex items-center justify-between border-b px-5 py-3 bg-gradient-to-r from-emerald-50 to-cyan-50">
           <h2 className="font-semibold flex items-center gap-2">
             <BookOpen size={18} className="text-emerald-700" />
             Hướng dẫn Billing — luồng gói & thanh toán
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-300"><X size={18} /></button>
         </div>
         <div className="p-5 overflow-auto space-y-5 text-sm">
           {/* Intro */}
@@ -514,7 +514,7 @@ function BillingHelpModal({ onClose, isSuper }: { onClose: () => void; isSuper: 
                 items={["Custom limits", "SLA + support", "Spicy / Custom mode", "Multi-domain"]}
               />
             </div>
-            <p className="text-xs text-slate-500 mt-2">
+            <p className="text-xs text-ink-400 mt-2">
               Định nghĩa chi tiết trong <code className="font-mono">backend/app/modules/entitlements/catalog.py</code>.
               Super_admin có thể chỉnh entitlements + price ở{" "}
               <Link to="/admin/plans" className="text-violet-600 hover:underline">/admin/plans</Link>.
@@ -556,7 +556,7 @@ function BillingHelpModal({ onClose, isSuper }: { onClose: () => void; isSuper: 
               <FlowStep label="cancel_at_period_end" color="bg-amber-100 text-amber-700">
                 User bấm Hủy nhưng vẫn dùng được tới hết chu kỳ
               </FlowStep>
-              <FlowStep label="cancelled / expired" color="bg-slate-100 text-slate-700">
+              <FlowStep label="cancelled / expired" color="bg-ink-800 text-ink-200">
                 Hết chu kỳ → tự rớt về Free plan
               </FlowStep>
             </div>
@@ -617,14 +617,14 @@ function DocSection({
 }: { n: number; icon: any; title: string; children: React.ReactNode }) {
   return (
     <section>
-      <h3 className="flex items-center gap-2 font-semibold text-slate-800 mb-2">
+      <h3 className="flex items-center gap-2 font-semibold text-ink-100 mb-2">
         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-bold">
           {n}
         </span>
-        <Icon size={14} className="text-slate-500" />
+        <Icon size={14} className="text-ink-400" />
         {title}
       </h3>
-      <div className="pl-8 text-slate-700">{children}</div>
+      <div className="pl-8 text-ink-200">{children}</div>
     </section>
   );
 }
@@ -633,7 +633,7 @@ function PlanCard({
   name, price, items, color,
 }: { name: string; price: string; items: string[]; color: "slate" | "cyan" | "violet" | "amber" }) {
   const cls = {
-    slate:  { ring: "ring-slate-200",  bg: "bg-slate-50",   text: "text-slate-700"  },
+    slate:  { ring: "ring-ink-800",  bg: "bg-ink-900",   text: "text-ink-200"  },
     cyan:   { ring: "ring-cyan-200",   bg: "bg-cyan-50",    text: "text-cyan-700"   },
     violet: { ring: "ring-violet-200", bg: "bg-violet-50",  text: "text-violet-700" },
     amber:  { ring: "ring-amber-200",  bg: "bg-amber-50",   text: "text-amber-700"  },
@@ -641,8 +641,8 @@ function PlanCard({
   return (
     <div className={`rounded-md ${cls.bg} ring-1 ${cls.ring} p-2.5`}>
       <div className={`font-semibold ${cls.text}`}>{name}</div>
-      <div className="text-[11px] text-slate-600 mt-0.5">{price}</div>
-      <ul className="mt-1.5 text-[11px] text-slate-700 space-y-0.5">
+      <div className="text-[11px] text-ink-300 mt-0.5">{price}</div>
+      <ul className="mt-1.5 text-[11px] text-ink-200 space-y-0.5">
         {items.map((it) => <li key={it}>• {it}</li>)}
       </ul>
     </div>
@@ -653,8 +653,8 @@ function FlowStep({ label, color, children }: { label: string; color: string; ch
   return (
     <div className="flex items-start gap-2">
       <span className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium flex-shrink-0 ${color}`}>{label}</span>
-      <ArrowRight size={12} className="text-slate-400 mt-1 flex-shrink-0" />
-      <span className="text-slate-600">{children}</span>
+      <ArrowRight size={12} className="text-ink-500 mt-1 flex-shrink-0" />
+      <span className="text-ink-300">{children}</span>
     </div>
   );
 }

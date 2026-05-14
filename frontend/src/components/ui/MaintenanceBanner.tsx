@@ -66,7 +66,7 @@ export function MaintenanceBanner() {
             <span className="ml-6 font-medium">{announcement}</span>
           </div>
         </div>
-        <span className="shrink-0 font-mono font-bold bg-white/20 backdrop-blur-sm px-3 py-0.5 rounded-full text-sm">
+        <span className="shrink-0 font-mono font-bold bg-ink-900/20 backdrop-blur-sm px-3 py-0.5 rounded-full text-sm">
           {formatRemaining(remaining)}
         </span>
       </div>

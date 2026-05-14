@@ -46,11 +46,11 @@ export function GatewayFunctionsPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">Code</th>
                 <th className="px-3 py-2">Name</th>
@@ -62,13 +62,13 @@ export function GatewayFunctionsPage() {
             </thead>
             <tbody>
               {(data ?? []).map((f) => (
-                <tr key={f.id} className="border-t hover:bg-slate-50">
+                <tr key={f.id} className="border-t hover:bg-ink-900">
                   <td className="px-3 py-2 font-mono text-xs">{f.code}</td>
                   <td className="px-3 py-2 font-medium">{f.name}</td>
                   <td className="px-3 py-2">{f.function_type}</td>
-                  <td className="px-3 py-2 text-slate-600">{f.description ?? "—"}</td>
+                  <td className="px-3 py-2 text-ink-300">{f.description ?? "—"}</td>
                   <td className="px-3 py-2">
-                    <span className={`text-xs px-2 py-0.5 rounded ${f.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded ${f.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-ink-800 text-ink-400"}`}>
                       {f.status}
                     </span>
                   </td>
@@ -86,7 +86,7 @@ export function GatewayFunctionsPage() {
                 </tr>
               ))}
               {(data ?? []).length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500">Chưa có function.</td></tr>
+                <tr><td colSpan={6} className="px-3 py-6 text-center text-ink-400">Chưa có function.</td></tr>
               )}
             </tbody>
           </table>
@@ -125,7 +125,7 @@ function Editor({ func, isCreate, onClose }: { func: Func | null; isCreate: bool
   });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <form onSubmit={handleSubmit((v) => save.mutate(v))} className="w-full max-w-md rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <form onSubmit={handleSubmit((v) => save.mutate(v))} className="w-full max-w-md rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">{isCreate ? "Tạo function" : `Sửa: ${func?.name}`}</h2>
         <div className="grid grid-cols-2 gap-2">
           <div>

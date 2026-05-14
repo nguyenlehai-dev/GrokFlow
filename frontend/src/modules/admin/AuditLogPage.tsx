@@ -147,7 +147,7 @@ export function AuditLogPage() {
     <div className="space-y-4">
       <header>
         <h1 className="page-title">Audit Log</h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-ink-400">
           {isSelf
             ? "Lịch sử hoạt động của bạn."
             : isSuper
@@ -159,11 +159,11 @@ export function AuditLogPage() {
       {/* ─── Tab strip per domain — super_admin only ─── */}
       {isSuper && domains && domains.length > 0 && (
         <div className="card overflow-x-auto p-0">
-          <div className="flex items-stretch border-b border-slate-100">
+          <div className="flex items-stretch border-b border-ink-800">
             <TabBtn active={activeTab === ""} onClick={() => setActiveTab("")}>
               <Globe size={14} />
               <span>Tất cả</span>
-              <span className="text-xs text-slate-400">(toàn hệ thống)</span>
+              <span className="text-xs text-ink-500">(toàn hệ thống)</span>
             </TabBtn>
             {domains.map((d) => (
               <TabBtn
@@ -189,11 +189,11 @@ export function AuditLogPage() {
           {/* Free-text search + action stay on one row for quick access */}
           <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
             <label className="block">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">
                 Search
               </span>
-              <div className="mt-1 flex items-center rounded-md border border-slate-300 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
-                <Search className="h-3.5 w-3.5 text-slate-400" />
+              <div className="mt-1 flex items-center rounded-md border border-ink-700 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
+                <Search className="h-3.5 w-3.5 text-ink-500" />
                 <input
                   className="w-full bg-transparent px-2 py-1.5 text-sm outline-none"
                   placeholder="Tìm trong action / metadata..."
@@ -204,7 +204,7 @@ export function AuditLogPage() {
               </div>
             </label>
             <label className="block">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">
                 Action
               </span>
               <input
@@ -215,7 +215,7 @@ export function AuditLogPage() {
               />
             </label>
             <label className="block">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">
                 Target type
               </span>
               <input
@@ -230,7 +230,7 @@ export function AuditLogPage() {
           {/* IDs + domain + date range */}
           <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
             <label className="block">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">
                 User ID
               </span>
               <input
@@ -241,7 +241,7 @@ export function AuditLogPage() {
               />
             </label>
             <label className="block">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">
                 Target ID
               </span>
               <input
@@ -255,7 +255,7 @@ export function AuditLogPage() {
                 domain_id filter still flows through `params.domain_id`
                 from the active tab via the effect upstream. */}
             <div className={isSuper ? "md:col-span-2" : "md:col-span-2"}>
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">
                 Date range
               </span>
               <div className="mt-1 flex items-center gap-1">
@@ -265,7 +265,7 @@ export function AuditLogPage() {
                   value={pending.date_from}
                   onChange={(e) => setPending({ ...pending, date_from: e.target.value })}
                 />
-                <span className="text-slate-400">→</span>
+                <span className="text-ink-500">→</span>
                 <input
                   type="datetime-local"
                   className="input w-full text-xs"
@@ -276,11 +276,11 @@ export function AuditLogPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-            <div className="text-xs text-slate-500">
+          <div className="flex items-center justify-between border-t border-ink-800 pt-3">
+            <div className="text-xs text-ink-400">
               {data && !isLoading && (
                 <>
-                  <strong className="text-slate-700">{data.total.toLocaleString()}</strong> kết quả
+                  <strong className="text-ink-200">{data.total.toLocaleString()}</strong> kết quả
                   {Object.values(params).some(Boolean) && " (đã lọc)"}
                 </>
               )}
@@ -317,11 +317,11 @@ export function AuditLogPage() {
 
       {/* ─── Table ─── */}
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">Time</th>
                 <th className="px-3 py-2">Action</th>
@@ -334,18 +334,18 @@ export function AuditLogPage() {
             </thead>
             <tbody>
               {(data?.rows ?? []).map((l) => (
-                <tr key={l.id} className="border-t hover:bg-slate-50">
-                  <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">
+                <tr key={l.id} className="border-t hover:bg-ink-900">
+                  <td className="whitespace-nowrap px-3 py-2 text-xs text-ink-400">
                     {new Date(l.created_at).toLocaleString("vi-VN")}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs font-semibold text-slate-700">
+                  <td className="px-3 py-2 font-mono text-xs font-semibold text-ink-200">
                     {l.action}
                   </td>
                   <td className="px-3 py-2 text-xs">
                     {l.target_type ? (
                       <button
                         type="button"
-                        className="cursor-pointer text-slate-700 hover:text-violet-600"
+                        className="cursor-pointer text-ink-200 hover:text-violet-600"
                         onClick={() => {
                           if (l.target_id) {
                             setPending({ ...pending, target_id: l.target_id, target_type: l.target_type ?? "" });
@@ -372,38 +372,38 @@ export function AuditLogPage() {
                           }
                         }}
                       >
-                        <span className="block truncate font-medium text-slate-700">
+                        <span className="block truncate font-medium text-ink-200">
                           {l.user_email}
                         </span>
                         {l.user_role && (
-                          <span className="text-[10px] uppercase text-slate-400">{l.user_role}</span>
+                          <span className="text-[10px] uppercase text-ink-500">{l.user_role}</span>
                         )}
                       </button>
                     ) : (
-                      <span className="text-slate-400">—</span>
+                      <span className="text-ink-500">—</span>
                     )}
                   </td>
                   {!isSelf && (
                     <td className="px-3 py-2 text-xs">
                       {l.domain_id ? (
-                        <span className="font-mono text-slate-500">
+                        <span className="font-mono text-ink-400">
                           {(domains ?? []).find((d) => d.id === l.domain_id)?.hostname
                             ?? l.domain_id.slice(0, 8)}
                         </span>
                       ) : "—"}
                     </td>
                   )}
-                  <td className="px-3 py-2 font-mono text-[11px] text-slate-500">
+                  <td className="px-3 py-2 font-mono text-[11px] text-ink-400">
                     {l.ip_address ?? "—"}
                   </td>
-                  <td className="max-w-md px-3 py-2 font-mono text-[11px] text-slate-500">
+                  <td className="max-w-md px-3 py-2 font-mono text-[11px] text-ink-400">
                     {l.metadata ? (
                       <details>
                         <summary className="cursor-pointer truncate">
                           {JSON.stringify(l.metadata).slice(0, 80)}
                           {JSON.stringify(l.metadata).length > 80 ? "…" : ""}
                         </summary>
-                        <pre className="mt-1 max-w-md overflow-x-auto whitespace-pre-wrap rounded bg-slate-50 p-2">
+                        <pre className="mt-1 max-w-md overflow-x-auto whitespace-pre-wrap rounded bg-ink-900 p-2">
                           {JSON.stringify(l.metadata, null, 2)}
                         </pre>
                       </details>
@@ -413,7 +413,7 @@ export function AuditLogPage() {
               ))}
               {(data?.rows ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={isSelf ? 6 : 7} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={isSelf ? 6 : 7} className="px-4 py-8 text-center text-ink-400">
                     Không có log nào khớp bộ lọc.
                   </td>
                 </tr>
@@ -425,7 +425,7 @@ export function AuditLogPage() {
 
       {/* ─── Pagination — admin only (self-view is unpaged) ─── */}
       {!isSelf && data && data.total > 0 && (
-        <div className="flex items-center justify-between text-sm text-slate-600">
+        <div className="flex items-center justify-between text-sm text-ink-300">
           <div className="flex items-center gap-2">
             <span>Hiển thị</span>
             <select
@@ -490,7 +490,7 @@ function TabBtn({
         "relative flex flex-shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition",
         active
           ? "text-violet-700"
-          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+          : "text-ink-300 hover:bg-ink-900 hover:text-white",
       ].join(" ")}
     >
       {children}

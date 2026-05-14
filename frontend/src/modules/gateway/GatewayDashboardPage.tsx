@@ -54,9 +54,9 @@ function Tile({
 }: { label: string; main: number | string; sub?: string; accent?: string }) {
   return (
     <div className="card">
-      <div className="text-sm text-slate-500">{label}</div>
-      <div className={`mt-2 text-3xl font-semibold ${accent ?? "text-slate-900"}`}>{main}</div>
-      {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
+      <div className="text-sm text-ink-400">{label}</div>
+      <div className={`mt-2 text-3xl font-semibold ${accent ?? "text-white"}`}>{main}</div>
+      {sub && <div className="text-xs text-ink-500 mt-1">{sub}</div>}
     </div>
   );
 }

@@ -74,7 +74,7 @@ function AuthedMedia({ url, fileName }: { url: string; fileName: string }) {
   }, [url]);
 
   if (err) return <p className="text-rose-600 text-sm">Lỗi tải media: {err}</p>;
-  if (!blobUrl) return <p className="text-slate-500 text-sm">Đang tải media…</p>;
+  if (!blobUrl) return <p className="text-ink-400 text-sm">Đang tải media…</p>;
   const isVideo = mime.startsWith("video/");
   return (
     <div className="space-y-2">
@@ -107,13 +107,13 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string; onClose: ()
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30" onClick={onClose}>
-      <div className="w-full max-w-2xl bg-white shadow-xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl bg-ink-900 shadow-xl flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b px-6 py-4">
           <h2 className="text-lg font-semibold">Job detail</h2>
-          <button className="text-slate-400 hover:text-slate-600" onClick={onClose}>✕</button>
+          <button className="text-ink-500 hover:text-ink-300" onClick={onClose}>✕</button>
         </div>
         {!job ? (
-          <p className="p-6 text-slate-500">Đang tải...</p>
+          <p className="p-6 text-ink-400">Đang tải...</p>
         ) : (
           <div className="flex-1 overflow-auto p-6 space-y-4">
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -127,7 +127,7 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string; onClose: ()
             </div>
             <div>
               <div className="text-sm font-medium mb-1">Prompt</div>
-              <pre className="bg-slate-50 p-3 rounded text-xs whitespace-pre-wrap">{job.prompt}</pre>
+              <pre className="bg-ink-900 p-3 rounded text-xs whitespace-pre-wrap">{job.prompt}</pre>
             </div>
             {job.error_message && (() => {
               const parsed = parseErrorCode(job.error_message);
@@ -170,12 +170,12 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string; onClose: ()
                 {logs?.length ? (
                   logs.map((l, i) => (
                     <div key={i} className={l.level === "error" ? "text-rose-300" : l.level === "warning" ? "text-amber-300" : ""}>
-                      <span className="text-slate-500">{new Date(l.created_at).toLocaleTimeString()} </span>
+                      <span className="text-ink-400">{new Date(l.created_at).toLocaleTimeString()} </span>
                       [{l.level}] {l.message}
                     </div>
                   ))
                 ) : (
-                  <div className="text-slate-500">Chưa có log.</div>
+                  <div className="text-ink-400">Chưa có log.</div>
                 )}
               </div>
             </div>
@@ -189,7 +189,7 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string; onClose: ()
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-xs text-slate-500">{label}</div>
+      <div className="text-xs text-ink-400">{label}</div>
       <div className="mt-0.5">{children}</div>
     </div>
   );

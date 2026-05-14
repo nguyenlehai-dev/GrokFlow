@@ -49,7 +49,7 @@ function rememberJob(toolSlug: string, jobId: string) {
  * ────────────────────────────────────────────────────────────────────*/
 
 function ZoneIcon({ icon }: { icon: DropZone["icon"] }) {
-  const cls = "h-7 w-7 text-slate-500";
+  const cls = "h-7 w-7 text-ink-400";
   if (icon === "audio") return <Music className={cls} />;
   if (icon === "media") return <FileVideo className={cls} />;
   return <VideoIcon className={cls} />;
@@ -90,14 +90,14 @@ function DropZoneView({ zone, files, onFiles }: DropZoneViewProps) {
           "flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-4 py-12 text-center transition",
           dragOver
             ? "border-violet-500 bg-violet-50"
-            : "border-slate-300 bg-slate-50 hover:border-violet-400 hover:bg-violet-50/40",
+            : "border-ink-700 bg-ink-900 hover:border-violet-400 hover:bg-violet-50/40",
         ].join(" ")}
       >
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-inner ring-1 ring-slate-200">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-ink-900 shadow-inner ring-1 ring-ink-800">
           <ZoneIcon icon={zone.icon} />
         </div>
-        <p className="mt-4 text-lg font-semibold text-slate-900">{zone.label}</p>
-        {zone.hint && <p className="mt-1 text-sm text-slate-500">{zone.hint}</p>}
+        <p className="mt-4 text-lg font-semibold text-white">{zone.label}</p>
+        {zone.hint && <p className="mt-1 text-sm text-ink-400">{zone.hint}</p>}
         <input
           ref={ref}
           type="file"
@@ -108,7 +108,7 @@ function DropZoneView({ zone, files, onFiles }: DropZoneViewProps) {
         />
       </div>
       {files.length > 0 && (
-        <ul className="space-y-1 px-1 text-[11px] text-slate-500">
+        <ul className="space-y-1 px-1 text-[11px] text-ink-400">
           {files.map((f, i) => (
             <li key={i} className="flex justify-between gap-3">
               <span className="truncate">{f.name}</span>
@@ -130,34 +130,34 @@ interface OpSyntaxProps {
 function OperationSyntax({ tool, values, onChange }: OpSyntaxProps) {
   const fields = tool.fields;
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+    <div className="rounded-2xl border border-ink-800 bg-ink-900/60 p-5">
       <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-violet-600">
         Operation Syntax
       </p>
       {fields.length === 0 ? (
-        <p className="text-sm italic text-slate-500">{tool.helperText}</p>
+        <p className="text-sm italic text-ink-400">{tool.helperText}</p>
       ) : (
         <>
           {tool.helperText && (
-            <p className="mb-4 text-xs italic text-slate-500">{tool.helperText}</p>
+            <p className="mb-4 text-xs italic text-ink-400">{tool.helperText}</p>
           )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {fields.map((f) => (
               <div key={f.name} className={f.kind === "boolean" ? "sm:col-span-2" : ""}>
                 {f.kind === "boolean" ? (
-                  <label className="flex cursor-pointer items-center gap-3 text-sm text-slate-700">
+                  <label className="flex cursor-pointer items-center gap-3 text-sm text-ink-200">
                     <input
                       type="checkbox"
                       checked={!!values[f.name]}
                       onChange={(e) => onChange(f.name, e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 accent-violet-600"
+                      className="h-4 w-4 rounded border-ink-700 accent-violet-600"
                     />
                     <span className="font-medium">{f.label}</span>
-                    {f.help && <span className="text-xs text-slate-500">({f.help})</span>}
+                    {f.help && <span className="text-xs text-ink-400">({f.help})</span>}
                   </label>
                 ) : (
                   <label className="block text-sm">
-                    <span className="mb-1 block font-medium text-slate-700">{f.label}</span>
+                    <span className="mb-1 block font-medium text-ink-200">{f.label}</span>
                     <input
                       type={f.kind === "number" ? "number" : "text"}
                       value={String(values[f.name] ?? "")}
@@ -172,7 +172,7 @@ function OperationSyntax({ tool, values, onChange }: OpSyntaxProps) {
                           f.kind === "number" ? (raw === "" ? "" : Number(raw)) : raw,
                         );
                       }}
-                      className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                      className="w-full rounded-md border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white placeholder:text-ink-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
                     />
                   </label>
                 )}
@@ -193,16 +193,16 @@ interface UrlInputProps {
 function UrlInput({ value, onChange }: UrlInputProps) {
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-        <span className="h-px flex-1 bg-slate-200" />
+      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+        <span className="h-px flex-1 bg-ink-700" />
         <span>OR</span>
-        <span className="h-px flex-1 bg-slate-200" />
+        <span className="h-px flex-1 bg-ink-700" />
       </div>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Paste an existing R2/Cloudflare URL to bypass upload..."
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+        className="w-full rounded-md border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-white placeholder:text-ink-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
       />
     </div>
   );
@@ -348,8 +348,8 @@ export function VideoToolPage({ tool }: Props) {
         {/* Upload progress — only shown during the upload phase */}
         {submitting && uploadPct > 0 && uploadPct < 100 && (
           <div>
-            <p className="mb-1 text-xs text-slate-500">Uploading: {uploadPct}%</p>
-            <div className="h-1.5 w-full overflow-hidden rounded bg-slate-100">
+            <p className="mb-1 text-xs text-ink-400">Uploading: {uploadPct}%</p>
+            <div className="h-1.5 w-full overflow-hidden rounded bg-ink-800">
               <div
                 className="h-full bg-violet-500 transition-all"
                 style={{ width: `${uploadPct}%` }}
@@ -363,7 +363,7 @@ export function VideoToolPage({ tool }: Props) {
             type="button"
             onClick={submit}
             disabled={submitting}
-            className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-violet-600 to-indigo-500 px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-violet-900/40 transition hover:from-violet-500 hover:to-indigo-400 disabled:cursor-not-allowed disabled:from-slate-700 disabled:to-slate-700 disabled:text-slate-400 disabled:shadow-none"
+            className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-violet-600 to-indigo-500 px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-violet-900/40 transition hover:from-violet-500 hover:to-indigo-400 disabled:cursor-not-allowed disabled:from-slate-700 disabled:to-slate-700 disabled:text-ink-500 disabled:shadow-none"
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -384,15 +384,15 @@ function JobCard({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
   const done = job.status === "completed";
   const failed = job.status === "failed";
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+    <div className="rounded-2xl border border-ink-800 bg-ink-900/60 p-5">
       <header className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           {done && <CheckCircle2 className="h-5 w-5 text-emerald-500" />}
           {failed && <AlertCircle className="h-5 w-5 text-rose-500" />}
           {!done && !failed && <Loader2 className="h-5 w-5 animate-spin text-violet-500" />}
           <div>
-            <h3 className="text-sm font-semibold text-slate-900">Job {job.id.slice(0, 8)}</h3>
-            <p className="text-[11px] text-slate-500">
+            <h3 className="text-sm font-semibold text-white">Job {job.id.slice(0, 8)}</h3>
+            <p className="text-[11px] text-ink-400">
               {new Date(job.created_at).toLocaleString("vi-VN")}
             </p>
           </div>
@@ -413,11 +413,11 @@ function JobCard({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
 
       {!done && !failed && (
         <div className="mt-3">
-          <div className="flex justify-between text-[11px] text-slate-500">
+          <div className="flex justify-between text-[11px] text-ink-400">
             <span>Progress</span>
             <span>{Math.round(job.progress)}%</span>
           </div>
-          <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-slate-100">
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-ink-800">
             <div
               className="h-full bg-violet-500 transition-all"
               style={{ width: `${job.progress}%` }}
@@ -435,18 +435,18 @@ function JobCard({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
       {done && job.output_url && (
         <div className="mt-4 space-y-3">
           {job.output_url.match(/\.(mp4|mov|webm)$/i) && (
-            <video src={job.output_url} controls className="w-full rounded-lg border border-slate-200" />
+            <video src={job.output_url} controls className="w-full rounded-lg border border-ink-800" />
           )}
           <a
             href={job.output_url}
             download={job.output_filename ?? undefined}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-violet-400 hover:text-violet-700"
+            className="inline-flex items-center gap-2 rounded-md border border-ink-700 bg-ink-900 px-4 py-2 text-sm font-medium text-ink-200 transition hover:border-violet-400 hover:text-violet-700"
           >
             <Download className="h-4 w-4" />
             Tải kết quả {job.file_size ? `(${(job.file_size / 1024 / 1024).toFixed(1)} MB)` : ""}
           </a>
           {job.duration !== null && (
-            <p className="text-[11px] text-slate-500">Xử lý mất {job.duration.toFixed(1)}s</p>
+            <p className="text-[11px] text-ink-400">Xử lý mất {job.duration.toFixed(1)}s</p>
           )}
         </div>
       )}
@@ -455,7 +455,7 @@ function JobCard({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
         <button
           type="button"
           onClick={onRetry}
-          className="mt-4 inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-violet-400 hover:text-violet-700"
+          className="mt-4 inline-flex items-center gap-2 rounded-md border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs font-medium text-ink-200 hover:border-violet-400 hover:text-violet-700"
         >
           <RefreshCw className="h-3.5 w-3.5" />
           Thử lại

@@ -38,7 +38,7 @@ export function SettingsPage() {
       <h1 className="page-title">Settings</h1>
 
       <div className="card p-0 overflow-x-auto">
-        <div className="flex items-stretch border-b border-slate-100">
+        <div className="flex items-stretch border-b border-ink-800">
           {TABS.map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
@@ -48,7 +48,7 @@ export function SettingsPage() {
                 type="button"
                 onClick={() => setTab(t.key)}
                 className={`relative inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition ${
-                  active ? "text-violet-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  active ? "text-violet-700" : "text-ink-300 hover:bg-ink-900 hover:text-white"
                 }`}
               >
                 <Icon size={14} />
@@ -79,9 +79,9 @@ function AccountTab() {
     <>
       <section className="card space-y-2">
         <h2 className="font-semibold">Tài khoản</h2>
-        <p className="text-sm text-slate-600">Email: <span className="font-medium">{user?.email}</span></p>
-        <p className="text-sm text-slate-600">Role: <span className="font-medium">{user?.role}</span></p>
-        <p className="text-sm text-slate-600">Status: <span className="font-medium">{user?.status}</span></p>
+        <p className="text-sm text-ink-300">Email: <span className="font-medium">{user?.email}</span></p>
+        <p className="text-sm text-ink-300">Role: <span className="font-medium">{user?.role}</span></p>
+        <p className="text-sm text-ink-300">Status: <span className="font-medium">{user?.status}</span></p>
       </section>
       <PasswordSection />
     </>
@@ -151,7 +151,7 @@ function WebhookSection() {
   return (
     <section className="card space-y-3">
       <h2 className="font-semibold flex items-center gap-2"><Webhook size={16} /> Webhook (job complete)</h2>
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-ink-300">
         Server sẽ POST event <code>job.success</code> / <code>job.failed</code> / <code>job.cancelled</code> tới URL này.
         Header <code>X-Grokflow-Signature</code> = HMAC-SHA256(secret, body) base64.
       </p>
@@ -164,7 +164,7 @@ function WebhookSection() {
         <label className="flex gap-2 items-center text-sm">
           <input type="checkbox" {...register("rotate_secret")} /> Rotate secret
         </label>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-ink-400">
           Trạng thái secret: {data?.has_secret ? "đã có" : "chưa có"}
           {data?.has_secret ? " — không thể xem lại, chỉ rotate." : ""}
         </p>
@@ -206,7 +206,7 @@ function LocaleTab() {
   return (
     <section className="card space-y-3">
       <h2 className="font-semibold flex items-center gap-2"><Globe size={16} /> Đa ngôn ngữ</h2>
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-ink-300">
         Chọn ngôn ngữ mặc định cho tài khoản. Toàn bộ UI sẽ được dịch trong phase 2 —
         hiện preference đã được lưu, một số label sidebar/header sẽ đổi ngay.
       </p>
@@ -227,7 +227,7 @@ function LocaleTab() {
           {save.isPending ? "Đang lưu..." : "Lưu"}
         </button>
       </div>
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-ink-500">
         Hiện tại: <code>{data?.locale ?? "(chưa đặt — auto detect từ browser)"}</code>
       </p>
     </section>
@@ -278,34 +278,34 @@ function NotificationsTab() {
   return (
     <section className="card space-y-3">
       <h2 className="font-semibold flex items-center gap-2"><Bell size={16} /> Thông báo</h2>
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-ink-300">
         Chọn kênh nhận từng loại sự kiện. <strong>In-app</strong> hiện ngay ở chuông góc trên, <strong>Email</strong> gửi sau (phase 2 sẽ wire email service).
       </p>
 
-      <div className="overflow-hidden rounded-md border border-slate-200">
+      <div className="overflow-hidden rounded-md border border-ink-800">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50">
+          <thead className="bg-ink-900">
             <tr>
-              <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">Sự kiện</th>
-              <th className="px-3 py-2 text-center text-xs font-semibold text-slate-600">In-app</th>
-              <th className="px-3 py-2 text-center text-xs font-semibold text-slate-600">Email</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-ink-300">Sự kiện</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold text-ink-300">In-app</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold text-ink-300">Email</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-ink-800">
             {Object.keys(NOTIF_LABEL).map((event) => {
               const p = prefs[event] ?? { email: false, in_app: true };
               return (
                 <tr key={event}>
                   <td className="px-3 py-2">
-                    <div className="font-medium text-slate-700">{NOTIF_LABEL[event]}</div>
-                    <code className="text-xs text-slate-400">{event}</code>
+                    <div className="font-medium text-ink-200">{NOTIF_LABEL[event]}</div>
+                    <code className="text-xs text-ink-500">{event}</code>
                   </td>
                   <td className="px-3 py-2 text-center">
                     <input
                       type="checkbox"
                       checked={p.in_app}
                       onChange={() => toggle(event, "in_app")}
-                      className="h-4 w-4 rounded border-slate-300 accent-violet-600"
+                      className="h-4 w-4 rounded border-ink-700 accent-violet-600"
                     />
                   </td>
                   <td className="px-3 py-2 text-center">
@@ -313,7 +313,7 @@ function NotificationsTab() {
                       type="checkbox"
                       checked={p.email}
                       onChange={() => toggle(event, "email")}
-                      className="h-4 w-4 rounded border-slate-300 accent-violet-600"
+                      className="h-4 w-4 rounded border-ink-700 accent-violet-600"
                     />
                   </td>
                 </tr>

@@ -124,7 +124,7 @@ function Inner() {
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : error ? (
         <ErrorPanel error={error} />
       ) : (
@@ -144,7 +144,7 @@ function Inner() {
             />
           ))}
           {(profiles ?? []).length === 0 && (
-            <div className="card text-center text-slate-500 py-10">
+            <div className="card text-center text-ink-400 py-10">
               Chưa có profile. Click "Tạo profile" để bắt đầu.
             </div>
           )}
@@ -186,7 +186,7 @@ function ProfileCard({
       ? "bg-amber-100 text-amber-700"
       : session?.state === "blocked" || session?.state === "error"
       ? "bg-rose-100 text-rose-700"
-      : "bg-slate-100 text-slate-600";
+      : "bg-ink-800 text-ink-300";
 
   return (
     <div className="card overflow-x-auto p-0">
@@ -195,8 +195,8 @@ function ProfileCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
-              <h3 className="font-semibold text-slate-900">{profile.name}</h3>
-              <p className="text-xs text-slate-500">
+              <h3 className="font-semibold text-white">{profile.name}</h3>
+              <p className="text-xs text-ink-400">
                 {v.label} · {profile.concurrency_limit} slot · proxy:{" "}
                 <span className="font-mono">{proxy?.name ?? "—"}</span>
               </p>
@@ -214,7 +214,7 @@ function ProfileCard({
           {profile.tags.length > 0 && (
             <div className="flex gap-1 mt-1.5 flex-wrap">
               {profile.tags.map((t) => (
-                <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-ink-800 text-ink-300">
                   {t}
                 </span>
               ))}
@@ -223,10 +223,10 @@ function ProfileCard({
         </div>
       </div>
 
-      <div className="grid md:grid-cols-3 border-t border-slate-200">
+      <div className="grid md:grid-cols-3 border-t border-ink-800">
         {/* Cookies block */}
-        <div className="p-3 space-y-2 border-r border-slate-100">
-          <div className="text-xs font-semibold text-slate-600">COOKIES</div>
+        <div className="p-3 space-y-2 border-r border-ink-800">
+          <div className="text-xs font-semibold text-ink-300">COOKIES</div>
           <span className={`text-xs px-2 py-0.5 rounded inline-block ${profile.cookie_file ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
             {profile.cookie_file ? "Đã import" : "Thiếu cookies"}
           </span>
@@ -244,12 +244,12 @@ function ProfileCard({
               className="block w-full text-xs file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-brand-50 file:text-brand-700 file:cursor-pointer"
             />
           </label>
-          <p className="text-[10px] text-slate-400">Netscape (.txt) hoặc JSON</p>
+          <p className="text-[10px] text-ink-500">Netscape (.txt) hoặc JSON</p>
         </div>
 
         {/* Session block */}
-        <div className="p-3 space-y-2 border-r border-slate-100">
-          <div className="text-xs font-semibold text-slate-600">SESSION</div>
+        <div className="p-3 space-y-2 border-r border-ink-800">
+          <div className="text-xs font-semibold text-ink-300">SESSION</div>
           <div className="flex flex-wrap gap-1">
             <span className={`text-xs px-2 py-0.5 rounded ${stateColor}`}>
               {session?.state ?? "unchecked"}
@@ -260,7 +260,7 @@ function ProfileCard({
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-600 line-clamp-3">
+          <p className="text-xs text-ink-300 line-clamp-3">
             {session?.summary ?? "Chạy Session check sau khi import cookies."}
           </p>
           <div className="flex gap-1.5">
@@ -288,23 +288,23 @@ function ProfileCard({
               <img
                 src={session.screenshot_data_url}
                 alt="session check"
-                className="mt-2 w-full rounded border border-slate-200"
+                className="mt-2 w-full rounded border border-ink-800"
               />
-              <p className="text-[10px] text-slate-400 mt-1 break-all">{session.page_url}</p>
+              <p className="text-[10px] text-ink-500 mt-1 break-all">{session.page_url}</p>
             </details>
           )}
         </div>
 
         {/* Storage block */}
         <div className="p-3 space-y-1.5">
-          <div className="text-xs font-semibold text-slate-600">STORAGE</div>
-          <div className="text-[10px] text-slate-500 font-mono break-all">
+          <div className="text-xs font-semibold text-ink-300">STORAGE</div>
+          <div className="text-[10px] text-ink-400 font-mono break-all">
             cache: {profile.cache_dir}
           </div>
-          <div className="text-[10px] text-slate-500 font-mono break-all">
+          <div className="text-[10px] text-ink-400 font-mono break-all">
             user_data: {profile.user_data_dir}
           </div>
-          <div className="text-[10px] text-slate-400">
+          <div className="text-[10px] text-ink-500">
             updated: {new Date(profile.updated_at).toLocaleString("vi-VN")}
           </div>
         </div>
@@ -379,7 +379,7 @@ function ProfileEditorModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
       <form
         onSubmit={handleSubmit((v) => save.mutate(v))}
-        className="w-full max-w-2xl max-h-[95vh] overflow-auto rounded-lg bg-white p-5 shadow-xl space-y-3"
+        className="w-full max-w-2xl max-h-[95vh] overflow-auto rounded-lg bg-ink-900 p-5 shadow-xl space-y-3"
       >
         <h2 className="text-lg font-semibold">
           {isCreate ? "Tạo profile" : `Sửa: ${profile?.name}`}
@@ -423,7 +423,7 @@ function ProfileEditorModal({
         </div>
 
         <details className="border-t pt-3">
-          <summary className="text-sm font-semibold cursor-pointer text-slate-700">
+          <summary className="text-sm font-semibold cursor-pointer text-ink-200">
             Antidetect (fingerprint browser)
           </summary>
           <div className="grid grid-cols-2 gap-3 mt-3">
@@ -494,7 +494,7 @@ export function ErrorPanel({ error }: { error: any }) {
         <AlertCircle size={20} className="text-rose-600 mt-0.5" />
         <div>
           <h2 className="font-semibold">Lỗi gọi gateway</h2>
-          <p className="text-sm text-slate-600 mt-1">
+          <p className="text-sm text-ink-300 mt-1">
             HTTP {status ?? "?"}: <code>{typeof detail === "string" ? detail.slice(0, 200) : JSON.stringify(detail).slice(0, 200)}</code>
           </p>
         </div>

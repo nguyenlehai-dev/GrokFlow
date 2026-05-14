@@ -79,27 +79,27 @@ export function ProfileDomainsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
+      <div className="w-full max-w-lg rounded-xl bg-ink-900 p-5 shadow-xl">
         <header className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-white">
               Phân quyền domain cho profile
             </h2>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-ink-400">
               <code>{profileName}</code> — tick các domain được phép dùng profile này
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-slate-400 hover:bg-slate-100"
+            className="rounded-md p-1 text-ink-500 hover:bg-ink-800"
           >
             <X className="h-5 w-5" />
           </button>
         </header>
 
         {loading ? (
-          <p className="py-8 text-center text-sm text-slate-500">Đang tải…</p>
+          <p className="py-8 text-center text-sm text-ink-400">Đang tải…</p>
         ) : (
           <>
             <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -107,13 +107,13 @@ export function ProfileDomainsModal({
               (legacy). Tick 1 domain = customer trong domain đó sẽ thấy +
               auto-pick được profile này.
             </p>
-            <div className="max-h-72 overflow-y-auto rounded-md border border-slate-200">
+            <div className="max-h-72 overflow-y-auto rounded-md border border-ink-800">
               {(allDomains ?? []).length === 0 ? (
-                <p className="px-3 py-4 text-sm text-slate-500">
+                <p className="px-3 py-4 text-sm text-ink-400">
                   Chưa có domain nào — tạo trước ở Admin → Domains.
                 </p>
               ) : (
-                <ul className="divide-y divide-slate-100">
+                <ul className="divide-y divide-ink-800">
                   {allDomains?.map((d) => (
                     <li key={d.id} className="px-3 py-2">
                       <label className="flex items-center gap-3 text-sm">
@@ -123,12 +123,12 @@ export function ProfileDomainsModal({
                           data-domain-checkbox
                           defaultChecked={selectedSet.has(d.id)}
                           onChange={() => toggle(d.id)}
-                          className="h-4 w-4 rounded border-slate-300 accent-violet-600"
+                          className="h-4 w-4 rounded border-ink-700 accent-violet-600"
                         />
-                        <span className="flex-1 font-medium text-slate-700">
+                        <span className="flex-1 font-medium text-ink-200">
                           {d.hostname}
                         </span>
-                        <span className="text-xs text-slate-400">{d.status}</span>
+                        <span className="text-xs text-ink-500">{d.status}</span>
                       </label>
                     </li>
                   ))}
@@ -142,7 +142,7 @@ export function ProfileDomainsModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="rounded-md border border-ink-700 bg-ink-900 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-900"
           >
             Hủy
           </button>

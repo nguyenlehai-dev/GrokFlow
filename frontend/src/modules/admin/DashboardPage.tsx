@@ -107,7 +107,7 @@ export function DashboardPage() {
         </div>
         <div className="flex items-center gap-2">
           {isAdmin && (
-            <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 shadow-card">
+            <div className="inline-flex rounded-lg border border-ink-200 bg-ink-900 p-0.5 shadow-card">
               <ScopeBtn active={scope === "admin"} onClick={() => setScope("admin")}>System</ScopeBtn>
               <ScopeBtn active={scope === "me"} onClick={() => setScope("me")}>Của tôi</ScopeBtn>
             </div>
@@ -242,7 +242,7 @@ function PerDomainSection({ rows, period }: { rows: DomainStats[]; period: Perio
         <div className="flex items-center gap-2">
           <Globe size={16} className="text-violet-600" />
           <h2 className="font-semibold">Thống kê theo Domain</h2>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-ink-400">
             ({PERIOD_LABEL[period].toLowerCase()})
           </span>
         </div>
@@ -256,7 +256,7 @@ function PerDomainSection({ rows, period }: { rows: DomainStats[]; period: Perio
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left">
+          <thead className="bg-ink-900 text-left">
             <tr>
               <th className="px-3 py-2">Domain</th>
               <SortHeader k="users" sk={sortKey} sd={sortDir} onClick={toggleSort}>Users</SortHeader>
@@ -273,7 +273,7 @@ function PerDomainSection({ rows, period }: { rows: DomainStats[]; period: Perio
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-8 text-center text-ink-400">
                   Chưa có domain nào khớp.
                 </td>
               </tr>
@@ -283,12 +283,12 @@ function PerDomainSection({ rows, period }: { rows: DomainStats[]; period: Perio
                   ? Math.round((r.jobs_success / r.jobs_total) * 100)
                   : null;
                 return (
-                  <tr key={r.domain_id ?? "no-domain"} className="border-t hover:bg-slate-50">
+                  <tr key={r.domain_id ?? "no-domain"} className="border-t hover:bg-ink-900">
                     <td className="px-3 py-2">
                       {r.hostname ? (
-                        <span className="font-medium text-slate-700">{r.hostname}</span>
+                        <span className="font-medium text-ink-200">{r.hostname}</span>
                       ) : (
-                        <span className="text-slate-400 italic">(không có domain)</span>
+                        <span className="text-ink-500 italic">(không có domain)</span>
                       )}
                       {successRate !== null && (
                         <span
@@ -304,12 +304,12 @@ function PerDomainSection({ rows, period }: { rows: DomainStats[]; period: Perio
                       )}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{fmt(r.users)}</td>
-                    <td className="px-3 py-2 font-mono text-xs font-semibold text-slate-700">
+                    <td className="px-3 py-2 font-mono text-xs font-semibold text-ink-200">
                       {fmt(r.jobs_total)}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs text-cyan-700">{fmt(r.jobs_image)}</td>
                     <td className="px-3 py-2 font-mono text-xs text-rose-700">{fmt(r.jobs_video)}</td>
-                    <td className={`px-3 py-2 font-mono text-xs ${r.jobs_failed > 0 ? "text-rose-600" : "text-slate-400"}`}>
+                    <td className={`px-3 py-2 font-mono text-xs ${r.jobs_failed > 0 ? "text-rose-600" : "text-ink-500"}`}>
                       {fmt(r.jobs_failed)}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{fmt(r.profiles)}</td>
@@ -317,7 +317,7 @@ function PerDomainSection({ rows, period }: { rows: DomainStats[]; period: Perio
                     <td className="px-3 py-2 font-mono text-xs text-emerald-700">
                       {r.revenue > 0 ? fmtVnd(r.revenue) : "—"}
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-500">
+                    <td className="px-3 py-2 text-xs text-ink-400">
                       {r.last_activity ? new Date(r.last_activity).toLocaleString("vi-VN") : "—"}
                     </td>
                   </tr>
@@ -326,9 +326,9 @@ function PerDomainSection({ rows, period }: { rows: DomainStats[]; period: Perio
             )}
           </tbody>
           {sorted.length > 1 && (
-            <tfoot className="bg-slate-50 font-semibold">
+            <tfoot className="bg-ink-900 font-semibold">
               <tr className="border-t">
-                <td className="px-3 py-2 text-xs uppercase text-slate-500">
+                <td className="px-3 py-2 text-xs uppercase text-ink-400">
                   Tổng ({sorted.length} domain)
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">{fmt(totals.users)}</td>
@@ -365,7 +365,7 @@ function SortHeader({
   const active = sk === k;
   return (
     <th
-      className="px-3 py-2 cursor-pointer select-none whitespace-nowrap hover:bg-slate-100"
+      className="px-3 py-2 cursor-pointer select-none whitespace-nowrap hover:bg-ink-800"
       onClick={() => onClick(k)}
     >
       <span className="inline-flex items-center gap-1">
@@ -413,7 +413,7 @@ function ScopeBtn({ active, onClick, children }: {
 
 function PeriodTabs({ value, onChange }: { value: Period; onChange: (v: Period) => void }) {
   return (
-    <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 shadow-card">
+    <div className="inline-flex rounded-lg border border-ink-200 bg-ink-900 p-0.5 shadow-card">
       {(["all", "today", "week", "month"] as Period[]).map((p) => (
         <button
           key={p}
@@ -443,11 +443,11 @@ function RevenueCard({ data, total }: { data: RevenuePoint[]; total: number }) {
           <h3 className="font-semibold flex items-center gap-2">
             <TrendingUp size={16} className="text-emerald-600" /> Doanh thu 12 tháng
           </h3>
-          <p className="text-xs text-slate-500 mt-0.5">Tổng đã thu: {fmtVnd(total)}</p>
+          <p className="text-xs text-ink-400 mt-0.5">Tổng đã thu: {fmtVnd(total)}</p>
         </div>
       </div>
       {data.length === 0 ? (
-        <div className="h-40 flex items-center justify-center text-sm text-slate-400">
+        <div className="h-40 flex items-center justify-center text-sm text-ink-500">
           Chưa có thanh toán nào.
         </div>
       ) : (
@@ -488,7 +488,7 @@ function LineChart({ data }: { data: RevenuePoint[] }) {
           </g>
         ))}
       </svg>
-      <div className="flex justify-between text-[10px] text-slate-400 font-mono px-2">
+      <div className="flex justify-between text-[10px] text-ink-500 font-mono px-2">
         {points.length > 0 && (
           <>
             <span>{points[0].month}</span>
@@ -510,7 +510,7 @@ function JobsTimeseriesCard({ data }: { data: JobTimePoint[] }) {
     <div className="card">
       <h3 className="font-semibold">Jobs 30 ngày gần nhất</h3>
       {data.length === 0 ? (
-        <div className="h-40 flex items-center justify-center text-sm text-slate-400">
+        <div className="h-40 flex items-center justify-center text-sm text-ink-500">
           Chưa có job.
         </div>
       ) : (
@@ -537,7 +537,7 @@ function BarChart({ data }: { data: JobTimePoint[] }) {
           );
         })}
       </div>
-      <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+      <div className="flex justify-between text-[10px] text-ink-500 font-mono">
         <span>{data[0]?.day}</span>
         <span>{data[data.length - 1]?.day}</span>
       </div>
@@ -573,7 +573,7 @@ function AppStatsSection({
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <h2 className="font-semibold">Thống kê theo App</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-ink-400 mt-0.5">
             Phân loại {fmt(grandTotal)} job/request theo nguồn — Grok ảnh, Grok video, Flow video tools, Gateway LLM, API keys.
             {selectedDomain && domains.length > 0 && (
               <>  Đang lọc theo <strong>{domains.find((d) => d.id === selectedDomain)?.hostname ?? "?"}</strong>.</>
@@ -625,8 +625,8 @@ function AppGroupCard({ group, grandTotal }: { group: AppGroup; grandTotal: numb
     : 1;
 
   return (
-    <div className="border border-slate-200 rounded-lg overflow-hidden flex flex-col">
-      <div className={`px-3 py-2 ${visual.bg} border-b border-slate-200`}>
+    <div className="border border-ink-800 rounded-lg overflow-hidden flex flex-col">
+      <div className={`px-3 py-2 ${visual.bg} border-b border-ink-800`}>
         <div className="flex items-center justify-between">
           <h3 className={`font-semibold flex items-center gap-2 text-sm ${visual.accent}`}>
             <Icon size={16} /> {group.label}
@@ -642,9 +642,9 @@ function AppGroupCard({ group, grandTotal }: { group: AppGroup; grandTotal: numb
         </div>
       </div>
       {group.items.length === 0 ? (
-        <p className="px-3 py-6 text-center text-xs text-slate-400">Chưa có dữ liệu.</p>
+        <p className="px-3 py-6 text-center text-xs text-ink-500">Chưa có dữ liệu.</p>
       ) : (
-        <div className="divide-y divide-slate-100 flex-1">
+        <div className="divide-y divide-ink-800 flex-1">
           {group.items.slice(0, 12).map((item) => {
             // Bar shows the item's count relative to the largest in its group.
             // Helps eye-spot the dominant model/operation per category.
@@ -652,15 +652,15 @@ function AppGroupCard({ group, grandTotal }: { group: AppGroup; grandTotal: numb
             return (
               <div
                 key={item.name}
-                className="px-3 py-2 hover:bg-slate-50 transition text-sm"
+                className="px-3 py-2 hover:bg-ink-900 transition text-sm"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-slate-700 min-w-0">{item.name}</span>
+                  <span className="truncate text-ink-200 min-w-0">{item.name}</span>
                   <span className={`font-mono font-semibold flex-shrink-0 ${visual.accent}`}>
                     {fmt(item.count)}
                   </span>
                 </div>
-                <div className="mt-1 h-1 w-full bg-slate-100 rounded overflow-hidden">
+                <div className="mt-1 h-1 w-full bg-ink-800 rounded overflow-hidden">
                   <div
                     className={`h-full ${visual.bg} ${visual.accent}`}
                     style={{
@@ -674,7 +674,7 @@ function AppGroupCard({ group, grandTotal }: { group: AppGroup; grandTotal: numb
             );
           })}
           {group.items.length > 12 && (
-            <div className="px-3 py-2 text-xs text-slate-500 text-center">
+            <div className="px-3 py-2 text-xs text-ink-400 text-center">
               +{group.items.length - 12} mục khác
             </div>
           )}

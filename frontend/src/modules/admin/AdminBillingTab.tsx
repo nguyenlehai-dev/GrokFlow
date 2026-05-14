@@ -100,7 +100,7 @@ function SubTabBtn({
     <button
       onClick={onClick}
       className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px inline-flex items-center gap-1.5 transition ${
-        active ? "border-brand-600 text-brand-700" : "border-transparent text-slate-500 hover:text-slate-700"
+        active ? "border-brand-600 text-brand-700" : "border-transparent text-ink-400 hover:text-ink-200"
       }`}
     >
       <Icon size={14} />
@@ -160,7 +160,7 @@ function SubscriptionsPanel() {
             <option value="expired">Expired</option>
             <option value="past_due">Past due</option>
           </select>
-          <span className="text-xs text-slate-500">{subs?.length ?? 0} records</span>
+          <span className="text-xs text-ink-400">{subs?.length ?? 0} records</span>
         </div>
         <button
           onClick={() => setCreating(true)}
@@ -171,11 +171,11 @@ function SubscriptionsPanel() {
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">User</th>
                 <th className="px-3 py-2">Plan</th>
@@ -189,17 +189,17 @@ function SubscriptionsPanel() {
             </thead>
             <tbody>
               {subs?.map((s) => (
-                <tr key={s.id} className="border-t hover:bg-slate-50">
+                <tr key={s.id} className="border-t hover:bg-ink-900">
                   <td className="px-3 py-2">
                     <div className="font-medium">{s.user_email}</div>
-                    <div className="text-xs text-slate-500 font-mono">{s.user_id.slice(0, 8)}</div>
+                    <div className="text-xs text-ink-400 font-mono">{s.user_id.slice(0, 8)}</div>
                   </td>
                   <td className="px-3 py-2 font-medium">{s.plan_name}</td>
                   <td className="px-3 py-2">{s.billing_cycle}</td>
                   <td className="px-3 py-2 font-semibold">{formatVnd(s.amount)}</td>
                   <td className="px-3 py-2 capitalize">{s.provider}</td>
                   <td className="px-3 py-2"><StatusBadge status={s.status} /></td>
-                  <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">
+                  <td className="px-3 py-2 text-xs text-ink-400 whitespace-nowrap">
                     {formatDateOnly(s.current_period_start)} → {formatDateOnly(s.current_period_end)}
                   </td>
                   <td className="px-3 py-2 space-x-1 whitespace-nowrap">
@@ -234,7 +234,7 @@ function SubscriptionsPanel() {
               ))}
               {(subs ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={8} className="px-3 py-6 text-center text-ink-400">
                     Không có subscription nào.
                   </td>
                 </tr>
@@ -300,7 +300,7 @@ function SubscriptionEditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <div className="w-full max-w-lg rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">
           {isCreate ? "Tạo subscription" : `Sửa subscription`}
         </h2>
@@ -411,7 +411,7 @@ function PaymentsPanel() {
             <option value="failed">Failed</option>
             <option value="refunded">Refunded</option>
           </select>
-          <span className="text-xs text-slate-500">{payments?.length ?? 0} records</span>
+          <span className="text-xs text-ink-400">{payments?.length ?? 0} records</span>
         </div>
         <button
           onClick={() => setCreating(true)}
@@ -422,11 +422,11 @@ function PaymentsPanel() {
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">Ngày</th>
                 <th className="px-3 py-2">User</th>
@@ -439,8 +439,8 @@ function PaymentsPanel() {
             </thead>
             <tbody>
               {payments?.map((p) => (
-                <tr key={p.id} className="border-t hover:bg-slate-50">
-                  <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">
+                <tr key={p.id} className="border-t hover:bg-ink-900">
+                  <td className="px-3 py-2 text-xs text-ink-400 whitespace-nowrap">
                     {formatDate(p.paid_at ?? p.created_at)}
                   </td>
                   <td className="px-3 py-2">{p.user_email}</td>
@@ -463,7 +463,7 @@ function PaymentsPanel() {
               ))}
               {(payments ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={7} className="px-3 py-6 text-center text-ink-400">
                     Không có payment nào.
                   </td>
                 </tr>
@@ -530,7 +530,7 @@ function PaymentEditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <div className="w-full max-w-lg rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">{isCreate ? "Tạo payment" : "Sửa payment"}</h2>
         {isCreate && (
           <>
@@ -640,7 +640,7 @@ function InvoicesPanel() {
             <option value="paid">Paid</option>
             <option value="void">Void</option>
           </select>
-          <span className="text-xs text-slate-500">{invoices?.length ?? 0} records</span>
+          <span className="text-xs text-ink-400">{invoices?.length ?? 0} records</span>
         </div>
         <button
           onClick={() => setCreating(true)}
@@ -651,11 +651,11 @@ function InvoicesPanel() {
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">Số HĐ</th>
                 <th className="px-3 py-2">User</th>
@@ -669,14 +669,14 @@ function InvoicesPanel() {
             </thead>
             <tbody>
               {invoices?.map((i) => (
-                <tr key={i.id} className="border-t hover:bg-slate-50">
+                <tr key={i.id} className="border-t hover:bg-ink-900">
                   <td className="px-3 py-2 font-mono text-xs">{i.invoice_number}</td>
                   <td className="px-3 py-2">{i.user_email}</td>
                   <td className="px-3 py-2">{formatVnd(i.amount)}</td>
-                  <td className="px-3 py-2 text-slate-500">{formatVnd(i.tax)}</td>
+                  <td className="px-3 py-2 text-ink-400">{formatVnd(i.tax)}</td>
                   <td className="px-3 py-2 font-semibold">{formatVnd(i.total)}</td>
                   <td className="px-3 py-2"><StatusBadge status={i.status} /></td>
-                  <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">
+                  <td className="px-3 py-2 text-xs text-ink-400 whitespace-nowrap">
                     {formatDateOnly(i.issued_at)}
                   </td>
                   <td className="px-3 py-2 space-x-1 whitespace-nowrap">
@@ -694,7 +694,7 @@ function InvoicesPanel() {
               ))}
               {(invoices ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={8} className="px-3 py-6 text-center text-ink-400">
                     Không có invoice nào.
                   </td>
                 </tr>
@@ -758,7 +758,7 @@ function InvoiceEditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <div className="w-full max-w-lg rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">{isCreate ? "Tạo invoice" : `Sửa ${inv?.invoice_number}`}</h2>
         {isCreate && (
           <div>

@@ -160,7 +160,7 @@ export function TryImagePage() {
     (job ? !["success", "failed", "cancelled"].includes(job.status) : false);
 
   return (
-    <div className="min-h-screen bg-white text-slate-900 flex flex-col">
+    <div className="min-h-screen bg-ink-900 text-white flex flex-col">
       {/* ── Top nav ─────────────────────────────────────────────────── */}
       <TopNav brandName={brandName} isAuth={isAuth} email={me?.email} />
 
@@ -225,7 +225,7 @@ export function TryImagePage() {
 
 function TopNav({ brandName, isAuth, email }: { brandName: string; isAuth: boolean; email?: string | null }) {
   return (
-    <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-lg border-b border-slate-200/70">
+    <header className="sticky top-0 z-30 bg-ink-900/85 backdrop-blur-lg border-b border-ink-800/70">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
         <Link to="/landing" className="text-xl font-bold inline-flex items-center gap-1.5">
           <Wand2 size={22} className="text-violet-600" />
@@ -233,7 +233,7 @@ function TopNav({ brandName, isAuth, email }: { brandName: string; isAuth: boole
             {brandName}
           </span>
         </Link>
-        <nav className="hidden md:flex items-center gap-5 text-sm text-slate-600">
+        <nav className="hidden md:flex items-center gap-5 text-sm text-ink-300">
           <Link to="/landing#modules" className="hover:text-violet-600">Tính năng</Link>
           <Link to="/pricing" className="hover:text-violet-600">Bảng giá</Link>
           <Link to="/landing#faq" className="hover:text-violet-600">FAQ</Link>
@@ -241,14 +241,14 @@ function TopNav({ brandName, isAuth, email }: { brandName: string; isAuth: boole
         <div className="flex items-center gap-2">
           {isAuth ? (
             <>
-              <span className="text-xs text-slate-500 hidden sm:inline">{email}</span>
+              <span className="text-xs text-ink-400 hidden sm:inline">{email}</span>
               <Link to="/dashboard" className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-4 py-2 text-sm font-semibold">
                 Dashboard <ArrowRight size={14} />
               </Link>
             </>
           ) : (
             <>
-              <Link to="/login" className="text-sm text-slate-600 hover:text-slate-900 px-2.5 py-1.5 hidden sm:inline">
+              <Link to="/login" className="text-sm text-ink-300 hover:text-white px-2.5 py-1.5 hidden sm:inline">
                 Đăng nhập
               </Link>
               <Link to="/register" className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-4 py-2 text-sm font-semibold hover:from-violet-700 hover:to-fuchsia-700 shadow-sm">
@@ -272,7 +272,7 @@ function Hero({ quota, isAuth }: { quota: QuotaResp | undefined; isAuth: boolean
         <div className="absolute -top-12 right-0 w-[28rem] h-[28rem] bg-fuchsia-300/30 rounded-full blur-3xl" />
       </div>
       <div className="max-w-6xl mx-auto px-4 pt-12 pb-10 sm:pt-16 text-center">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-violet-200 bg-white/80 backdrop-blur-sm text-violet-700 text-xs font-semibold">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-violet-200 bg-ink-900/80 backdrop-blur-sm text-violet-700 text-xs font-semibold">
           <Star size={12} className="text-amber-500" />
           {isAuth ? "Logged in · Plan quota" : "Public preview · 2 ảnh miễn phí mỗi ngày"}
         </span>
@@ -282,7 +282,7 @@ function Hero({ quota, isAuth }: { quota: QuotaResp | undefined; isAuth: boolean
             Grok Imagine
           </span>
         </h1>
-        <p className="mt-4 text-base sm:text-lg text-slate-600 max-w-xl mx-auto">
+        <p className="mt-4 text-base sm:text-lg text-ink-300 max-w-xl mx-auto">
           Gõ mô tả ảnh bằng tiếng Việt hoặc tiếng Anh → bấm tạo → tải về. Không cần
           đăng ký, không cần thẻ.
         </p>
@@ -307,7 +307,7 @@ function HeroQuotaBadge({ quota, isAuth }: { quota: QuotaResp; isAuth: boolean }
           Đã hết lượt thử miễn phí · <Link to="/register" className="underline font-semibold">Đăng ký để tiếp tục</Link>
         </span>
       ) : (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-violet-200 text-slate-700 shadow-sm">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ink-900 border border-violet-200 text-ink-200 shadow-sm">
           <Sparkles size={14} className="text-violet-500" />
           Còn <strong className="text-violet-700">{quota.remaining}</strong>/{quota.daily_cap} lượt miễn phí · reset sau 24h
         </span>
@@ -337,18 +337,18 @@ function PromptForm({
   isExhausted: boolean;
 }) {
   return (
-    <div className="rounded-2xl bg-white p-5 sm:p-6 ring-1 ring-slate-200 shadow-sm">
+    <div className="rounded-2xl bg-ink-900 p-5 sm:p-6 ring-1 ring-slate-200 shadow-sm">
       <label className="block">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-semibold text-slate-800 inline-flex items-center gap-1.5">
+          <span className="text-sm font-semibold text-ink-100 inline-flex items-center gap-1.5">
             <Sparkles size={14} className="text-violet-500" /> Mô tả ảnh (prompt)
           </span>
-          <span className="text-xs text-slate-400 font-mono">
+          <span className="text-xs text-ink-500 font-mono">
             {prompt.length}/2000
           </span>
         </div>
         <textarea
-          className="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm font-mono outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100 transition resize-none"
+          className="w-full rounded-lg border border-ink-700 px-3 py-3 text-sm font-mono outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100 transition resize-none"
           rows={4}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -359,7 +359,7 @@ function PromptForm({
 
       {/* Aspect chips */}
       <div className="mt-4">
-        <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Khung hình</p>
+        <p className="text-xs font-semibold text-ink-300 uppercase tracking-wider mb-2">Khung hình</p>
         <div className="flex flex-wrap gap-1.5">
           {ASPECTS.map((a) => (
             <button
@@ -369,7 +369,7 @@ function PromptForm({
               className={`px-3 py-1.5 text-sm font-medium rounded-md border transition ${
                 aspect === a.v
                   ? "bg-violet-600 text-white border-violet-600 shadow-sm"
-                  : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                  : "bg-ink-900 text-ink-200 border-ink-700 hover:bg-ink-950"
               }`}
             >
               <span className="font-mono">{a.v}</span>
@@ -381,7 +381,7 @@ function PromptForm({
 
       {/* Quality chips */}
       <div className="mt-4">
-        <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Chất lượng</p>
+        <p className="text-xs font-semibold text-ink-300 uppercase tracking-wider mb-2">Chất lượng</p>
         <div className="flex gap-1.5">
           <button
             type="button"
@@ -389,7 +389,7 @@ function PromptForm({
             className={`flex-1 sm:flex-none px-4 py-2 text-sm font-medium rounded-md border inline-flex items-center justify-center gap-1.5 transition ${
               quality === "speed"
                 ? "bg-fuchsia-600 text-white border-fuchsia-600 shadow-sm"
-                : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                : "bg-ink-900 text-ink-200 border-ink-700 hover:bg-ink-950"
             }`}
           >
             <Zap size={14} /> Nhanh (~15s)
@@ -400,7 +400,7 @@ function PromptForm({
             className={`flex-1 sm:flex-none px-4 py-2 text-sm font-medium rounded-md border inline-flex items-center justify-center gap-1.5 transition ${
               quality === "quality"
                 ? "bg-fuchsia-600 text-white border-fuchsia-600 shadow-sm"
-                : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                : "bg-ink-900 text-ink-200 border-ink-700 hover:bg-ink-950"
             }`}
           >
             <Crown size={14} /> Cao (~45s)
@@ -409,8 +409,8 @@ function PromptForm({
       </div>
 
       {/* Submit row */}
-      <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
-        <div className="text-xs text-slate-500">
+      <div className="mt-5 pt-4 border-t border-ink-800 flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-xs text-ink-400">
           {isAuth ? (
             <span className="inline-flex items-center gap-1">
               <Check size={12} className="text-emerald-500" /> Dùng quota gói
@@ -455,12 +455,12 @@ function ResultCard({
   const isPending = !isDone && !isFailed;
 
   return (
-    <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 shadow-sm">
+    <div className="rounded-2xl bg-ink-900 p-5 ring-1 ring-slate-200 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-slate-800 inline-flex items-center gap-2">
+        <h3 className="font-semibold text-ink-100 inline-flex items-center gap-2">
           <ImageIcon size={16} className="text-violet-600" /> Kết quả
         </h3>
-        <code className="text-[10px] font-mono text-slate-400">
+        <code className="text-[10px] font-mono text-ink-500">
           {job.job_id.slice(0, 8)} · {job.status}
         </code>
       </div>
@@ -468,17 +468,17 @@ function ResultCard({
       {isPending && (
         <div className="rounded-xl bg-gradient-to-br from-violet-100 via-fuchsia-100 to-rose-100 aspect-square max-w-md mx-auto flex items-center justify-center relative overflow-hidden">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,white,transparent_70%)] opacity-50 animate-pulse" />
-          <div className="text-center text-slate-700 relative z-10">
+          <div className="text-center text-ink-200 relative z-10">
             <Loader2 size={36} className="mx-auto animate-spin text-violet-500" />
             <p className="text-sm mt-3 font-medium">Đang render bằng Grok Imagine</p>
-            <p className="text-xs text-slate-500 mt-1">15-30s tuỳ tải · status={job.status}</p>
+            <p className="text-xs text-ink-400 mt-1">15-30s tuỳ tải · status={job.status}</p>
           </div>
         </div>
       )}
 
       {isDone && (
         <>
-          <div className="rounded-xl overflow-hidden bg-slate-100 shadow-lg">
+          <div className="rounded-xl overflow-hidden bg-ink-800 shadow-lg">
             <img
               src={job.result_url!}
               alt={prompt}
@@ -486,13 +486,13 @@ function ResultCard({
             />
           </div>
           <div className="flex justify-between items-center gap-2 mt-3 flex-wrap">
-            <p className="text-xs text-slate-500 italic truncate max-w-md">"{prompt}"</p>
+            <p className="text-xs text-ink-400 italic truncate max-w-md">"{prompt}"</p>
             <div className="flex gap-2 flex-shrink-0">
               <CopyPromptButton text={prompt} />
               <a
                 href={job.result_url!}
                 download
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-ink-800 hover:bg-slate-200 text-ink-200 text-sm font-medium"
               >
                 <Download size={14} /> Tải về
               </a>
@@ -515,7 +515,7 @@ function ResultCard({
           <p className="text-xs text-rose-700 mt-1">{job.error_message || "Hệ thống bận, thử lại sau."}</p>
           <button
             onClick={onRetry}
-            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white text-rose-700 text-xs font-medium hover:bg-rose-100 ring-1 ring-rose-200"
+            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-ink-900 text-rose-700 text-xs font-medium hover:bg-rose-100 ring-1 ring-rose-200"
           >
             <RefreshCw size={12} /> Thử lại
           </button>
@@ -534,7 +534,7 @@ function CopyPromptButton({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium"
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-ink-800 hover:bg-slate-200 text-ink-200 text-sm font-medium"
       title="Copy prompt"
     >
       {copied ? <><Check size={14} className="text-emerald-600" /> Đã copy</> : <><Copy size={14} /> Copy prompt</>}
@@ -577,12 +577,12 @@ function HistorySection({
   items, onPick, onClear,
 }: { items: HistoryItem[]; onPick: (it: HistoryItem) => void; onClear: () => void }) {
   return (
-    <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+    <div className="rounded-2xl bg-ink-900 p-5 ring-1 ring-slate-200">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-slate-800 inline-flex items-center gap-2">
+        <h3 className="font-semibold text-ink-100 inline-flex items-center gap-2">
           <History size={16} className="text-cyan-600" /> Lịch sử (local)
         </h3>
-        <button onClick={onClear} className="text-xs text-slate-400 hover:text-rose-600">
+        <button onClick={onClear} className="text-xs text-ink-500 hover:text-rose-600">
           Xóa lịch sử
         </button>
       </div>
@@ -591,7 +591,7 @@ function HistorySection({
           <button
             key={it.job_id}
             onClick={() => onPick(it)}
-            className="group relative aspect-square rounded-lg overflow-hidden bg-slate-100 ring-1 ring-slate-200 hover:ring-2 hover:ring-violet-500 transition"
+            className="group relative aspect-square rounded-lg overflow-hidden bg-ink-800 ring-1 ring-slate-200 hover:ring-2 hover:ring-violet-500 transition"
             title={it.prompt}
           >
             <img src={it.result_url} alt={it.prompt} className="absolute inset-0 w-full h-full object-cover" />
@@ -601,7 +601,7 @@ function HistorySection({
           </button>
         ))}
       </div>
-      <p className="text-[11px] text-slate-400 mt-2">
+      <p className="text-[11px] text-ink-500 mt-2">
         Lưu trong trình duyệt của bạn · không sync · click để load lại prompt
       </p>
     </div>
@@ -613,10 +613,10 @@ function HistorySection({
 function ExamplePromptsCard({ onPick }: { onPick: (p: string) => void }) {
   return (
     <div className="rounded-2xl bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4 ring-1 ring-violet-200">
-      <h3 className="font-semibold text-slate-800 inline-flex items-center gap-1.5 mb-2">
+      <h3 className="font-semibold text-ink-100 inline-flex items-center gap-1.5 mb-2">
         <Lightbulb size={16} className="text-amber-500" /> Prompt mẫu
       </h3>
-      <p className="text-xs text-slate-600 mb-3">
+      <p className="text-xs text-ink-300 mb-3">
         Bí ý tưởng? Bấm để dùng:
       </p>
       <ul className="space-y-1.5">
@@ -624,11 +624,11 @@ function ExamplePromptsCard({ onPick }: { onPick: (p: string) => void }) {
           <li key={p.label}>
             <button
               onClick={() => onPick(p.prompt)}
-              className="w-full text-left text-sm rounded-md bg-white hover:bg-violet-100 px-3 py-2 transition flex items-center gap-2"
+              className="w-full text-left text-sm rounded-md bg-ink-900 hover:bg-violet-100 px-3 py-2 transition flex items-center gap-2"
             >
               <span className="text-base">{p.emoji}</span>
-              <span className="font-medium text-slate-700 flex-1">{p.label}</span>
-              <ArrowRight size={12} className="text-slate-400" />
+              <span className="font-medium text-ink-200 flex-1">{p.label}</span>
+              <ArrowRight size={12} className="text-ink-500" />
             </button>
           </li>
         ))}
@@ -639,16 +639,16 @@ function ExamplePromptsCard({ onPick }: { onPick: (p: string) => void }) {
 
 function TipsCard() {
   return (
-    <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-      <h3 className="font-semibold text-slate-800 inline-flex items-center gap-1.5 mb-2">
+    <div className="rounded-2xl bg-ink-900 p-4 ring-1 ring-slate-200">
+      <h3 className="font-semibold text-ink-100 inline-flex items-center gap-1.5 mb-2">
         <BookOpen size={16} className="text-cyan-600" /> Prompt hay
       </h3>
-      <ul className="space-y-2 text-xs text-slate-600 leading-relaxed">
-        <li><strong className="text-slate-800">Cụ thể hơn</strong> luôn tốt hơn. "Mèo" → "mèo Anh lông ngắn, mắt xanh, nằm trên ghế velvet đỏ".</li>
-        <li><strong className="text-slate-800">Thêm style</strong>: watercolor, oil painting, photorealistic, anime, 3D render, pixel art.</li>
-        <li><strong className="text-slate-800">Thêm lighting</strong>: golden hour, neon, dramatic side lighting, soft studio.</li>
-        <li><strong className="text-slate-800">Tỷ lệ phù hợp</strong>: 16:9 cho landscape, 9:16 cho mobile, 1:1 cho avatar.</li>
-        <li><strong className="text-slate-800">English thường ra tốt hơn</strong> tiếng Việt vì model train chủ yếu tiếng Anh.</li>
+      <ul className="space-y-2 text-xs text-ink-300 leading-relaxed">
+        <li><strong className="text-ink-100">Cụ thể hơn</strong> luôn tốt hơn. "Mèo" → "mèo Anh lông ngắn, mắt xanh, nằm trên ghế velvet đỏ".</li>
+        <li><strong className="text-ink-100">Thêm style</strong>: watercolor, oil painting, photorealistic, anime, 3D render, pixel art.</li>
+        <li><strong className="text-ink-100">Thêm lighting</strong>: golden hour, neon, dramatic side lighting, soft studio.</li>
+        <li><strong className="text-ink-100">Tỷ lệ phù hợp</strong>: 16:9 cho landscape, 9:16 cho mobile, 1:1 cho avatar.</li>
+        <li><strong className="text-ink-100">English thường ra tốt hơn</strong> tiếng Việt vì model train chủ yếu tiếng Anh.</li>
       </ul>
     </div>
   );
@@ -663,10 +663,10 @@ function UpsellCard() {
         Đăng ký miễn phí để nhận 10 ảnh/ngày. Lên Pro: 200 ảnh + 200 video, API key, Quality mode, Webhook.
       </p>
       <div className="mt-3 space-y-1.5">
-        <Link to="/register" className="block text-center rounded-md bg-white text-violet-700 px-4 py-2 text-sm font-bold hover:bg-violet-50">
+        <Link to="/register" className="block text-center rounded-md bg-ink-900 text-violet-700 px-4 py-2 text-sm font-bold hover:bg-violet-50">
           Đăng ký miễn phí
         </Link>
-        <Link to="/pricing" className="block text-center rounded-md bg-white/15 backdrop-blur-sm border border-white/40 text-white px-4 py-2 text-sm font-semibold hover:bg-white/25">
+        <Link to="/pricing" className="block text-center rounded-md bg-ink-900/15 backdrop-blur-sm border border-white/40 text-white px-4 py-2 text-sm font-semibold hover:bg-ink-900/25">
           Xem bảng giá
         </Link>
       </div>
@@ -691,13 +691,13 @@ function HowItWorksStrip() {
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {steps.map((s, i) => (
-          <div key={s.title} className="relative rounded-xl bg-white p-5 ring-1 ring-slate-200">
+          <div key={s.title} className="relative rounded-xl bg-ink-900 p-5 ring-1 ring-slate-200">
             <span className="absolute -top-3 -right-3 w-9 h-9 rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white font-bold text-sm flex items-center justify-center shadow-md">
               {i + 1}
             </span>
             <s.icon size={22} className="text-violet-600" />
             <h3 className="font-bold mt-3">{s.title}</h3>
-            <p className="text-sm text-slate-600 mt-1 leading-snug">{s.desc}</p>
+            <p className="text-sm text-ink-300 mt-1 leading-snug">{s.desc}</p>
           </div>
         ))}
       </div>
@@ -740,16 +740,16 @@ function FaqStrip() {
 function FaqRow({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl bg-white ring-1 ring-slate-200 overflow-hidden">
+    <div className="rounded-xl bg-ink-900 ring-1 ring-slate-200 overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 text-left"
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-ink-950 text-left"
       >
-        <span className="font-semibold text-sm text-slate-800">{q}</span>
-        {open ? <X size={14} className="text-violet-600 rotate-45" /> : <ArrowRight size={14} className="text-slate-400" />}
+        <span className="font-semibold text-sm text-ink-100">{q}</span>
+        {open ? <X size={14} className="text-violet-600 rotate-45" /> : <ArrowRight size={14} className="text-ink-500" />}
       </button>
       {open && (
-        <div className="px-4 pb-3 text-sm text-slate-600 leading-relaxed border-t border-slate-100 pt-2">
+        <div className="px-4 pb-3 text-sm text-ink-300 leading-relaxed border-t border-ink-800 pt-2">
           {a}
         </div>
       )}
@@ -769,13 +769,13 @@ function Footer({ brandName }: { brandName: string }) {
               <Wand2 size={18} className="text-violet-400" />
               <span className="text-white">{brandName}</span>
             </Link>
-            <p className="text-xs text-slate-400 mt-2">
+            <p className="text-xs text-ink-500 mt-2">
               AI image/video API + LLM Gateway + Flow tools. Self-hosted ready.
             </p>
           </div>
           <div>
             <p className="font-semibold text-white mb-1.5">Sản phẩm</p>
-            <ul className="space-y-1 text-slate-400">
+            <ul className="space-y-1 text-ink-500">
               <li><Link to="/try/image" className="hover:text-violet-400">Thử Grok Image</Link></li>
               <li><Link to="/pricing" className="hover:text-violet-400">Bảng giá</Link></li>
               <li><Link to="/landing#modules" className="hover:text-violet-400">Tính năng</Link></li>
@@ -783,14 +783,14 @@ function Footer({ brandName }: { brandName: string }) {
           </div>
           <div>
             <p className="font-semibold text-white mb-1.5">Tài khoản</p>
-            <ul className="space-y-1 text-slate-400">
+            <ul className="space-y-1 text-ink-500">
               <li><Link to="/login" className="hover:text-violet-400">Đăng nhập</Link></li>
               <li><Link to="/register" className="hover:text-violet-400">Đăng ký</Link></li>
               <li><Link to="/terms" className="hover:text-violet-400">Điều khoản</Link></li>
             </ul>
           </div>
         </div>
-        <div className="mt-8 pt-4 border-t border-slate-800 flex justify-between items-center text-xs text-slate-500">
+        <div className="mt-8 pt-4 border-t border-slate-800 flex justify-between items-center text-xs text-ink-400">
           <span>© {new Date().getFullYear()} {brandName}.</span>
           <span className="inline-flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />

@@ -92,7 +92,7 @@ export function TenantDashboardPage() {
             <p className="text-sm opacity-90 mt-1">
               {me?.email}
               {domain?.hostname && (
-                <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-xs font-mono">
+                <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-ink-900/15 px-2 py-0.5 text-xs font-mono">
                   {domain.hostname}
                 </span>
               )}
@@ -104,7 +104,7 @@ export function TenantDashboardPage() {
 
       {/* KPIs */}
       {isLoading && !data ? (
-        <p className="text-slate-500">Đang tải…</p>
+        <p className="text-ink-400">Đang tải…</p>
       ) : data ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Kpi
@@ -157,13 +157,13 @@ export function TenantDashboardPage() {
 
 function PeriodTabs({ value, onChange }: { value: Period; onChange: (v: Period) => void }) {
   return (
-    <div className="inline-flex rounded-md bg-white/15 p-0.5">
+    <div className="inline-flex rounded-md bg-ink-900/15 p-0.5">
       {PERIODS.map((p) => (
         <button
           key={p.v}
           onClick={() => onChange(p.v)}
           className={`px-3 py-1 text-xs font-medium rounded-md transition ${
-            value === p.v ? "bg-white text-violet-700" : "text-white/90 hover:bg-white/10"
+            value === p.v ? "bg-ink-900 text-violet-700" : "text-white/90 hover:bg-ink-900/10"
           }`}
         >
           {p.label}
@@ -174,7 +174,7 @@ function PeriodTabs({ value, onChange }: { value: Period; onChange: (v: Period) 
 }
 
 const TONE_CLS: Record<string, { ring: string; icon: string; value: string }> = {
-  violet:  { ring: "ring-violet-100",  icon: "text-violet-500",  value: "text-slate-900" },
+  violet:  { ring: "ring-violet-100",  icon: "text-violet-500",  value: "text-white" },
   emerald: { ring: "ring-emerald-100", icon: "text-emerald-500", value: "text-emerald-600" },
   amber:   { ring: "ring-amber-100",   icon: "text-amber-500",   value: "text-amber-600" },
   rose:    { ring: "ring-rose-100",    icon: "text-rose-500",    value: "text-rose-600" },
@@ -189,13 +189,13 @@ function Kpi({
 }) {
   const t = TONE_CLS[tone];
   return (
-    <div className={`rounded-lg bg-white p-4 ring-1 ${t.ring} shadow-sm`}>
+    <div className={`rounded-lg bg-ink-900 p-4 ring-1 ${t.ring} shadow-sm`}>
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{label}</p>
+        <p className="text-xs font-medium text-ink-400 uppercase tracking-wider">{label}</p>
         <Icon size={18} className={t.icon} />
       </div>
       <p className={`text-2xl font-bold mt-2 ${t.value}`}>{value}</p>
-      {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
+      {sub && <p className="text-xs text-ink-400 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -233,7 +233,7 @@ const TONE_BG: Record<string, string> = {
   blue:    "bg-blue-50 text-blue-700 ring-blue-200 hover:bg-blue-100",
   fuchsia: "bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-200 hover:bg-fuchsia-100",
   amber:   "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100",
-  slate:   "bg-slate-50 text-slate-700 ring-slate-200 hover:bg-slate-100",
+  slate:   "bg-ink-900 text-ink-200 ring-ink-800 hover:bg-ink-800",
 };
 
 function QuickActions({ allowed }: { allowed: string[] }) {
@@ -246,7 +246,7 @@ function QuickActions({ allowed }: { allowed: string[] }) {
   if (visible.length === 0) return null;
   return (
     <section>
-      <h2 className="text-sm font-semibold text-slate-700 mb-2">Truy cập nhanh</h2>
+      <h2 className="text-sm font-semibold text-ink-200 mb-2">Truy cập nhanh</h2>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {visible.map((c) => (
           <Link
@@ -271,25 +271,25 @@ function QuickActions({ allowed }: { allowed: string[] }) {
 
 function RecentJobs({ jobs }: { jobs: JobLite[] }) {
   return (
-    <div className="rounded-lg bg-white ring-1 ring-slate-200 shadow-sm">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-        <h2 className="font-semibold text-slate-800">Job gần đây</h2>
+    <div className="rounded-lg bg-ink-900 ring-1 ring-ink-800 shadow-sm">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
+        <h2 className="font-semibold text-ink-100">Job gần đây</h2>
         <Link to="/jobs" className="text-xs text-violet-600 hover:underline inline-flex items-center gap-1">
           Tất cả <ArrowRight size={12} />
         </Link>
       </div>
       {jobs.length === 0 ? (
-        <p className="px-4 py-8 text-center text-sm text-slate-500">Chưa có job nào.</p>
+        <p className="px-4 py-8 text-center text-sm text-ink-400">Chưa có job nào.</p>
       ) : (
-        <ul className="divide-y divide-slate-100">
+        <ul className="divide-y divide-ink-800">
           {jobs.map((j) => (
             <li key={j.id} className="px-4 py-3 flex items-center gap-3">
               {j.job_type === "video"
                 ? <Video size={16} className="text-violet-500 flex-shrink-0" />
                 : <ImageIcon size={16} className="text-violet-500 flex-shrink-0" />}
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-slate-800 truncate">{j.prompt || "(no prompt)"}</p>
-                <p className="text-xs text-slate-500">
+                <p className="text-sm text-ink-100 truncate">{j.prompt || "(no prompt)"}</p>
+                <p className="text-xs text-ink-400">
                   <span className="font-mono">{j.id.slice(0, 8)}</span>
                   <span className="mx-1">·</span>
                   <span>{relativeTime(j.created_at)}</span>
@@ -305,11 +305,11 @@ function RecentJobs({ jobs }: { jobs: JobLite[] }) {
 }
 
 function SecondaryStats({ data }: { data: DashboardData | undefined }) {
-  if (!data) return <div className="rounded-lg bg-white p-4 ring-1 ring-slate-200" />;
+  if (!data) return <div className="rounded-lg bg-ink-900 p-4 ring-1 ring-ink-800" />;
   const t = data.totals;
   return (
-    <div className="rounded-lg bg-white p-4 ring-1 ring-slate-200 shadow-sm space-y-3">
-      <h2 className="font-semibold text-slate-800">Tài nguyên</h2>
+    <div className="rounded-lg bg-ink-900 p-4 ring-1 ring-ink-800 shadow-sm space-y-3">
+      <h2 className="font-semibold text-ink-100">Tài nguyên</h2>
       <Row label="API Keys" value={fmt(t.api_keys)} icon={KeyRound} />
       <Row
         label="Profiles"
@@ -335,14 +335,14 @@ function Row({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="w-9 h-9 rounded-md bg-slate-50 flex items-center justify-center flex-shrink-0">
-        <Icon size={16} className="text-slate-600" />
+      <div className="w-9 h-9 rounded-md bg-ink-900 flex items-center justify-center flex-shrink-0">
+        <Icon size={16} className="text-ink-300" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-slate-500">{label}</p>
-        <p className="text-sm font-semibold text-slate-800">
+        <p className="text-xs text-ink-400">{label}</p>
+        <p className="text-sm font-semibold text-ink-100">
           {value}
-          {sub && <span className="ml-1 text-xs font-normal text-slate-500">{sub}</span>}
+          {sub && <span className="ml-1 text-xs font-normal text-ink-400">{sub}</span>}
         </p>
       </div>
     </div>

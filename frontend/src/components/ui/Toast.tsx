@@ -33,17 +33,17 @@ const TOAST_VARIANTS = {
   success: {
     icon: CheckCircle2,
     iconClass: "text-emerald-500",
-    surface: "bg-white/95 border-emerald-200 text-emerald-900",
+    surface: "bg-ink-900/95 border-emerald-200 text-emerald-900",
   },
   error: {
     icon: AlertCircle,
     iconClass: "text-rose-500",
-    surface: "bg-white/95 border-rose-200 text-rose-900",
+    surface: "bg-ink-900/95 border-rose-200 text-rose-900",
   },
   info: {
     icon: Info,
     iconClass: "text-brand-500",
-    surface: "bg-white/95 border-brand-200 text-ink-900",
+    surface: "bg-ink-900/95 border-brand-200 text-ink-900",
   },
 } as const;
 

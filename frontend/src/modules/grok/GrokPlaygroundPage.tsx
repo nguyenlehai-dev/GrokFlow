@@ -49,7 +49,7 @@ export function GrokPlaygroundPage() {
           <h1 className="page-title flex items-center gap-2">
             <Activity size={22} className="text-violet-600" /> Grok Playground
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-ink-400 mt-0.5">
             Test API key của bạn bằng cách submit job qua đúng đường dẫn external client dùng.
           </p>
         </div>
@@ -171,7 +171,7 @@ function PlaygroundForm({ bearer, isAdmin }: { bearer: string | null; isAdmin: b
               className={`px-3 py-1.5 rounded-md border transition ${
                 jobType === t
                   ? "bg-violet-50 border-violet-500 text-violet-700"
-                  : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  : "border-ink-800 text-ink-300 hover:bg-ink-900"
               }`}
             >
               {t === "image" ? "Image" : "Video"}
@@ -180,21 +180,21 @@ function PlaygroundForm({ bearer, isAdmin }: { bearer: string | null; isAdmin: b
         </div>
 
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">Prompt</span>
+          <span className="text-sm font-medium text-ink-200">Prompt</span>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder={jobType === "image"
               ? "A serene japanese garden at dusk, watercolor style"
               : "A dragon flying over Ha Long Bay"}
-            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+            className="mt-1 w-full rounded-md border border-ink-700 px-3 py-2 text-sm font-mono outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
             rows={3}
           />
         </label>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
           <label className="block">
-            <span className="font-medium text-slate-700">Aspect</span>
+            <span className="font-medium text-ink-200">Aspect</span>
             <select
               value={aspect}
               onChange={(e) => setAspect(e.target.value)}
@@ -205,7 +205,7 @@ function PlaygroundForm({ bearer, isAdmin }: { bearer: string | null; isAdmin: b
           </label>
           {jobType === "image" ? (
             <label className="block">
-              <span className="font-medium text-slate-700">Quality</span>
+              <span className="font-medium text-ink-200">Quality</span>
               <select
                 value={quality}
                 onChange={(e) => setQuality(e.target.value)}
@@ -217,7 +217,7 @@ function PlaygroundForm({ bearer, isAdmin }: { bearer: string | null; isAdmin: b
           ) : (
             <>
               <label className="block">
-                <span className="font-medium text-slate-700">Resolution</span>
+                <span className="font-medium text-ink-200">Resolution</span>
                 <select
                   value={resolution}
                   onChange={(e) => setResolution(e.target.value as "480p" | "720p")}
@@ -228,7 +228,7 @@ function PlaygroundForm({ bearer, isAdmin }: { bearer: string | null; isAdmin: b
                 </select>
               </label>
               <label className="block">
-                <span className="font-medium text-slate-700">Duration (s)</span>
+                <span className="font-medium text-ink-200">Duration (s)</span>
                 <select
                   value={duration}
                   onChange={(e) => setDuration(Number(e.target.value))}
@@ -266,9 +266,9 @@ function PlaygroundForm({ bearer, isAdmin }: { bearer: string | null; isAdmin: b
           <div className="flex items-center gap-2 text-sm">
             <code className="font-mono text-xs">{result.id.slice(0, 8)}</code>
             <StatusBadge status={result.status} />
-            <span className="text-slate-500">{result.job_type}</span>
+            <span className="text-ink-400">{result.job_type}</span>
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-400">
             Job đã vào hàng đợi. Theo dõi tiến độ ở{" "}
             <a href="/grok/jobs" className="text-violet-600 hover:underline">/grok/jobs</a>.
           </p>

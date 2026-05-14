@@ -79,7 +79,7 @@ export function CheckoutPage() {
   });
 
   if (!plan_code) return <Navigate to="/pricing" replace />;
-  if (!plans) return <p className="text-slate-500">Đang tải...</p>;
+  if (!plans) return <p className="text-ink-400">Đang tải...</p>;
   if (!plan) return <Navigate to="/pricing" replace />;
   if (plan.price_vnd === null || plan.price_vnd === 0) return <Navigate to="/pricing" replace />;
 
@@ -94,7 +94,7 @@ export function CheckoutPage() {
     <div className="space-y-6 max-w-3xl">
       <div>
         <h1 className="page-title">Hoàn tất thanh toán</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-ink-400 mt-1">
           Bạn đang mua gói <strong>{plan.name}</strong> ({cycle === "yearly" ? "hàng năm" : "hàng tháng"}).
         </p>
       </div>
@@ -140,13 +140,13 @@ export function CheckoutPage() {
                     className={`text-left border rounded-md px-3 py-3 transition flex items-start gap-3 ${
                       provider === p.code
                         ? "border-brand-500 bg-brand-50"
-                        : "border-slate-200 hover:border-slate-300"
+                        : "border-ink-800 hover:border-ink-700"
                     } ${p.disabled ? "opacity-40 cursor-not-allowed" : ""}`}
                   >
-                    <Icon size={18} className="text-slate-700 flex-shrink-0 mt-0.5" />
+                    <Icon size={18} className="text-ink-200 flex-shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-sm">{p.label}</div>
-                      <div className="text-xs text-slate-500">{p.hint}</div>
+                      <div className="text-xs text-ink-400">{p.hint}</div>
                     </div>
                   </button>
                 );
@@ -157,7 +157,7 @@ export function CheckoutPage() {
           {/* Billing info (optional) */}
           <section className="card space-y-3">
             <h2 className="font-semibold">Thông tin hóa đơn (tùy chọn)</h2>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-ink-400">
               Điền nếu cần xuất hóa đơn cho doanh nghiệp.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -208,7 +208,7 @@ function CheckoutSuccess({
           </div>
           <div>
             <h2 className="text-lg font-semibold">Đơn hàng đã ghi nhận</h2>
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-ink-300">
               Hóa đơn <span className="font-mono font-semibold">{result.invoice_number}</span> ·{" "}
               {planName} ({cycle})
             </p>
@@ -220,7 +220,7 @@ function CheckoutSuccess({
           <p className="whitespace-pre-line">{result.instructions}</p>
         </div>
 
-        <div className="rounded-md border border-slate-200 p-3 space-y-1 text-sm">
+        <div className="rounded-md border border-ink-800 p-3 space-y-1 text-sm">
           <div className="font-semibold mb-1">Thông tin chuyển khoản:</div>
           <div>Ngân hàng: <strong>Vietcombank</strong></div>
           <div>Số TK: <strong>1234567890</strong></div>
@@ -228,7 +228,7 @@ function CheckoutSuccess({
           <div>
             Nội dung CK: <span className="font-mono font-bold text-rose-600">{result.invoice_number}</span>
           </div>
-          <div className="pt-1 text-slate-600">
+          <div className="pt-1 text-ink-300">
             Số tiền: <strong>{new Intl.NumberFormat("vi-VN").format(Number(result.amount))}₫</strong>
           </div>
         </div>
@@ -246,10 +246,10 @@ function Row({ label, value, sub }: { label: string; value: string; sub?: string
   return (
     <div className="flex items-start justify-between">
       <div>
-        <div className="text-slate-600">{label}</div>
-        {sub && <div className="text-xs text-slate-400">{sub}</div>}
+        <div className="text-ink-300">{label}</div>
+        {sub && <div className="text-xs text-ink-500">{sub}</div>}
       </div>
-      <div className="text-slate-900 font-medium text-right">{value}</div>
+      <div className="text-white font-medium text-right">{value}</div>
     </div>
   );
 }

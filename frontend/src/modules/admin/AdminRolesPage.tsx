@@ -112,7 +112,7 @@ function Inner() {
           <Plus size={14} /> Tạo role
         </button>
       </div>
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-ink-400">
         Role là tập quyền có tên thuộc một domain. Mỗi role chứa danh sách page con của domain
         và được gán cho user khi tạo tài khoản — user chỉ thấy menu của role đó.
       </p>
@@ -120,9 +120,9 @@ function Inner() {
       {/* Filter bar — search + status + domain (super_admin only) */}
       <div className="card flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[200px]">
-          <label className="text-xs font-medium text-slate-600">Tìm role</label>
-          <div className="mt-1 flex items-center rounded-md border border-slate-300 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
-            <Search size={14} className="text-slate-400" />
+          <label className="text-xs font-medium text-ink-300">Tìm role</label>
+          <div className="mt-1 flex items-center rounded-md border border-ink-700 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
+            <Search size={14} className="text-ink-500" />
             <input
               className="w-full bg-transparent px-2 py-1.5 text-sm outline-none"
               placeholder="Theo tên hoặc mô tả..."
@@ -132,7 +132,7 @@ function Inner() {
           </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-slate-600">Status</label>
+          <label className="text-xs font-medium text-ink-300">Status</label>
           <select
             className="input mt-1 w-32"
             value={statusFilter}
@@ -145,7 +145,7 @@ function Inner() {
         </div>
         {isSuper && (
           <div className="min-w-[200px]">
-            <label className="text-xs font-medium text-slate-600">Domain</label>
+            <label className="text-xs font-medium text-ink-300">Domain</label>
             <select
               className="input mt-1"
               value={filterDomain}
@@ -158,17 +158,17 @@ function Inner() {
             </select>
           </div>
         )}
-        <div className="text-xs text-slate-500">
+        <div className="text-xs text-ink-400">
           {filteredRoles.length} / {roles?.length ?? 0} role
         </div>
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-3 py-2">Tên / Mô tả</th>
                 <th className="px-3 py-2">Domain</th>
@@ -180,11 +180,11 @@ function Inner() {
             </thead>
             <tbody>
               {filteredRoles.map((r) => (
-                <tr key={r.id} className="border-t hover:bg-slate-50 align-top">
+                <tr key={r.id} className="border-t hover:bg-ink-900 align-top">
                   <td className="px-3 py-2">
-                    <div className="font-medium text-slate-800">{r.name}</div>
+                    <div className="font-medium text-ink-100">{r.name}</div>
                     {r.description && (
-                      <div className="text-xs text-slate-500 mt-0.5 line-clamp-2 max-w-xs">
+                      <div className="text-xs text-ink-400 mt-0.5 line-clamp-2 max-w-xs">
                         {r.description}
                       </div>
                     )}
@@ -194,12 +194,12 @@ function Inner() {
                     <PagesCell paths={r.allowed_pages} />
                   </td>
                   <td className="px-3 py-2 text-xs">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-ink-800 text-ink-200 font-mono">
                       <Users size={11} /> {r.user_count}
                     </span>
                   </td>
                   <td className="px-3 py-2">
-                    <span className={`text-xs px-2 py-0.5 rounded ${r.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded ${r.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-ink-800 text-ink-300"}`}>
                       {r.status}
                     </span>
                   </td>
@@ -237,7 +237,7 @@ function Inner() {
               ))}
               {filteredRoles.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={6} className="px-3 py-6 text-center text-ink-400">
                     {roles && roles.length > 0
                       ? "Không có role nào khớp filter."
                       : "Chưa có role nào — tạo role đầu tiên cho domain của bạn."}
@@ -284,11 +284,11 @@ function PagesCell({ paths }: { paths: string[] }) {
   const preview = labels.slice(0, 3).join(", ");
   return (
     <div className="text-xs" title={tooltip}>
-      <span className="font-mono text-slate-700">{paths.length} page</span>
+      <span className="font-mono text-ink-200">{paths.length} page</span>
       {paths.length > 0 && (
-        <div className="text-slate-500 mt-0.5 line-clamp-1 max-w-[16rem]">
+        <div className="text-ink-400 mt-0.5 line-clamp-1 max-w-[16rem]">
           {preview}
-          {paths.length > 3 && <span className="text-slate-400"> +{paths.length - 3}</span>}
+          {paths.length > 3 && <span className="text-ink-500"> +{paths.length - 3}</span>}
         </div>
       )}
     </div>
@@ -344,7 +344,7 @@ function RoleEditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <div className="w-full max-w-2xl max-h-[95vh] overflow-auto rounded-lg bg-white p-5 shadow-xl space-y-4">
+      <div className="w-full max-w-2xl max-h-[95vh] overflow-auto rounded-lg bg-ink-900 p-5 shadow-xl space-y-4">
         <h2 className="text-lg font-semibold">
           {isCreate ? "Tạo role mới" : `Sửa role: ${role?.name}`}
         </h2>
@@ -369,7 +369,7 @@ function RoleEditorModal({
               ))}
             </select>
             {!isCreate && (
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-ink-400 mt-1">
                 Domain không đổi được sau khi tạo (role gắn cứng với 1 domain).
               </p>
             )}
@@ -392,12 +392,12 @@ function RoleEditorModal({
 
         <section className="border-t pt-3 space-y-2">
           <h3 className="text-sm font-semibold">Trang được phép truy cập</h3>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-400">
             Chỉ những trang nằm trong allowlist của domain mới hiển thị bên dưới.
             User được gán role này sẽ thấy đúng các trang đã tick.
           </p>
           {!domainId ? (
-            <p className="text-slate-500">Chọn domain trước để xem danh sách trang.</p>
+            <p className="text-ink-400">Chọn domain trước để xem danh sách trang.</p>
           ) : (
             <div className="space-y-3">
               {PAGE_GROUPS.map((group) => {
@@ -430,7 +430,7 @@ function RoleEditorModal({
                       {visibleItems.map((p) => (
                         <label
                           key={p.path}
-                          className="flex items-start gap-2 border rounded px-3 py-2 cursor-pointer hover:bg-slate-50"
+                          className="flex items-start gap-2 border rounded px-3 py-2 cursor-pointer hover:bg-ink-900"
                         >
                           <input
                             type="checkbox"
@@ -440,7 +440,7 @@ function RoleEditorModal({
                           />
                           <span className="flex-1 min-w-0">
                             <span className="font-medium">{p.label}</span>
-                            <span className="text-xs text-slate-500 block">{p.path}</span>
+                            <span className="text-xs text-ink-400 block">{p.path}</span>
                           </span>
                         </label>
                       ))}

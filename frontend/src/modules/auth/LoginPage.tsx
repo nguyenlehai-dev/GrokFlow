@@ -42,13 +42,13 @@ export function LoginPage() {
           highlights so the page is more than a bare form. */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-gradient-brand">
         {/* Decorative orbs */}
-        <div className="absolute -top-20 -left-20 w-80 h-80 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute -top-20 -left-20 w-80 h-80 rounded-full bg-ink-900/10 blur-3xl" />
         <div className="absolute bottom-0 right-0 w-96 h-96 rounded-full bg-accent-fuchsia/30 blur-3xl" />
         <div className="absolute top-1/2 left-1/3 w-64 h-64 rounded-full bg-accent-cyan/20 blur-3xl" />
 
         <div className="relative z-10 flex flex-col justify-between p-12 text-white">
           <Link to="/" className="flex items-center gap-3">
-            <span className="w-11 h-11 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center font-bold text-xl">
+            <span className="w-11 h-11 rounded-xl bg-ink-900/15 backdrop-blur flex items-center justify-center font-bold text-xl">
               {brandName[0]}
             </span>
             <span className="font-bold text-2xl">{brandName}</span>
@@ -71,7 +71,7 @@ export function LoginPage() {
                 { icon: Zap, text: "API key duy nhất, route tự động" },
               ].map(({ icon: Icon, text }) => (
                 <li key={text} className="flex items-center gap-3 text-white/90">
-                  <span className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center">
+                  <span className="w-8 h-8 rounded-lg bg-ink-900/15 flex items-center justify-center">
                     <Icon size={16} />
                   </span>
                   <span className="text-sm">{text}</span>

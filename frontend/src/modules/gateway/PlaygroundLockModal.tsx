@@ -34,17 +34,17 @@ export function PlaygroundLockModal() {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-xl bg-ink-900 p-6 shadow-xl">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
             <Lock size={20} className="text-amber-600" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">
+            <p className="text-xs uppercase tracking-wider text-ink-400 font-semibold">
               System Auth Required
             </p>
-            <h2 className="text-xl font-bold text-slate-900 mt-1">Playground is locked</h2>
-            <p className="text-sm text-slate-600 mt-2">
+            <h2 className="text-xl font-bold text-white mt-1">Playground is locked</h2>
+            <p className="text-sm text-ink-300 mt-2">
               Verify a Gateway API Key before running execute, async submit, or
               request-status checks from the Playground.
             </p>
@@ -80,7 +80,7 @@ export function PlaygroundLockModal() {
                 )}
               </button>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-ink-400">
               Chưa có key? Vào <a href="/gateway/gateway-keys" className="text-brand-600 underline">/gateway/gateway-keys</a> để issue key mới.
             </p>
           </div>
@@ -126,7 +126,7 @@ export function SystemAuthIndicator({ isAdmin }: { isAdmin: boolean }) {
       <CheckCircle2 size={12} /> System Auth verified · {current.label}
       <button
         onClick={() => clear()}
-        className="ml-1 hover:text-slate-700 underline"
+        className="ml-1 hover:text-ink-200 underline"
         title="Đăng xuất key"
       >
         clear

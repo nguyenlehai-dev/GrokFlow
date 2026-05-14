@@ -69,13 +69,13 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
       return <Navigate to={target} replace />;
     }
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50">
+      <div className="flex h-screen items-center justify-center bg-ink-900">
         <div className="card max-w-md text-center">
-          <h2 className="text-lg font-semibold text-slate-900">Trang không khả dụng</h2>
-          <p className="text-sm text-slate-600 mt-2">
+          <h2 className="text-lg font-semibold text-white">Trang không khả dụng</h2>
+          <p className="text-sm text-ink-300 mt-2">
             Domain <code className="font-mono">{domainConfig?.hostname}</code> chưa được cấp quyền vào trang nào.
           </p>
-          <p className="text-xs text-slate-500 mt-3">
+          <p className="text-xs text-ink-400 mt-3">
             Liên hệ admin để được cấp quyền.
           </p>
         </div>

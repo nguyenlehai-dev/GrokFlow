@@ -62,7 +62,7 @@ function Inner() {
           <h1 className="page-title flex items-center gap-2">
             <LayoutDashboard size={22} /> Gateway — Overview
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-sm text-ink-400 mt-1">
             Auto-refresh mỗi 15s — toàn cảnh gateway operations.
           </p>
         </div>
@@ -115,9 +115,9 @@ function Inner() {
                         {p.notes ?? "Ready for cookie import, proxy & antidetect setup."}
                       </p>
                       <div className="flex gap-1.5 mt-1.5 text-[10px]">
-                        {p.supports_cookie_import && <span className="px-1.5 py-0.5 rounded bg-white/10">cookies</span>}
-                        {p.supports_proxy && <span className="px-1.5 py-0.5 rounded bg-white/10">proxy</span>}
-                        {p.supports_antidetect && <span className="px-1.5 py-0.5 rounded bg-white/10">antidetect</span>}
+                        {p.supports_cookie_import && <span className="px-1.5 py-0.5 rounded bg-ink-900/10">cookies</span>}
+                        {p.supports_proxy && <span className="px-1.5 py-0.5 rounded bg-ink-900/10">proxy</span>}
+                        {p.supports_antidetect && <span className="px-1.5 py-0.5 rounded bg-ink-900/10">antidetect</span>}
                       </div>
                     </div>
                   </div>
@@ -136,7 +136,7 @@ function Inner() {
                 return (
                   <div key={c.category} className="flex items-center gap-3">
                     <span className="w-24 text-sm">{v.label}</span>
-                    <div className="flex-1 h-6 bg-slate-100 rounded overflow-hidden">
+                    <div className="flex-1 h-6 bg-ink-800 rounded overflow-hidden">
                       <div
                         className="h-full transition-all"
                         style={{ width: `${pct}%`, backgroundColor: v.accent }}
@@ -147,7 +147,7 @@ function Inner() {
                 );
               })}
               {(o?.categories ?? []).length === 0 && (
-                <p className="text-sm text-slate-400">Chưa có profile nào.</p>
+                <p className="text-sm text-ink-500">Chưa có profile nào.</p>
               )}
             </div>
           </section>
@@ -160,9 +160,9 @@ function Inner() {
 function Stat({ label, main, sub }: { label: string; main: number | string; sub: string }) {
   return (
     <div className="card">
-      <div className="text-sm text-slate-500">{label}</div>
-      <div className="mt-2 text-3xl font-semibold text-slate-900">{main}</div>
-      <div className="text-xs text-slate-400 mt-1">{sub}</div>
+      <div className="text-sm text-ink-400">{label}</div>
+      <div className="mt-2 text-3xl font-semibold text-white">{main}</div>
+      <div className="text-xs text-ink-500 mt-1">{sub}</div>
     </div>
   );
 }

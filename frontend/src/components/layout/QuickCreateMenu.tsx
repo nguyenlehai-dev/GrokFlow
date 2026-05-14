@@ -93,10 +93,10 @@ export function QuickCreateMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 w-80 max-w-[calc(100vw-1rem)] rounded-lg bg-white shadow-xl ring-1 ring-slate-200 z-40 overflow-hidden">
-          <div className="px-3 py-2 border-b border-slate-100 bg-slate-50">
-            <p className="text-xs font-semibold text-slate-700">Tạo nhanh</p>
-            <p className="text-[11px] text-slate-500">Chọn loại nội dung — mở playground tương ứng</p>
+        <div className="absolute right-0 top-full mt-1.5 w-80 max-w-[calc(100vw-1rem)] rounded-lg bg-ink-900 shadow-xl ring-1 ring-ink-800 z-40 overflow-hidden">
+          <div className="px-3 py-2 border-b border-ink-800 bg-ink-900">
+            <p className="text-xs font-semibold text-ink-200">Tạo nhanh</p>
+            <p className="text-[11px] text-ink-400">Chọn loại nội dung — mở playground tương ứng</p>
           </div>
           <ul>
             {ITEMS.map((it) => (
@@ -104,24 +104,24 @@ export function QuickCreateMenu() {
                 <Link
                   to={it.to}
                   onClick={() => setOpen(false)}
-                  className="group flex items-start gap-2.5 px-3 py-2.5 hover:bg-slate-50 transition"
+                  className="group flex items-start gap-2.5 px-3 py-2.5 hover:bg-ink-900 transition"
                 >
                   <div className={`w-9 h-9 rounded-md flex items-center justify-center flex-shrink-0 ${TONE_BG[it.tone]}`}>
                     <it.icon size={16} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-semibold text-slate-800 truncate">{it.label}</p>
+                      <p className="text-sm font-semibold text-ink-100 truncate">{it.label}</p>
                       {it.badge && (
                         <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
                           {it.badge}
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-tight mt-0.5">{it.desc}</p>
+                    <p className="text-[11px] text-ink-400 leading-tight mt-0.5">{it.desc}</p>
                   </div>
                   {it.publicOk && (
-                    <ExternalLink size={11} className="text-slate-300 mt-1 flex-shrink-0" />
+                    <ExternalLink size={11} className="text-ink-500 mt-1 flex-shrink-0" />
                   )}
                 </Link>
               </li>

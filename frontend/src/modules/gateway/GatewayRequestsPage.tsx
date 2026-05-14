@@ -58,7 +58,7 @@ export function GatewayRequestsPage() {
       <div className="card space-y-2">
         <h2 className="font-semibold">Gateway Requests</h2>
         {(data ?? []).length === 0 ? (
-          <p className="text-slate-500 text-sm">Chưa có request nào.</p>
+          <p className="text-ink-400 text-sm">Chưa có request nào.</p>
         ) : (
           <div className="space-y-2">
             {data!.map((r) => {
@@ -66,25 +66,25 @@ export function GatewayRequestsPage() {
                 ? r.request_body!.prompt : null;
               const respText = extractResponseText(r.response_body);
               return (
-                <div key={r.id} className="border border-slate-200 rounded p-3">
+                <div key={r.id} className="border border-ink-800 rounded p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <strong className="font-mono text-sm">{r.gw_id}</strong>
                         <StatusPill status={r.status} />
                         {r.latency_ms != null && (
-                          <span className="text-xs text-slate-500">{r.latency_ms}ms</span>
+                          <span className="text-xs text-ink-400">{r.latency_ms}ms</span>
                         )}
                       </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
+                      <div className="text-xs text-ink-400 mt-0.5">
                         {[r.vendor_name, r.pool_name].filter(Boolean).join(" / ")}
                         {r.function_code && <span> · {r.function_code}</span>}
                       </div>
-                      <div className="text-xs text-slate-500 font-mono">
+                      <div className="text-xs text-ink-400 font-mono">
                         {r.model ?? "—"} {r.pool_key_name && `· ${r.pool_key_name}`}
                       </div>
                       {(r.tokens_input != null || r.tokens_output != null || r.cost_cents != null) && (
-                        <div className="text-xs text-slate-600 mt-0.5">
+                        <div className="text-xs text-ink-300 mt-0.5">
                           {r.tokens_input != null && <span>in: <strong>{r.tokens_input}</strong></span>}
                           {r.tokens_output != null && <span className="ml-2">out: <strong>{r.tokens_output}</strong></span>}
                           {r.cost_cents != null && r.cost_cents > 0 && (
@@ -96,10 +96,10 @@ export function GatewayRequestsPage() {
                       )}
                       {prompt && (
                         <details className="mt-2 group">
-                          <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-700">
+                          <summary className="text-xs text-ink-400 cursor-pointer hover:text-ink-200">
                             Prompt ({prompt.length} chars)
                           </summary>
-                          <p className="text-xs text-slate-700 mt-1 whitespace-pre-wrap break-words bg-slate-50 p-2 rounded">
+                          <p className="text-xs text-ink-200 mt-1 whitespace-pre-wrap break-words bg-ink-900 p-2 rounded">
                             {prompt}
                           </p>
                         </details>
@@ -109,7 +109,7 @@ export function GatewayRequestsPage() {
                           <summary className="text-xs text-emerald-700 cursor-pointer hover:text-emerald-800 font-medium">
                             Response ({respText.length} chars)
                           </summary>
-                          <p className="text-sm text-slate-800 mt-1 whitespace-pre-wrap break-words bg-emerald-50 p-3 rounded leading-relaxed">
+                          <p className="text-sm text-ink-100 mt-1 whitespace-pre-wrap break-words bg-emerald-50 p-3 rounded leading-relaxed">
                             {respText}
                           </p>
                         </details>
@@ -120,7 +120,7 @@ export function GatewayRequestsPage() {
                         </p>
                       )}
                     </div>
-                    <span className="text-xs text-slate-400 font-mono whitespace-nowrap">
+                    <span className="text-xs text-ink-500 font-mono whitespace-nowrap">
                       {new Date(r.created_at).toLocaleTimeString("vi-VN")}
                     </span>
                   </div>
@@ -139,6 +139,6 @@ function StatusPill({ status }: { status: string }) {
     status === "succeeded" || status === "success" ? "bg-emerald-100 text-emerald-700"
     : status === "running" || status === "pending" ? "bg-amber-100 text-amber-700"
     : status === "failed" ? "bg-rose-100 text-rose-700"
-    : "bg-slate-100 text-slate-600";
+    : "bg-ink-800 text-ink-300";
   return <span className={`text-xs px-2 py-0.5 rounded ${cls}`}>{status}</span>;
 }

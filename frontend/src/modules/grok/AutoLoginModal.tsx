@@ -82,11 +82,11 @@ export function AutoLoginModal({ profileId, onClose }: { profileId: string; onCl
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-      <div className="w-full max-w-6xl h-[90vh] rounded-lg bg-white shadow-xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-6xl h-[90vh] rounded-lg bg-ink-900 shadow-xl flex flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h2 className="font-semibold">Đăng nhập provider — browser trong web</h2>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-ink-400">
               Đăng nhập tài khoản provider trong khung dưới. Xong bấm <strong>Lưu &amp; đóng</strong>.
             </p>
           </div>
@@ -103,9 +103,9 @@ export function AutoLoginModal({ profileId, onClose }: { profileId: string; onCl
           </div>
         </div>
 
-        <div className="flex-1 bg-slate-100 relative">
+        <div className="flex-1 bg-ink-800 relative">
           {phase === "starting" && (
-            <div className="absolute inset-0 flex items-center justify-center text-slate-500">
+            <div className="absolute inset-0 flex items-center justify-center text-ink-400">
               <div className="text-center space-y-2">
                 <div className="animate-spin rounded-full h-8 w-8 border-2 border-brand-500 border-t-transparent mx-auto" />
                 <p>Đang khởi động Chrome (kasmweb)... 10-30s</p>
@@ -116,7 +116,7 @@ export function AutoLoginModal({ profileId, onClose }: { profileId: string; onCl
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center space-y-2 max-w-md">
                 <p className="text-rose-600 font-medium">Lỗi khởi động VNC</p>
-                <p className="text-sm text-slate-600">{errMsg}</p>
+                <p className="text-sm text-ink-300">{errMsg}</p>
                 <button onClick={onClose} className="btn-ghost">Đóng</button>
               </div>
             </div>
@@ -129,7 +129,7 @@ export function AutoLoginModal({ profileId, onClose }: { profileId: string; onCl
           )}
         </div>
 
-        <div className="border-t bg-slate-50 px-4 py-2 text-xs text-slate-500">
+        <div className="border-t bg-ink-900 px-4 py-2 text-xs text-ink-400">
           Login Grok bình thường (paste pass Ctrl+V được). Xong bấm <strong>Lưu &amp; đóng</strong> —
           browser sẽ tiếp tục chạy nền để worker chạy job. Muốn tắt browser hoàn toàn, dùng nút
           <strong> Stop browser</strong> ở row profile.

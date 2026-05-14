@@ -204,7 +204,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm p-4 animate-fade-in">
       <form
         onSubmit={handleSubmit(onSubmit)}
-        className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card-hover space-y-4 max-h-[95vh] overflow-auto animate-scale-in border border-ink-200/60"
+        className="w-full max-w-3xl rounded-2xl bg-ink-900 p-6 shadow-card-hover space-y-4 max-h-[95vh] overflow-auto animate-scale-in border border-ink-200/60"
       >
         <div className="flex items-center justify-between pb-3 border-b border-ink-100">
           <div>
@@ -299,7 +299,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
             <label className="text-sm font-medium">
               Ảnh tham chiếu (optional) — quyết định mode:
             </label>
-            <p className="text-xs text-slate-600 mt-1">
+            <p className="text-xs text-ink-300 mt-1">
               {jobType === "image" ? (
                 <>
                   • Không upload → <strong>prompt → image</strong> (text-to-image)<br />
@@ -323,7 +323,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
                 </div>
               ) : (
                 <button type="button" onClick={() => fileRef.current?.click()}
-                  className="w-24 h-24 border-2 border-dashed border-slate-300 rounded flex flex-col items-center justify-center text-slate-400 hover:border-brand-500 hover:text-brand-500">
+                  className="w-24 h-24 border-2 border-dashed border-ink-700 rounded flex flex-col items-center justify-center text-ink-500 hover:border-brand-500 hover:text-brand-500">
                   <ImageIcon size={24} />
                   <span className="text-xs mt-1">{uploadInput.isPending ? "..." : "Upload"}</span>
                 </button>
@@ -335,7 +335,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           ) : (
-            <p className="text-xs text-slate-500 italic">
+            <p className="text-xs text-ink-400 italic">
               <Lock size={12} className="inline" /> Gói hiện tại không hỗ trợ upload ảnh tham chiếu cho {jobType}.
             </p>
           )
@@ -415,7 +415,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
                   );
                 })}
               </select>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-ink-400 mt-1">
                 Sau khi Grok render video, hệ thống tự click preset bạn chọn để regenerate phiên bản đó.
                 {canSpicy && (
                   <> <strong> Spicy (18+)</strong> chỉ có với account Pro/Heavy.</>
@@ -425,7 +425,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-ink-400">
           Grok luôn render <strong>4 variants</strong> mỗi job — sẽ hiện đủ trong gallery sau khi xong.
         </p>
 

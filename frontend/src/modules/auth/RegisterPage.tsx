@@ -56,13 +56,13 @@ export function RegisterPage() {
     <div className="min-h-screen flex bg-gradient-mesh">
       {/* Left art panel — mirrors LoginPage but pitches the free trial. */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-gradient-brand">
-        <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full bg-ink-900/10 blur-3xl" />
         <div className="absolute bottom-0 left-0 w-96 h-96 rounded-full bg-accent-cyan/30 blur-3xl" />
         <div className="absolute top-1/3 right-1/4 w-64 h-64 rounded-full bg-accent-fuchsia/20 blur-3xl" />
 
         <div className="relative z-10 flex flex-col justify-between p-12 text-white">
           <Link to="/" className="flex items-center gap-3">
-            <span className="w-11 h-11 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center font-bold text-xl">
+            <span className="w-11 h-11 rounded-xl bg-ink-900/15 backdrop-blur flex items-center justify-center font-bold text-xl">
               {brandName[0]}
             </span>
             <span className="font-bold text-2xl">{brandName}</span>
@@ -70,7 +70,7 @@ export function RegisterPage() {
 
           <div className="space-y-8">
             <div>
-              <span className="inline-block px-3 py-1 rounded-full bg-white/15 text-xs font-semibold tracking-wider uppercase">
+              <span className="inline-block px-3 py-1 rounded-full bg-ink-900/15 text-xs font-semibold tracking-wider uppercase">
                 Free forever — không cần thẻ
               </span>
               <h2 className="mt-4 text-4xl font-bold leading-tight">
@@ -92,7 +92,7 @@ export function RegisterPage() {
                 "Hỗ trợ tiếng Việt, server VN",
               ].map((text) => (
                 <li key={text} className="flex items-center gap-3 text-white/90">
-                  <span className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                  <span className="w-6 h-6 rounded-full bg-ink-900/20 flex items-center justify-center shrink-0">
                     <Check size={14} />
                   </span>
                   <span className="text-sm">{text}</span>

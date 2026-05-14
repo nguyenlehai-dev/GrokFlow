@@ -50,7 +50,7 @@ export function GatewayVendorsPage() {
         {/* Form (full width on small) */}
         <div className="card space-y-3">
           <h2 className="font-semibold">Create Vendor</h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-400">
             Click "Create Vendor" ở trên để mở modal, hoặc nhập trực tiếp ở đây.
           </p>
           <InlineCreateForm onDone={() => qc.invalidateQueries({ queryKey: ["gw-vendors"] })} />
@@ -60,26 +60,26 @@ export function GatewayVendorsPage() {
         <div className="card space-y-2">
           <h2 className="font-semibold">Vendor List</h2>
           {isLoading ? (
-            <p className="text-slate-500 text-sm">Đang tải...</p>
+            <p className="text-ink-400 text-sm">Đang tải...</p>
           ) : (vendors ?? []).length === 0 ? (
-            <p className="text-slate-500 text-sm">Chưa có vendor nào.</p>
+            <p className="text-ink-400 text-sm">Chưa có vendor nào.</p>
           ) : (
             <div className="space-y-2">
               {vendors!.map((v) => (
-                <div key={v.id} className="border border-slate-200 rounded p-3 hover:bg-slate-50">
+                <div key={v.id} className="border border-ink-800 rounded p-3 hover:bg-ink-900">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <strong>{v.name}</strong>
-                        <span className={`text-xs px-2 py-0.5 rounded ${v.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded ${v.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-ink-800 text-ink-400"}`}>
                           {v.status}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-500 font-mono">
+                      <div className="text-xs text-ink-400 font-mono">
                         {v.code} {v.short_name && `/ ${v.short_name}`}
                       </div>
                       {v.description && (
-                        <p className="text-sm text-slate-600 mt-1">{v.description}</p>
+                        <p className="text-sm text-ink-300 mt-1">{v.description}</p>
                       )}
                     </div>
                     <div className="flex gap-1">
@@ -168,7 +168,7 @@ function VendorEditorModal({
   });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <form onSubmit={handleSubmit((v) => save.mutate(v))} className="w-full max-w-md rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <form onSubmit={handleSubmit((v) => save.mutate(v))} className="w-full max-w-md rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">{isCreate ? "Tạo vendor" : `Sửa: ${vendor?.name}`}</h2>
         <div>
           <label className="text-sm font-medium">Name</label>

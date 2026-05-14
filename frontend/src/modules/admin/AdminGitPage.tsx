@@ -87,15 +87,15 @@ function Inner() {
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : !repos || repos.length === 0 ? (
-        <div className="card text-center py-8 text-slate-500">
+        <div className="card text-center py-8 text-ink-400">
           Chưa có git repo nào. Click "Tạo repo" để thêm.
         </div>
       ) : (
         <>
           {/* Tab strip */}
-          <div className="flex gap-1 border-b border-slate-200 flex-wrap">
+          <div className="flex gap-1 border-b border-ink-800 flex-wrap">
             {repos.map((r) => (
               <button
                 key={r.id}
@@ -103,13 +103,13 @@ function Inner() {
                 className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px inline-flex items-center gap-2 transition group ${
                   activeId === r.id
                     ? "border-brand-600 text-brand-700"
-                    : "border-transparent text-slate-500 hover:text-slate-700"
+                    : "border-transparent text-ink-400 hover:text-ink-200"
                 }`}
               >
                 <GitBranch size={14} />
                 {r.label}
                 <span
-                  className="ml-1 text-slate-300 hover:text-rose-500 cursor-pointer"
+                  className="ml-1 text-ink-500 hover:text-rose-500 cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
                     setEditing(r);
@@ -196,7 +196,7 @@ function RepoPanel({ repoId }: { repoId: string }) {
   const behindCount = status?.commits_behind ?? null;
 
   if (isLoading || !status) {
-    return <p className="text-slate-500">Đang tải...</p>;
+    return <p className="text-ink-400">Đang tải...</p>;
   }
 
   const serviceChoices = status.repo.services.length > 0
@@ -217,7 +217,7 @@ function RepoPanel({ repoId }: { repoId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="text-sm text-slate-500">
+        <div className="text-sm text-ink-400">
           <span className="font-mono">{status.repo.github_repo}</span>
           <span className="mx-2">·</span>
           <span className="font-mono">{status.repo.local_path}</span>
@@ -233,14 +233,14 @@ function RepoPanel({ repoId }: { repoId: string }) {
       </div>
 
       {/* Sub-tab strip */}
-      <div className="flex gap-1 border-b border-slate-200">
+      <div className="flex gap-1 border-b border-ink-800">
         {SUBTABS.map((t) => (
           <button
             key={t.key}
             type="button"
             onClick={() => setSubTab(t.key)}
             className={`relative px-3 py-1.5 text-sm font-medium transition ${
-              subTab === t.key ? "text-brand-700" : "text-slate-500 hover:text-slate-700"
+              subTab === t.key ? "text-brand-700" : "text-ink-400 hover:text-ink-200"
             }`}
           >
             {t.label}
@@ -260,12 +260,12 @@ function RepoPanel({ repoId }: { repoId: string }) {
           : ""
         }`}
       >
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-slate-100">
+        <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-ink-800">
           {isUpdated
             ? <CheckCircle2 size={20} className="text-emerald-600" />
             : behindCount && behindCount > 0
             ? <AlertCircle size={20} className="text-amber-600" />
-            : <GitBranch size={20} className="text-slate-600" />}
+            : <GitBranch size={20} className="text-ink-300" />}
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="font-semibold">
@@ -275,7 +275,7 @@ function RepoPanel({ repoId }: { repoId: string }) {
               ? `⚠ Đang chậm ${behindCount} commit so với GitHub`
               : "Trạng thái remote chưa xác định"}
           </h2>
-          <p className="text-sm text-slate-600 mt-0.5">
+          <p className="text-sm text-ink-300 mt-0.5">
             Branch: <code className="font-mono">{status.branch}</code>
             {status.is_dirty && (
               <span className="ml-2 text-rose-600 font-medium">⚠ working tree dirty</span>
@@ -309,7 +309,7 @@ function RepoPanel({ repoId }: { repoId: string }) {
                 className={`px-3 py-1.5 rounded-md text-sm border transition ${
                   (selectedServices ?? []).includes(s)
                     ? "bg-brand-50 border-brand-500 text-brand-700"
-                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    : "border-ink-800 text-ink-300 hover:bg-ink-900"
                 }`}
               >
                 {s}
@@ -345,7 +345,7 @@ function RepoPanel({ repoId }: { repoId: string }) {
             )}
           </button>
           {deploy.isPending && (
-            <span className="text-xs text-slate-500">Có thể mất 1-3 phút. Không đóng tab.</span>
+            <span className="text-xs text-ink-400">Có thể mất 1-3 phút. Không đóng tab.</span>
           )}
         </div>
       </section>
@@ -360,7 +360,7 @@ function RepoPanel({ repoId }: { repoId: string }) {
                 : <AlertCircle size={16} className="text-rose-600" />}
               Kết quả deploy gần nhất
             </h3>
-            <span className="text-xs text-slate-500">{lastResult.duration_seconds}s</span>
+            <span className="text-xs text-ink-400">{lastResult.duration_seconds}s</span>
           </div>
           <pre className="bg-slate-900 text-slate-100 p-3 rounded text-xs whitespace-pre-wrap overflow-auto max-h-96">
             {lastResult.log}
@@ -375,9 +375,9 @@ function RepoPanel({ repoId }: { repoId: string }) {
         <h2 className="font-semibold flex items-center gap-2">
           <Server size={16} /> Containers
         </h2>
-        <div className="overflow-hidden rounded-md border border-slate-200">
+        <div className="overflow-hidden rounded-md border border-ink-800">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-600">
+            <thead className="bg-ink-900 text-left text-ink-300">
               <tr>
                 <th className="px-3 py-2">Name</th>
                 <th className="px-3 py-2">Status</th>
@@ -394,16 +394,16 @@ function RepoPanel({ repoId }: { repoId: string }) {
                         ? "text-emerald-700"
                         : c.status.includes("unhealthy") || c.status.toLowerCase().includes("exited")
                         ? "text-rose-700"
-                        : "text-slate-600"
+                        : "text-ink-300"
                     }`}>
                       {c.status}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-xs text-slate-500">{c.started_at ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs text-ink-400">{c.started_at ?? "—"}</td>
                 </tr>
               ))}
               {status.containers.length === 0 && (
-                <tr><td colSpan={3} className="px-3 py-4 text-center text-slate-500">Không thấy container nào (kiểm tra label / docker-compose project name).</td></tr>
+                <tr><td colSpan={3} className="px-3 py-4 text-center text-ink-400">Không thấy container nào (kiểm tra label / docker-compose project name).</td></tr>
               )}
             </tbody>
           </table>
@@ -418,13 +418,13 @@ function RepoPanel({ repoId }: { repoId: string }) {
           </h2>
           <div className="space-y-1">
             {status.recent_commits.map((c) => (
-              <div key={c.hash} className="border border-slate-200 rounded px-3 py-2 text-sm hover:bg-slate-50">
+              <div key={c.hash} className="border border-ink-800 rounded px-3 py-2 text-sm hover:bg-ink-900">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <code className="font-mono text-xs text-amber-700">{c.short}</code>
-                  <span className="text-xs text-slate-500">{c.date}</span>
+                  <span className="text-xs text-ink-400">{c.date}</span>
                 </div>
-                <div className="text-slate-800 mt-0.5 truncate">{c.message}</div>
-                <div className="text-xs text-slate-500">{c.author}</div>
+                <div className="text-ink-100 mt-0.5 truncate">{c.message}</div>
+                <div className="text-xs text-ink-400">{c.author}</div>
               </div>
             ))}
           </div>
@@ -456,14 +456,14 @@ function RepoEnvTab({ repoId }: { repoId: string }) {
     onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Lỗi lưu .env", "error"),
   });
 
-  if (isLoading || !data) return <p className="text-slate-500">Đang tải .env...</p>;
+  if (isLoading || !data) return <p className="text-ink-400">Đang tải .env...</p>;
   const current = draft ?? data.env;
   return (
     <section className="card space-y-3">
       <header className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="font-semibold">Environment variables</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-ink-400 mt-0.5">
             File: <code className="font-mono">{data.path}</code>. Sửa rồi <strong>Lưu</strong>;
             container đang chạy KHÔNG tự reload — phải tab Deploy bấm "Deploy now" để pick up.
           </p>
@@ -484,7 +484,7 @@ function RepoEnvTab({ repoId }: { repoId: string }) {
         spellCheck={false}
       />
       <div className="flex justify-between items-center">
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-ink-400">
           {current.split("\n").filter((l) => l && !l.startsWith("#")).length} dòng có giá trị
         </span>
         <button
@@ -502,16 +502,16 @@ function RepoEnvTab({ repoId }: { repoId: string }) {
 function CommitCard({ title, commit }: { title: string; commit: Commit | null }) {
   return (
     <div className="card">
-      <h3 className="text-sm font-semibold text-slate-600 mb-2">{title}</h3>
+      <h3 className="text-sm font-semibold text-ink-300 mb-2">{title}</h3>
       {commit ? (
         <div className="space-y-1">
           <div className="font-mono text-xs text-amber-700">{commit.short}</div>
-          <div className="text-sm font-medium text-slate-900">{commit.message}</div>
-          <div className="text-xs text-slate-500">{commit.author}</div>
-          <div className="text-xs text-slate-400 font-mono">{commit.date}</div>
+          <div className="text-sm font-medium text-white">{commit.message}</div>
+          <div className="text-xs text-ink-400">{commit.author}</div>
+          <div className="text-xs text-ink-500 font-mono">{commit.date}</div>
         </div>
       ) : (
-        <p className="text-sm text-slate-400">—</p>
+        <p className="text-sm text-ink-500">—</p>
       )}
     </div>
   );
@@ -562,7 +562,7 @@ function RepoEditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl space-y-3">
+      <div className="w-full max-w-lg rounded-lg bg-ink-900 p-5 shadow-xl space-y-3">
         <h2 className="text-lg font-semibold">
           {isCreate ? "Tạo git repo mới" : `Sửa: ${repo?.label}`}
         </h2>
@@ -618,7 +618,7 @@ function RepoEditorModal({
           <input className="input font-mono" value={servicesText}
             onChange={(e) => setServicesText(e.target.value)}
             placeholder="backend, frontend, worker" />
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-ink-400 mt-1">
             Để trống = tất cả services trong compose file.
           </p>
         </div>

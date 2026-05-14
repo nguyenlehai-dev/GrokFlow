@@ -55,19 +55,19 @@ export function PricingPage() {
 
   const currentPlanCode = me?.entitlements?.plan_code;
 
-  if (isLoading) return <p className="text-slate-500">Đang tải...</p>;
+  if (isLoading) return <p className="text-ink-400">Đang tải...</p>;
 
   return (
     <div className="space-y-6 max-w-6xl">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="page-title">Đổi gói</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-sm text-ink-400 mt-1">
             Chọn gói phù hợp. Nâng cấp/hạ cấp bất cứ lúc nào — không phí ẩn.
           </p>
         </div>
         {/* Billing cycle toggle */}
-        <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5">
+        <div className="inline-flex rounded-md border border-ink-800 bg-ink-900 p-0.5">
           <CycleBtn active={cycle === "monthly"} onClick={() => setCycle("monthly")}>Hàng tháng</CycleBtn>
           <CycleBtn active={cycle === "yearly"} onClick={() => setCycle("yearly")}>
             Hàng năm <span className="ml-1 text-xs text-emerald-600 font-bold">-17%</span>
@@ -92,12 +92,12 @@ export function PricingPage() {
           return (
             <div
               key={p.id}
-              className={`rounded-xl border bg-white p-5 flex flex-col ${
-                isHighlight ? "border-brand-500 ring-2 ring-brand-100 shadow-md" : "border-slate-200"
+              className={`rounded-xl border bg-ink-900 p-5 flex flex-col ${
+                isHighlight ? "border-brand-500 ring-2 ring-brand-100 shadow-md" : "border-ink-800"
               } ${isCurrent ? "ring-2 ring-emerald-300" : ""}`}
             >
               <div className="flex items-center gap-2">
-                <h3 className="text-xl font-bold text-slate-900">{p.name}</h3>
+                <h3 className="text-xl font-bold text-white">{p.name}</h3>
                 {isCurrent && (
                   <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-700">
                     Hiện tại
@@ -109,18 +109,18 @@ export function PricingPage() {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-slate-500 mt-1 min-h-[2.5rem]">{p.description}</p>
+              <p className="text-sm text-ink-400 mt-1 min-h-[2.5rem]">{p.description}</p>
 
               <div className="mt-4">
-                <span className="text-3xl font-bold text-slate-900">{priceDisplay}</span>
+                <span className="text-3xl font-bold text-white">{priceDisplay}</span>
                 {p.price_vnd && p.price_vnd > 0 && (
-                  <span className="text-sm text-slate-500"> / {cycle === "yearly" ? "năm" : "tháng"}</span>
+                  <span className="text-sm text-ink-400"> / {cycle === "yearly" ? "năm" : "tháng"}</span>
                 )}
               </div>
 
               <ul className="mt-4 space-y-1.5 text-sm flex-1">
                 {taglines.map((t) => (
-                  <li key={t} className="flex items-start gap-2 text-slate-700">
+                  <li key={t} className="flex items-start gap-2 text-ink-200">
                     <Check size={16} className="text-emerald-600 mt-0.5 flex-shrink-0" />
                     <span>{t}</span>
                   </li>
@@ -137,7 +137,7 @@ export function PricingPage() {
         })}
       </div>
 
-      <p className="text-center text-sm text-slate-500">
+      <p className="text-center text-sm text-ink-400">
         Đã có thắc mắc? <Link to="/billing" className="text-brand-600 hover:underline">Quay lại trang Billing</Link>
       </p>
     </div>
@@ -149,7 +149,7 @@ function CycleBtn({ active, onClick, children }: { active: boolean; onClick: () 
     <button
       onClick={onClick}
       className={`px-3 py-1.5 text-sm rounded transition ${
-        active ? "bg-brand-600 text-white" : "text-slate-700 hover:bg-slate-50"
+        active ? "bg-brand-600 text-white" : "text-ink-200 hover:bg-ink-950"
       }`}
     >
       {children}
@@ -164,7 +164,7 @@ function PlanCTA({
     return (
       <button
         disabled
-        className="mt-5 block w-full text-center px-4 py-2 rounded-md font-medium bg-slate-100 text-slate-500 cursor-default"
+        className="mt-5 block w-full text-center px-4 py-2 rounded-md font-medium bg-ink-800 text-ink-400 cursor-default"
       >
         Gói hiện tại
       </button>
@@ -174,7 +174,7 @@ function PlanCTA({
     return (
       <a
         href="mailto:sales@grokflow.io"
-        className="mt-5 block text-center px-4 py-2 rounded-md font-medium bg-slate-100 text-slate-900 hover:bg-slate-200"
+        className="mt-5 block text-center px-4 py-2 rounded-md font-medium bg-ink-800 text-white hover:bg-slate-200"
       >
         Liên hệ Sales
       </a>
@@ -184,7 +184,7 @@ function PlanCTA({
     return (
       <button
         disabled
-        className="mt-5 block w-full text-center px-4 py-2 rounded-md font-medium bg-slate-100 text-slate-500 cursor-default"
+        className="mt-5 block w-full text-center px-4 py-2 rounded-md font-medium bg-ink-800 text-ink-400 cursor-default"
       >
         Plan mặc định
       </button>

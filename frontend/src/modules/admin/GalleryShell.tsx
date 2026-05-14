@@ -168,7 +168,7 @@ export function GalleryShell({ mode }: { mode: GalleryMode }) {
             </h1>
             <p className="text-sm opacity-90 mt-1.5">{meta.subtitle}</p>
           </div>
-          <div className="inline-flex items-center gap-1 rounded-full bg-white/15 backdrop-blur-sm px-4 py-1.5 font-mono text-sm">
+          <div className="inline-flex items-center gap-1 rounded-full bg-ink-900/15 backdrop-blur-sm px-4 py-1.5 font-mono text-sm">
             <Sparkles size={14} /> {total.toLocaleString()} kết quả
           </div>
         </div>
@@ -355,7 +355,7 @@ function VideoThumb({ url }: { url: string }) {
         onError={() => setLoaded(false)}
       />
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-10 h-10 rounded-full bg-white/30 backdrop-blur-md flex items-center justify-center group-hover:bg-white/50 transition">
+        <div className="w-10 h-10 rounded-full bg-ink-900/30 backdrop-blur-md flex items-center justify-center group-hover:bg-ink-900/50 transition">
           <div className="border-l-[10px] border-l-white border-y-[6px] border-y-transparent ml-1" />
         </div>
       </div>
@@ -506,7 +506,7 @@ function PromptSkeleton() {
 function EmptyState({ hasData, mode }: { hasData: boolean; mode: GalleryMode }) {
   const Icon = MODE_META[mode].icon;
   return (
-    <div className="rounded-2xl border-2 border-dashed border-ink-200 bg-white py-16 px-6 text-center">
+    <div className="rounded-2xl border-2 border-dashed border-ink-200 bg-ink-900 py-16 px-6 text-center">
       <div className="w-14 h-14 mx-auto rounded-full bg-brand-50 flex items-center justify-center">
         <Icon size={24} className="text-brand-500" />
       </div>
@@ -537,7 +537,7 @@ function PreviewModal({ item, onClose }: { item: GalleryItem; onClose: () => voi
       onClick={onClose}
     >
       <div
-        className="max-w-5xl w-full bg-white rounded-2xl overflow-hidden flex flex-col max-h-[92vh] shadow-card-hover animate-scale-in"
+        className="max-w-5xl w-full bg-ink-900 rounded-2xl overflow-hidden flex flex-col max-h-[92vh] shadow-card-hover animate-scale-in"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between px-5 py-3.5 border-b border-ink-100 bg-ink-50">
@@ -598,7 +598,7 @@ function PreviewModal({ item, onClose }: { item: GalleryItem; onClose: () => voi
           )}
         </div>
 
-        <footer className="px-5 py-3 border-t border-ink-100 bg-white flex justify-between items-center text-xs">
+        <footer className="px-5 py-3 border-t border-ink-100 bg-ink-900 flex justify-between items-center text-xs">
           <code className="font-mono text-ink-500">{item.job_id.slice(0, 8)}</code>
           <div className="flex gap-2">
             <a

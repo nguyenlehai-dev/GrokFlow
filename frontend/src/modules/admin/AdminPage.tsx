@@ -99,7 +99,7 @@ export function AdminPage() {
   // Wait for the fresh /me confirmation so admin queries don't fire with a
   // stale token (e.g. cache says admin, DB says user → 403).
   if (!verified) {
-    return <p className="text-slate-500">Đang xác thực quyền admin...</p>;
+    return <p className="text-ink-400">Đang xác thực quyền admin...</p>;
   }
 
   const isSuper = me?.role === "super_admin";
@@ -126,7 +126,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     <button
       onClick={onClick}
       className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
-        active ? "border-brand-600 text-brand-700" : "border-transparent text-slate-500 hover:text-slate-700"
+        active ? "border-brand-600 text-brand-700" : "border-transparent text-ink-400 hover:text-ink-200"
       }`}
     >
       {children}
@@ -155,8 +155,8 @@ function StatsBlock() {
 function Stat({ label, value, accent }: { label: string; value: number | string; accent?: string }) {
   return (
     <div className="card">
-      <div className="text-sm text-slate-500">{label}</div>
-      <div className={`mt-2 text-2xl font-semibold ${accent ?? "text-slate-900"}`}>{value}</div>
+      <div className="text-sm text-ink-400">{label}</div>
+      <div className={`mt-2 text-2xl font-semibold ${accent ?? "text-white"}`}>{value}</div>
     </div>
   );
 }
@@ -193,11 +193,11 @@ export function UsersTab({ meId }: { meId: string }) {
         </button>
       </div>
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-4 py-2">Email</th>
                 <th className="px-4 py-2">Name</th>
@@ -259,12 +259,12 @@ function UserRow({
           <option value="support">support</option>
         </select>
       </td>
-      <td className="px-4 py-2 text-slate-700">{planLabel}</td>
+      <td className="px-4 py-2 text-ink-200">{planLabel}</td>
       <td className="px-4 py-2">
         {hasOverride ? (
           <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800">có</span>
         ) : (
-          <span className="text-xs text-slate-400">—</span>
+          <span className="text-xs text-ink-500">—</span>
         )}
       </td>
       <td className="px-4 py-2"><StatusBadge status={u.status} /></td>
@@ -367,7 +367,7 @@ function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => voi
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-sm animate-fade-in p-4">
-      <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-md rounded-lg bg-white p-4 shadow-lg space-y-3">
+      <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-md rounded-lg bg-ink-900 p-4 shadow-lg space-y-3">
         <h2 className="text-lg font-semibold">Tạo user mới</h2>
         <div>
           <label className="text-sm font-medium">Email</label>
@@ -408,7 +408,7 @@ function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => voi
                 <option key={d.id} value={d.id}>{d.hostname} — {d.label}</option>
               ))}
             </select>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-ink-400 mt-1">
               Global = super_admin / không bị giới hạn theo domain. Chọn domain cụ thể để user/admin chỉ truy cập tài nguyên của domain đó.
             </p>
           </div>
@@ -421,7 +421,7 @@ function CreateUserModal({ plans, onClose }: { plans: Plan[]; onClose: () => voi
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}
           </select>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-ink-400 mt-1">
             Khi gán role: user chỉ thấy menu trong allowlist của role (giao với domain). Bỏ trống = thừa hưởng full menu của domain.
           </p>
         </div>
@@ -552,17 +552,17 @@ function UserPermissionsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-3xl max-h-[95vh] overflow-auto rounded-lg bg-white p-5 shadow-xl space-y-4">
+      <div className="w-full max-w-3xl max-h-[95vh] overflow-auto rounded-lg bg-ink-900 p-5 shadow-xl space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <ShieldCheck size={18} /> Phân quyền — {user.email}
             </h2>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-ink-400">
               Effective hiện tại: <span className="font-mono">{effective?.plan_name ?? "—"}</span>
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-300">✕</button>
         </div>
 
         <section className="border-b pb-3 space-y-3">
@@ -575,7 +575,7 @@ function UserPermissionsModal({
                 {isSuper && <option value="super_admin">super_admin (global)</option>}
                 <option value="support">support</option>
               </select>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-ink-400 mt-1">
                 Tier quyết định bypass: <code>admin/super_admin</code> luôn thấy mọi menu của domain;
                 <code>user</code> bị giới hạn bởi role bên dưới.
               </p>
@@ -589,7 +589,7 @@ function UserPermissionsModal({
                     <option key={d.id} value={d.id}>{d.hostname} — {d.label}</option>
                   ))}
                 </select>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-ink-400 mt-1">
                   Đổi domain sẽ tự reset role (role không cross-domain).
                 </p>
               </div>
@@ -603,7 +603,7 @@ function UserPermissionsModal({
                 <option key={r.id} value={r.id}>{r.name}</option>
               ))}
             </select>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-ink-400 mt-1">
               Chỉ áp dụng cho tier <code>user</code>: thu hẹp menu xuống các trang trong role.
               Admin/super_admin bỏ qua role này (luôn thấy đủ).
             </p>
@@ -618,18 +618,18 @@ function UserPermissionsModal({
               <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
             ))}
           </select>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-ink-400 mt-1">
             Plan quy định quyền cơ bản. Override bên dưới sẽ ưu tiên hơn plan.
           </p>
         </div>
 
         {!catalog ? (
-          <p className="text-slate-500">Đang tải catalog...</p>
+          <p className="text-ink-400">Đang tải catalog...</p>
         ) : (
           <>
             <div>
               <h3 className="text-sm font-semibold mb-2">Features</h3>
-              <p className="text-xs text-slate-500 mb-2">
+              <p className="text-xs text-ink-400 mb-2">
                 Mỗi feature có 3 trạng thái: <strong>Theo plan</strong> (kế thừa), <strong>Bật</strong>, <strong>Tắt</strong>.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -640,7 +640,7 @@ function UserPermissionsModal({
                     <div key={k} className="flex items-center justify-between gap-2 border rounded px-3 py-2">
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{catalog.features[k]}</div>
-                        <div className="text-xs text-slate-500 font-mono">{k}</div>
+                        <div className="text-xs text-ink-400 font-mono">{k}</div>
                         <div className="text-xs">
                           plan: <span className={planValue ? "text-emerald-600" : "text-rose-600"}>
                             {planValue ? "✓" : "✗"}
@@ -668,7 +668,7 @@ function UserPermissionsModal({
 
             <div>
               <h3 className="text-sm font-semibold mb-2">Limits</h3>
-              <p className="text-xs text-slate-500 mb-2">
+              <p className="text-xs text-ink-400 mb-2">
                 Để trống = theo plan. Số = override (0 nghĩa là không giới hạn).
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -679,8 +679,8 @@ function UserPermissionsModal({
                     <div key={k} className="flex items-center justify-between gap-2 border rounded px-3 py-2">
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{catalog.limits[k]}</div>
-                        <div className="text-xs text-slate-500 font-mono">{k}</div>
-                        <div className="text-xs text-slate-500">
+                        <div className="text-xs text-ink-400 font-mono">{k}</div>
+                        <div className="text-xs text-ink-400">
                           plan: <span className="font-mono">{planValue}</span>
                           {" • "}effective: <span className="font-mono">{eff}</span>
                         </div>
@@ -743,11 +743,11 @@ export function PlansTab() {
         </button>
       </div>
       {isLoading ? (
-        <p className="text-slate-500">Đang tải...</p>
+        <p className="text-ink-400">Đang tải...</p>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left">
+            <thead className="bg-ink-900 text-left">
               <tr>
                 <th className="px-4 py-2">Code</th>
                 <th className="px-4 py-2">Tên</th>
@@ -764,7 +764,7 @@ export function PlansTab() {
                   <td className="px-4 py-2 font-medium">{p.name}</td>
                   <td className="px-4 py-2">{p.is_default ? "✓" : ""}</td>
                   <td className="px-4 py-2">{p.sort_order}</td>
-                  <td className="px-4 py-2 text-slate-600">{p.description || "—"}</td>
+                  <td className="px-4 py-2 text-ink-300">{p.description || "—"}</td>
                   <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                     <button className="btn-ghost" onClick={() => setEditing(p)} title="Sửa plan">
                       <Pencil size={14} className="inline mr-1" />
@@ -861,10 +861,10 @@ function PlanEditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-3xl max-h-[95vh] overflow-auto rounded-lg bg-white p-5 shadow-xl space-y-4">
+      <div className="w-full max-w-3xl max-h-[95vh] overflow-auto rounded-lg bg-ink-900 p-5 shadow-xl space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{isCreate ? "Tạo plan mới" : `Sửa plan: ${plan?.name}`}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-300">✕</button>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -902,14 +902,14 @@ function PlanEditorModal({
         </div>
 
         {!catalog ? (
-          <p className="text-slate-500">Đang tải catalog...</p>
+          <p className="text-ink-400">Đang tải catalog...</p>
         ) : (
           <>
             <div>
               <h3 className="text-sm font-semibold mb-2">Features</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {Object.entries(catalog.features).map(([k, label]) => (
-                  <label key={k} className="flex items-center gap-2 border rounded px-3 py-2 hover:bg-slate-50">
+                  <label key={k} className="flex items-center gap-2 border rounded px-3 py-2 hover:bg-ink-900">
                     <input
                       type="checkbox"
                       checked={features[k] ?? false}
@@ -917,7 +917,7 @@ function PlanEditorModal({
                     />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">{label}</div>
-                      <div className="text-xs text-slate-500 font-mono">{k}</div>
+                      <div className="text-xs text-ink-400 font-mono">{k}</div>
                     </div>
                   </label>
                 ))}
@@ -931,7 +931,7 @@ function PlanEditorModal({
                   <div key={k} className="flex items-center gap-2 border rounded px-3 py-2">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">{label}</div>
-                      <div className="text-xs text-slate-500 font-mono">{k}</div>
+                      <div className="text-xs text-ink-400 font-mono">{k}</div>
                     </div>
                     <input
                       type="number" min={0}

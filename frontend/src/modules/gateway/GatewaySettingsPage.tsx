@@ -49,7 +49,7 @@ function Inner() {
     onError: (e: any) => toast(extractError(e), "error"),
   });
 
-  if (isLoading) return <p className="text-slate-500">Đang tải...</p>;
+  if (isLoading) return <p className="text-ink-400">Đang tải...</p>;
   if (error) return <ErrorPanel error={error} />;
 
   return (
@@ -70,7 +70,7 @@ function Inner() {
           <label className="text-sm font-medium">Concurrency (1-20)</label>
           <input className="input" type="number" min={1} max={20}
             {...register("concurrency", { valueAsNumber: true, required: true })} />
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-ink-400 mt-1">
             Số job chạy song song trong job_runner.
           </p>
         </div>
@@ -79,7 +79,7 @@ function Inner() {
           <label className="text-sm font-medium">Timeout (ms)</label>
           <input className="input" type="number" min={1000} max={600000}
             {...register("timeout_ms", { valueAsNumber: true, required: true })} />
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-ink-400 mt-1">
             Timeout cho mỗi job automation. 120000 = 2 phút.
           </p>
         </div>

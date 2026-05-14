@@ -276,7 +276,7 @@ function CodeBlock({ code }: { code: string }) {
       <button
         type="button"
         onClick={onCopy}
-        className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md bg-slate-800 px-2 py-1 text-[10px] text-slate-300 opacity-0 transition hover:bg-slate-700 group-hover:opacity-100"
+        className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md bg-slate-800 px-2 py-1 text-[10px] text-ink-500 opacity-0 transition hover:bg-slate-700 group-hover:opacity-100"
       >
         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
         {copied ? "Copied" : "Copy"}
@@ -287,14 +287,14 @@ function CodeBlock({ code }: { code: string }) {
 
 function ToolCard({ spec }: { spec: ToolSpec }) {
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <header className="border-b border-slate-100 px-5 py-4">
+    <article className="rounded-2xl border border-ink-800 bg-ink-900 shadow-sm">
+      <header className="border-b border-ink-800 px-5 py-4">
         <div className="flex items-center gap-2">
           <MethodBadge method={spec.method} />
-          <code className="text-sm font-semibold text-slate-800">{spec.endpoint}</code>
+          <code className="text-sm font-semibold text-ink-100">{spec.endpoint}</code>
         </div>
-        <h3 className="mt-2 text-base font-semibold text-slate-900">{spec.title}</h3>
-        <p className="mt-1 text-sm text-slate-500">{spec.description}</p>
+        <h3 className="mt-2 text-base font-semibold text-white">{spec.title}</h3>
+        <p className="mt-1 text-sm text-ink-400">{spec.description}</p>
       </header>
 
       {spec.params.length > 0 && (
@@ -302,36 +302,36 @@ function ToolCard({ spec }: { spec: ToolSpec }) {
           <h4 className="text-[11px] font-bold uppercase tracking-[0.18em] text-violet-600">
             Parameters
           </h4>
-          <div className="mt-2 overflow-hidden rounded-md border border-slate-200">
+          <div className="mt-2 overflow-hidden rounded-md border border-ink-800">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50">
+              <thead className="bg-ink-900">
                 <tr>
-                  <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-ink-400">
                     Name
                   </th>
-                  <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-ink-400">
                     Type
                   </th>
-                  <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-ink-400">
                     Description
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-ink-800">
                 {spec.params.map((p) => (
                   <tr key={p.name}>
                     <td className="px-3 py-2 align-top">
-                      <code className="text-xs font-semibold text-slate-800">{p.name}</code>
+                      <code className="text-xs font-semibold text-ink-100">{p.name}</code>
                       {p.required && (
                         <span className="ml-1.5 rounded bg-rose-50 px-1 py-0.5 text-[10px] font-bold uppercase text-rose-600">
                           required
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2 align-top text-xs text-slate-500">
+                    <td className="px-3 py-2 align-top text-xs text-ink-400">
                       <code>{p.type}</code>
                     </td>
-                    <td className="px-3 py-2 align-top text-xs text-slate-600">{p.desc}</td>
+                    <td className="px-3 py-2 align-top text-xs text-ink-300">{p.desc}</td>
                   </tr>
                 ))}
               </tbody>
@@ -366,9 +366,9 @@ export function FlowApiDocsPage() {
   return (
     <FlowShell workspaceLabel="API Documentation">
       <div className="space-y-4">
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-ink-400">
           Bộ công cụ xử lý video qua FFmpeg. Tất cả endpoints dưới đây đi qua proxy{" "}
-          <code className="rounded bg-slate-100 px-1 py-0.5 text-xs text-slate-700">
+          <code className="rounded bg-ink-800 px-1 py-0.5 text-xs text-ink-200">
             /api/flow/*
           </code>{" "}
           — chỉ cần GrokFlow JWT, không cần X-API-Key.
