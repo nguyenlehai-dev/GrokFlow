@@ -485,20 +485,57 @@ async def auto_provision_project(
                 # We can't predict which flow Grok will use (and it may
                 # change). Try A first with a shorter wait, fall back to B.
                 clicked_at_url = page.url
-                # `new_btn` here is a JSHandle/ElementHandle resolved by
-                # evaluate_handle. Use ElementHandle.click() which handles
-                # actionability + falls back nicely.
+                # Try every click strategy we know — Grok uses React
+                # synthetic events that sometimes ignore programmatic
+                # clicks. mouse.click(x,y) on the bounding box center is
+                # the closest thing to a real user click.
                 try:
                     await new_btn.scroll_into_view_if_needed(timeout=3_000)
                 except Exception:  # noqa: BLE001
                     pass
+
+                clicked_ok = False
+                box = None
                 try:
-                    await new_btn.click(timeout=5_000)
+                    box = await new_btn.bounding_box()
                 except Exception:  # noqa: BLE001
+                    pass
+
+                # 1) Real mouse click via CDP at the element's center.
+                if box and box.get("width") and box.get("height"):
+                    try:
+                        cx = box["x"] + box["width"] / 2
+                        cy = box["y"] + box["height"] / 2
+                        await page.mouse.move(cx, cy)
+                        await page.mouse.click(cx, cy, delay=40)
+                        clicked_ok = True
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                # 2) Native .click() with full Playwright actionability.
+                if not clicked_ok:
+                    try:
+                        await new_btn.click(timeout=5_000)
+                        clicked_ok = True
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                # 3) Force click (skips actionability).
+                if not clicked_ok:
                     try:
                         await new_btn.click(force=True, timeout=3_000)
+                        clicked_ok = True
                     except Exception:  # noqa: BLE001
-                        # Last resort: dispatch the DOM click event.
+                        pass
+
+                # 4) dispatchEvent — last resort, fires React listeners.
+                if not clicked_ok:
+                    try:
+                        await new_btn.evaluate(
+                            "el => el.dispatchEvent(new MouseEvent('click', "
+                            "{bubbles: true, cancelable: true, view: window}))"
+                        )
+                    except Exception:  # noqa: BLE001
                         await new_btn.evaluate("el => el.click()")
 
                 slug_captured = False

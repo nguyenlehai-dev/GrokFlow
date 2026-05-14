@@ -597,7 +597,18 @@ function AutoProvisionModal({
       toast(`Đã tự tạo project "${data.name}" · slug ${data.grok_project_id}`, "success");
       onClose();
     },
-    onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Auto-provision lỗi", "error"),
+    onError: (e: any) => {
+      const detail = e?.response?.data?.detail;
+      const msg = detail?.message ?? "Auto-provision lỗi";
+      // Common case: Grok's UI changed faster than our selectors.
+      // Toast the message + hint at manual fallback so user isn't stuck.
+      toast(
+        msg.length > 200
+          ? `${msg.slice(0, 200)}… → thử nút "Thủ công" (Grok UI có thể đã đổi)`
+          : `${msg} → dùng nút "Thủ công" nếu cần`,
+        "error",
+      );
+    },
   });
 
   const disabled = !name.trim() || provision.isPending;
