@@ -47,7 +47,7 @@ export function GatewayRequestsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
+        <h1 className="page-title flex items-center gap-2">
           <Activity size={22} /> Gateway — Requests
         </h1>
         <button onClick={() => refetch()} className="btn-ghost text-xs inline-flex items-center gap-1">

@@ -16,7 +16,7 @@ export function FlowShell({ workspaceLabel, children }: ShellProps) {
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-violet-600">
             Current Workspace
           </p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-900">{workspaceLabel}</h1>
+          <h1 className="mt-1 page-title">{workspaceLabel}</h1>
         </header>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">

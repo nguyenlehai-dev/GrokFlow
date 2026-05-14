@@ -54,7 +54,7 @@ function Inner() {
 
   return (
     <div className="space-y-4 max-w-xl">
-      <h1 className="text-2xl font-semibold flex items-center gap-2">
+      <h1 className="page-title flex items-center gap-2">
         <Wrench size={22} /> Gateway — Settings
       </h1>
 

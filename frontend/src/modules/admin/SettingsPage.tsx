@@ -35,7 +35,7 @@ export function SettingsPage() {
   const [tab, setTab] = useState<TabKey>("account");
   return (
     <div className="space-y-4 max-w-3xl">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+      <h1 className="page-title">Settings</h1>
 
       <div className="card p-0 overflow-x-auto">
         <div className="flex items-stretch border-b border-slate-100">

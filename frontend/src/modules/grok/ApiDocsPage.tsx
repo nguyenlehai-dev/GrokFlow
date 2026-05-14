@@ -619,7 +619,7 @@ export function ApiDocsPage() {
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-semibold">API Reference</h1>
+        <h1 className="page-title">API Reference</h1>
         <p className="text-sm text-slate-500 mt-1">
           Tất cả endpoint dùng JSON. Mỗi endpoint hiển thị Parameters, Request Example (curl), và Response Format.
         </p>

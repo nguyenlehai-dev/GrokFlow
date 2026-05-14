@@ -5,7 +5,7 @@ export function AdminPlansPage() {
   return (
     <AdminGuard>
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold">Admin — Plans / Gói</h1>
+        <h1 className="page-title">Admin — Plans / Gói</h1>
         <PlansTab />
       </div>
     </AdminGuard>

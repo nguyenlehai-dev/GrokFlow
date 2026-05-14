@@ -112,7 +112,7 @@ function Inner() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
+        <h1 className="page-title flex items-center gap-2">
           <Layers size={22} /> Gateway — Profiles
         </h1>
         <button

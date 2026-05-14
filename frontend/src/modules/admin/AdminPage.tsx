@@ -105,7 +105,7 @@ export function AdminPage() {
   const isSuper = me?.role === "super_admin";
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Admin</h1>
+      <h1 className="page-title">Admin</h1>
       <StatsBlock />
       <div className="tabs-scroll">
         <TabButton active={tab === "users"} onClick={() => setTab("users")}>Users</TabButton>

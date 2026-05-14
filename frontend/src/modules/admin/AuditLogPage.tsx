@@ -146,7 +146,7 @@ export function AuditLogPage() {
   return (
     <div className="space-y-4">
       <header>
-        <h1 className="text-2xl font-semibold">Audit Log</h1>
+        <h1 className="page-title">Audit Log</h1>
         <p className="mt-1 text-sm text-slate-500">
           {isSelf
             ? "Lịch sử hoạt động của bạn."

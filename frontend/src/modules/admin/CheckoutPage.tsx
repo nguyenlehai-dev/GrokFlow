@@ -93,7 +93,7 @@ export function CheckoutPage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-semibold">Hoàn tất thanh toán</h1>
+        <h1 className="page-title">Hoàn tất thanh toán</h1>
         <p className="text-sm text-slate-500 mt-1">
           Bạn đang mua gói <strong>{plan.name}</strong> ({cycle === "yearly" ? "hàng năm" : "hàng tháng"}).
         </p>

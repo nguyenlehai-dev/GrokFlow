@@ -46,7 +46,7 @@ export function GrokPlaygroundPage() {
     <div className="relative space-y-4">
       <header className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
+          <h1 className="page-title flex items-center gap-2">
             <Activity size={22} className="text-violet-600" /> Grok Playground
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">

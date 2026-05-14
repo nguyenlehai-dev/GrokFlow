@@ -37,7 +37,7 @@ export function GatewayPlaygroundPage() {
   return (
     <div className="space-y-4 relative">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
+        <h1 className="page-title flex items-center gap-2">
           <Terminal size={22} /> Gateway — Playground
         </h1>
         <SystemAuthIndicator isAdmin={isAdmin} />

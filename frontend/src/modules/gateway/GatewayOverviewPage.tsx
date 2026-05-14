@@ -59,7 +59,7 @@ function Inner() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
+          <h1 className="page-title flex items-center gap-2">
             <LayoutDashboard size={22} /> Gateway — Overview
           </h1>
           <p className="text-sm text-slate-500 mt-1">

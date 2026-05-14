@@ -5,7 +5,7 @@ export function AdminBillingPage() {
   return (
     <AdminGuard>
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold">Admin — Billing</h1>
+        <h1 className="page-title">Admin — Billing</h1>
         <AdminBillingTab />
       </div>
     </AdminGuard>

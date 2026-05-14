@@ -34,7 +34,7 @@ const METHOD_CLS: Record<string, string> = {
 export function GatewayDocsPage() {
   return (
     <div className="space-y-4 max-w-5xl">
-      <h1 className="text-2xl font-semibold flex items-center gap-2">
+      <h1 className="page-title flex items-center gap-2">
         <BookOpen size={22} /> Gateway — API Docs
       </h1>
 

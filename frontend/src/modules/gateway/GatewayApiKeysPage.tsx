@@ -54,7 +54,7 @@ function Inner() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
+        <h1 className="page-title flex items-center gap-2">
           <Code2 size={22} /> Gateway — API Keys
         </h1>
         <button onClick={() => setCreating(true)} className="btn-primary inline-flex items-center gap-1.5">

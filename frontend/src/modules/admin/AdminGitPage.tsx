@@ -77,7 +77,7 @@ function Inner() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-semibold">Admin — Git / Deploy</h1>
+        <h1 className="page-title">Admin — Git / Deploy</h1>
         <button
           onClick={() => setCreating(true)}
           className="btn-primary inline-flex items-center gap-1.5"

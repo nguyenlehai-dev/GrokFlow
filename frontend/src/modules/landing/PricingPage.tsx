@@ -61,7 +61,7 @@ export function PricingPage() {
     <div className="space-y-6 max-w-6xl">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Đổi gói</h1>
+          <h1 className="page-title">Đổi gói</h1>
           <p className="text-sm text-slate-500 mt-1">
             Chọn gói phù hợp. Nâng cấp/hạ cấp bất cứ lúc nào — không phí ẩn.
           </p>
