@@ -30,6 +30,21 @@ from app.providers.grok_api_client import GrokAPIClient, GrokAPIError
 _STATSIG_CACHE: dict[str, tuple[str, float]] = {}
 _STATSIG_TTL_S = 3600.0
 
+# Per-profile capture lock. Without this, when N concurrent jobs land on
+# the same profile and the statsig cache is cold, each one opens its own
+# /imagine page simultaneously inside the SAME Chromium and the browser
+# crashes (TargetClosedError). Lock makes the first job do the capture
+# while the others wait; they then all see the warm cache.
+_STATSIG_LOCKS: dict[str, _asyncio_for_lock.Lock] = {}
+
+
+def _statsig_lock(cache_key: str) -> _asyncio_for_lock.Lock:
+    lk = _STATSIG_LOCKS.get(cache_key)
+    if lk is None:
+        lk = _asyncio_for_lock.Lock()
+        _STATSIG_LOCKS[cache_key] = lk
+    return lk
+
 
 # Per-profile navigation lock: page.goto() on a busy Chromium triggers
 # a render-thread storm if many concurrent tabs each try to bootstrap React
@@ -362,17 +377,27 @@ class GrokProvider(Provider):
                     self._log(tag, "no browser context — fallback")
                     return None
 
-                # Capture statsig (this also warms the session for video by
-                # navigating to /imagine first, which Grok requires before
-                # accepting video gen requests).
+                # Capture statsig under a per-profile lock so concurrent
+                # jobs don't all open their own page simultaneously and
+                # crash the Chromium. First caller does the real work,
+                # the rest see the warm cache on entry.
                 cached = _STATSIG_CACHE.get(cache_key)
                 if cached and time.monotonic() - cached[1] < _STATSIG_TTL_S:
                     statsig_id = cached[0]
                     self._log(tag, f"statsig cache hit ({'video' if is_video else 'image'})")
                 else:
-                    statsig_id = await self._capture_statsig_id(ctx, tag, for_video=is_video)
-                    if statsig_id:
-                        _STATSIG_CACHE[cache_key] = (statsig_id, time.monotonic())
+                    async with _statsig_lock(cache_key):
+                        # Re-check inside the lock — by the time we got
+                        # the lock another concurrent job may have just
+                        # populated the cache for us.
+                        cached = _STATSIG_CACHE.get(cache_key)
+                        if cached and time.monotonic() - cached[1] < _STATSIG_TTL_S:
+                            statsig_id = cached[0]
+                            self._log(tag, f"statsig cache hit after lock ({'video' if is_video else 'image'})")
+                        else:
+                            statsig_id = await self._capture_statsig_id(ctx, tag, for_video=is_video)
+                            if statsig_id:
+                                _STATSIG_CACHE[cache_key] = (statsig_id, time.monotonic())
 
                 # Extract cookies AFTER navigating — /imagine may set
                 # additional session cookies needed by the video endpoint.
