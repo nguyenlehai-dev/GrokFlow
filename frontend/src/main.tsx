@@ -32,6 +32,15 @@ const queryClient = new QueryClient({
 // is treated as fail-open until the response lands a tick later.
 useDomainStore.getState().load();
 
+// Re-poll every 30s so when an admin flips maintenance_mode (or any other
+// per-domain flag), already-logged-in users see the change within ~30s
+// without having to refresh. Skipped when the tab is hidden to keep the
+// backend cache hot only for active sessions.
+setInterval(() => {
+  if (typeof document !== "undefined" && document.hidden) return;
+  useDomainStore.getState().load();
+}, 30_000);
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
