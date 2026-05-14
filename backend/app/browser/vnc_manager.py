@@ -19,6 +19,7 @@ Lifecycle:
 """
 
 import os
+import threading
 import time
 from typing import Any
 
@@ -36,6 +37,24 @@ def _client() -> docker.DockerClient:
 def _container_name(profile_id: str) -> str:
     short = str(profile_id).replace("-", "")[:12]
     return f"grokflow-vnc-{short}"
+
+
+# Per-profile spawn lock. React StrictMode (and double-clicks) fire
+# start-vnc-session twice in a row; without a lock the second call can race
+# into the create() and either 409-conflict or destroy the first call's
+# brand-new container. The lock serialises spawns per profile so the second
+# caller sees the container already created and reuses it.
+_SPAWN_LOCKS: dict[str, threading.Lock] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(profile_id: str) -> threading.Lock:
+    with _LOCKS_GUARD:
+        lk = _SPAWN_LOCKS.get(profile_id)
+        if lk is None:
+            lk = threading.Lock()
+            _SPAWN_LOCKS[profile_id] = lk
+        return lk
 
 
 def _container_to_host_path(profile_path: str) -> str:
@@ -89,25 +108,39 @@ def stop_for_profile(profile_id: str) -> None:
         print(f"[vnc] stop error for {name}: {exc}", flush=True)
 
 
+def _reuse_info(c) -> dict[str, Any]:
+    """Build the start_for_profile() return dict from an existing container."""
+    return {
+        "container_name": c.name,
+        "container_id": c.id,
+        "ws_path": "/vnc/",
+        "cdp_endpoint": f"http://{c.name}:9223",
+        "reused": True,
+        "ready": c.status == "running",
+    }
+
+
 def start_for_profile(profile_id: str, profile_path: str, provider_url: str) -> dict[str, Any]:
-    """Spawn (or reuse) a persistent VNC+CDP container for this profile."""
+    """Spawn (or reuse) a persistent VNC+CDP container for this profile.
+
+    Per-profile lock so concurrent callers don't race each other's create().
+    """
+    with _lock_for(str(profile_id)):
+        return _start_locked(profile_id, profile_path, provider_url)
+
+
+def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict[str, Any]:
     cli = _client()
     name = _container_name(profile_id)
 
     try:
         c = cli.containers.get(name)
         c.reload()
-        if c.status == "running":
-            return {
-                "container_name": name,
-                "container_id": c.id,
-                "ws_path": "/vnc/",
-                "cdp_endpoint": f"http://{name}:9223",
-                "reused": True,
-                "ready": True,
-            }
-        # Not running → remove. force=True handles "created" / "exited" /
-        # "dead" / "removing" alike; ignore errors so we proceed to create.
+        # Anything that's running, just-created, restarting, or paused is
+        # something the caller should reuse — don't tear it down. Only
+        # "exited" / "dead" / "removing" warrant a fresh spawn.
+        if c.status in ("running", "created", "restarting", "paused"):
+            return _reuse_info(c)
         try:
             c.remove(force=True)
         except (APIError, NotFound) as exc:
@@ -115,9 +148,6 @@ def start_for_profile(profile_id: str, profile_path: str, provider_url: str) -> 
     except NotFound:
         pass
     except APIError as exc:
-        # get() can race with a slow remove or hit transient daemon errors.
-        # Log + fall through; the conflict-on-create retry below will cover
-        # the rare case where a same-named container materializes anyway.
         print(f"[vnc] get() error for {name}, will try to create anyway: {exc}", flush=True)
 
     host_profile_path = _container_to_host_path(profile_path)
@@ -151,23 +181,29 @@ def start_for_profile(profile_id: str, profile_path: str, provider_url: str) -> 
         security_opt=["seccomp=unconfined"],
     )
 
-    # If a same-named container is wedged (created/exited/removing) the
-    # pre-cleanup above sometimes misses it. Treat 409 as "stale leftover,
-    # force-remove by name, retry once". After retry we re-raise so the
-    # caller gets a real error instead of silently spinning.
+    # 409 on create means a container with that name already exists. With
+    # the per-profile lock this should be rare — but pre-cleanup can race
+    # with `removing` state. Strategy: re-fetch the container; if it's
+    # alive/usable (running / created / restarting / paused) just reuse it
+    # rather than tearing down a sibling caller's work. Only when it's
+    # actually dead do we force-remove + retry.
     try:
         container = cli.containers.run(**run_kwargs)
     except APIError as exc:
         if exc.response is None or exc.response.status_code != 409:
             raise
-        print(f"[vnc] 409 conflict on create '{name}' — force-removing leftover and retrying", flush=True)
         try:
-            stale = cli.containers.get(name)
-            stale.remove(force=True)
+            existing = cli.containers.get(name)
+            existing.reload()
+            if existing.status in ("running", "created", "restarting", "paused"):
+                print(f"[vnc] 409 on '{name}' — reusing healthy existing container ({existing.status})", flush=True)
+                return _reuse_info(existing)
+            print(f"[vnc] 409 on '{name}' (state={existing.status}) — force-removing + retry", flush=True)
+            existing.remove(force=True)
         except NotFound:
-            pass
+            print(f"[vnc] 409 on '{name}' but get() says NotFound — retrying", flush=True)
         except APIError as inner:
-            print(f"[vnc] could not remove leftover {name}: {inner}", flush=True)
+            print(f"[vnc] could not inspect/remove '{name}': {inner}", flush=True)
         container = cli.containers.run(**run_kwargs)
 
     deadline = time.monotonic() + 60
