@@ -142,20 +142,18 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            # Video API path is OFF by default — every body variant we've
-            # tried 404s with `imagine:invalid-parent-post`. The captured
-            # working browser request uses the upload's fileMetadataId as
-            # parentPostId, but that same value rejected from our worker.
-            # There's likely a hidden step (create-post? UI interaction?
-            # account-tier check?) between upload and videoize that we
-            # haven't reverse-engineered yet. Until that's resolved,
-            # Playwright video remains the only reliable path.
-            # To re-enable (e.g., for further debugging): set
-            # GROK_VIDEO_API_ENABLED=1.
+            # Video API path: image-to-video via /conversations/new with
+            # an uploaded image as parentPostId. Re-enabled after we
+            # confirmed the earlier 404s were the upstream account's
+            # video quota — not a bug in our body shape. When an
+            # individual profile gets `invalid-parent-post` reliably,
+            # treat that profile as video-rate-limited and let the
+            # auto-pick rotate to another one (see jobs/service.py).
+            # Disable via GROK_VIDEO_API_ENABLED=0 if needed.
             if (
                 job.job_type == "video"
-                and os.getenv("GROK_VIDEO_API_ENABLED", "").lower()
-                in ("1", "true", "yes")
+                and os.getenv("GROK_VIDEO_API_ENABLED", "true").lower()
+                not in ("0", "false", "no")
             ):
                 api_result = await self._run_video_via_api(job)
                 if api_result is not None:

@@ -395,6 +395,19 @@ class GrokAPIClient:
                         )
                     if resp.status_code >= 400:
                         snippet = (await resp.aread())[:200]
+                        snippet_text = snippet.decode("utf-8", errors="replace")
+                        # `invalid-parent-post` is Grok's signal that the
+                        # profile has hit its per-account video quota —
+                        # the upload succeeded but the account can't start
+                        # a new video gen. Surface as rate_limited so the
+                        # ProfilesPage banner directs admin to switch.
+                        if "invalid-parent-post" in snippet_text:
+                            raise GrokAPIError(
+                                "rate_limited",
+                                "Grok video quota exhausted on this profile "
+                                "— switch to another profile in the pool",
+                                retryable=True,
+                            )
                         raise GrokAPIError(
                             "unknown_error", f"{resp.status_code}: {snippet!r}"
                         )

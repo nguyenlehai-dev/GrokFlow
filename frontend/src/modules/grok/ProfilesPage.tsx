@@ -70,6 +70,35 @@ export function ProfilesPage() {
         )}
       </div>
 
+      {isAdmin && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
+          <p className="font-semibold">⚠️ Giới hạn video theo từng tài khoản Grok</p>
+          <p>
+            Mỗi tài khoản Grok có quota video riêng (thường ~5-10 video/ngày tuỳ gói). Khi 1 profile
+            hết quota, job video chạy trên profile đó sẽ báo lỗi <code className="px-1 bg-amber-100 rounded text-xs">invalid-parent-post</code> hoặc{" "}
+            <code className="px-1 bg-amber-100 rounded text-xs">rate_limited</code>.
+          </p>
+          <p>
+            <strong>Cách xử lý:</strong>
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>
+              <strong>Tạm thời:</strong> bấm <em>Disable</em> profile đang hết quota → hệ thống auto-pick profile khác cho job tiếp theo.
+            </li>
+            <li>
+              <strong>Lâu dài:</strong> tạo thêm profile (mỗi profile = 1 tài khoản Grok riêng) để pool có nhiều quota gộp lại. Khi 1 cái hết, các cái khác gánh.
+            </li>
+            <li>
+              <strong>Theo dõi:</strong> profile vừa fail video sẽ thấy job status <code className="px-1 bg-amber-100 rounded text-xs">rate_limited</code> trong{" "}
+              <a href="/jobs" className="underline text-amber-700">Jobs</a> — đó là tín hiệu chuyển profile.
+            </li>
+          </ul>
+          <p className="text-xs text-amber-700 mt-2">
+            Lưu ý: image jobs dùng quota khác (riêng), nên 1 profile có thể vẫn chạy image bình thường dù đã hết quota video.
+          </p>
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
       ) : (
