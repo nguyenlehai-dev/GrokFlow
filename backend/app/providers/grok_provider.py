@@ -141,9 +141,19 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            if job.job_type == "video":
-                # Same idea for video — much simpler body, no project scope,
-                # but cuts ~15s of DOM clicking off the front of every job.
+            # Video API path is DISABLED. Grok's video endpoint requires a
+            # parentPostId pointing at a real image post (videos are always
+            # image-to-video; the UI generates / attaches an image first).
+            # Wiring up the multi-step image→post→video flow saves only
+            # ~15-30s out of a 90-180s job — not worth the complexity yet.
+            # Playwright video path handles this transparently via the
+            # Imagine studio. To re-enable: set GROK_VIDEO_API_ENABLED=1
+            # AND implement the image-upload step in _run_video_via_api.
+            if (
+                job.job_type == "video"
+                and os.getenv("GROK_VIDEO_API_ENABLED", "").lower()
+                in ("1", "true", "yes")
+            ):
                 api_result = await self._run_video_via_api(job)
                 if api_result is not None:
                     return api_result
