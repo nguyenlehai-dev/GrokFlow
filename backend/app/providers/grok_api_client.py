@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import uuid
 from typing import Any, Callable
 
 import httpx
@@ -146,16 +147,21 @@ class GrokAPIClient:
         # Referer matters: project-scoped image responses are gated on
         # `referer` pointing at the workspace; video responses on the
         # Imagine studio URL. Both are computed by the caller.
+        # `x-xai-request-id` is a per-request UUID the frontend always
+        # sends — some endpoints (notably video gen) appear to require it
+        # for dedup/idempotency, so add it to every call. Free to include.
         h = {
             "accept": "*/*",
             "accept-language": "en-US,en;q=0.9",
             "content-type": "application/json",
             "origin": GROK_BASE,
+            "priority": "u=1, i",
             "referer": f"{GROK_BASE}{referer_path}",
             "user-agent": self.user_agent,
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "same-origin",
+            "x-xai-request-id": str(uuid.uuid4()),
         }
         if self.x_statsig_id:
             h["x-statsig-id"] = self.x_statsig_id

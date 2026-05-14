@@ -450,42 +450,41 @@ class GrokProvider(Provider):
             # Path B (preferred): no attachment → generate via /imagine and
             # use the resulting imageUuid as parentPostId directly. Skips
             # /upload-file entirely (which Grok was rejecting in tests).
+            # Source image: must produce a `users/<uid>/<id>/content` URL
+            # because Grok's video endpoint won't accept `/generated/.../
+            # image.jpg` paths. Two ways to get a /content URL:
+            #   A. Use job.attachments → upload_file → fileMetadataId.
+            #   B. No attachment → /imagine → download bytes → upload them.
+            # Both routes funnel through /upload-file so the upstream sees
+            # a "user-uploaded" asset, which is what video gen requires.
             if job.attachments:
                 att = job.attachments[0]
                 image_bytes = att.bytes
                 image_mime = att.mime or "image/jpeg"
                 image_name = att.name or "input.jpg"
                 self._log(tag, f"using job attachment ({len(image_bytes)} B)")
-                meta = await client.upload_file(
-                    content=image_bytes,
-                    filename=image_name,
-                    mime=image_mime,
-                    log=lambda m: self._log(tag, m),
-                )
-                parent_id = meta["fileMetadataId"]
-                asset_path = meta["fileUri"]
             else:
-                self._log(tag, "no attachment — generating source image via /imagine")
-                imagine_meta = await client.imagine_meta(
+                self._log(tag, "no attachment — generating source via /imagine then uploading")
+                imagine_results = await client.imagine(
                     prompt=job.prompt,
                     project_id=job.grok_project_id,
                     log=lambda m: self._log(tag, m),
                 )
-                if not imagine_meta:
-                    self._log(tag, "imagine_meta returned nothing — fallback")
+                if not imagine_results:
+                    self._log(tag, "imagine returned nothing — fallback")
                     return None
-                # Use the FIRST generated image as the video source. We
-                # deliberately do NOT re-upload these bytes — Grok's
-                # /upload-file returns a different fileMetadataId that the
-                # video endpoint rejects with invalid-parent-post. The
-                # original imageUuid from the imagine stream is what works.
-                first = imagine_meta[0]
-                parent_id = first["image_uuid"]
-                asset_path = first["image_url"]
-                self._log(
-                    tag,
-                    f"using imagine image_uuid={parent_id} as parentPostId",
-                )
+                image_bytes = imagine_results[0]
+                image_mime = "image/jpeg"
+                image_name = f"{uuid.uuid4()}.jpg"
+
+            meta = await client.upload_file(
+                content=image_bytes,
+                filename=image_name,
+                mime=image_mime,
+                log=lambda m: self._log(tag, m),
+            )
+            parent_id = meta["fileMetadataId"]
+            asset_path = meta["fileUri"]
 
             # ── Trigger video generation referencing the source image
             video_bytes_list = await client.videoize(
