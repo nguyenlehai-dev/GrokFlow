@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -16,8 +17,14 @@ from sqlalchemy import func, select
 
 from app.core.deps import CurrentUser, DbSession
 from app.models import Job, Profile, User
+from app.modules.grok.files.router import make_share_token
 
 router = APIRouter(prefix="/api/gallery", tags=["gallery"])
+
+
+# Match `/api/files/<uuid>/download` inside Job.result_url so we can attach
+# a short-lived `?token=` for inline rendering by <img>/<video> tags.
+_FILE_URL_RE = re.compile(r"^/api/files/([0-9a-f-]{36})/download$")
 
 
 class GalleryItem(BaseModel):
@@ -89,19 +96,28 @@ async def list_gallery(
         .offset(offset).limit(limit)
     )).all()
 
-    items = [
-        GalleryItem(
+    items = []
+    for j, p, u in rows:
+        raw = j.result_url or ""
+        # Sign /api/files/<uuid>/download URLs so the browser can render
+        # them in <img>/<video> tags without an Authorization header.
+        m = _FILE_URL_RE.match(raw)
+        if m:
+            try:
+                token = make_share_token(uuid.UUID(m.group(1)))
+                raw = f"{raw}?token={token}"
+            except Exception:  # noqa: BLE001 — never block listing on signing errors
+                pass
+        items.append(GalleryItem(
             job_id=j.id,
             job_type=j.job_type,
             provider=j.provider,
             prompt=j.prompt or "",
-            result_url=j.result_url or "",
+            result_url=raw,
             profile_name=p.name if p else None,
             user_email=u.email if u else None,
             created_at=j.created_at,
             completed_at=j.completed_at,
-            file_size=None,  # Job model doesn't carry file_size; FE shows date+name only
-        )
-        for j, p, u in rows
-    ]
+            file_size=None,
+        ))
     return GalleryPage(items=items, total=int(total), offset=offset, limit=limit)
