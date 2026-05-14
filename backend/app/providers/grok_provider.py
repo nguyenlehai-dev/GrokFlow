@@ -142,17 +142,24 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            # Video API path: image-to-video via /conversations/new. The
-            # previous failures (invalid-parent-post on every variant)
-            # turned out to be a missing piece — the session must be in
-            # "Imagine studio" state before the video gen request lands,
-            # otherwise Grok rejects every parentPostId. The fix is in
-            # _capture_statsig_id which now navigates to /imagine first
-            # for video jobs, warming the session. Default ON now.
+            # Video API path stays OFF. We've exhausted reasonable angles:
+            #   • upload-file fileMetadataId as parentPostId          ✗
+            #   • chat /imagine imageUuid as parentPostId             ✗
+            #   • 3 body variants (with/no parent / message-only)     ✗
+            #   • /imagine session warm-up before request             ✗
+            #   • x-xai-request-id + priority headers                 ✗
+            #   • job.attachments (real user upload) path             ✗
+            # Every combination 404s with `invalid-parent-post` while
+            # Playwright submitting through the Imagine studio UI on the
+            # SAME profile succeeds. Strong signal Grok server-side checks
+            # for an active /imagine WebSocket / SSE session that our
+            # stateless httpx call can't hold. Without reverse-engineering
+            # that channel, video must stay on Playwright.
+            # Re-enable for further debugging via GROK_VIDEO_API_ENABLED=1.
             if (
                 job.job_type == "video"
-                and os.getenv("GROK_VIDEO_API_ENABLED", "true").lower()
-                not in ("0", "false", "no")
+                and os.getenv("GROK_VIDEO_API_ENABLED", "").lower()
+                in ("1", "true", "yes")
             ):
                 api_result = await self._run_video_via_api(job)
                 if api_result is not None:
