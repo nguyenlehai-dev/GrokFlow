@@ -115,9 +115,21 @@ class GrokProvider(Provider):
     VIDEO_TIMEOUT_MS = 360000  # 6 min — Grok video can take 90-300s
 
     async def run(self, job: JobInput) -> JobResult:
-        # Same chat-page flow handles both image generation, image-to-image
-        # (with attachments), and video (Grok auto-detects from prompt).
+        # When the job is pinned to a GrokProject we route the prompt
+        # through chat mode (grok.com/project/<slug>) using a slash
+        # command, so chat history / presets stay scoped to that project.
+        # Otherwise fall back to the legacy /imagine studio flow.
+        # Video still uses /imagine because chat-mode slash commands
+        # don't always trigger the video pipeline reliably.
         if job.job_type in ("image", "video"):
+            if job.grok_project_id and job.job_type == "image":
+                # Best-effort project-scoped flow. Falls back to /imagine
+                # internally if the chat input or response can't be
+                # located within the timeout, so a Grok UI quirk in
+                # project mode doesn't strand the job.
+                result = await self._run_image_in_project(job)
+                if result is not None:
+                    return result
             return await self._run_image(job)
         return JobResult(success=False, error_code="unsupported_job_type",
                          error_message=f"Grok provider unsupported job_type: {job.job_type}")
@@ -165,6 +177,200 @@ class GrokProvider(Provider):
             return None
         # Re-query to get the canonical info shape (cdp_endpoint etc.)
         return vnc_manager.get_for_profile(profile_id)
+
+    async def _run_image_in_project(self, job: JobInput) -> JobResult | None:
+        """Project-scoped image generation via chat-mode `/imagine` slash.
+
+        Returns:
+          - JobResult on success/failure of the project flow
+          - None when we can't even get into the project page; caller
+            then falls back to legacy /imagine studio (so a routing
+            blip doesn't strand the job)
+
+        Selectors here are best-effort against Grok's chat UI which
+        we don't fully control. Heavy logging at each step makes UI
+        drift easy to spot in worker logs.
+        """
+        profile_id = self._profile_id_from_path(job.profile_path)
+        tag = f"prj:{profile_id[:8]}"
+        info = self._ensure_vnc_running(job)
+        if not info:
+            return None
+        cdp_endpoint = info["cdp_endpoint"]
+
+        # Same CDP WS-URL rewrite as the legacy flow uses.
+        try:
+            async with httpx.AsyncClient(timeout=10) as cli:
+                resp = await cli.get(f"{cdp_endpoint}/json/version")
+                ws_url = resp.json().get("webSocketDebuggerUrl", "")
+            if not ws_url:
+                return None
+            host = cdp_endpoint.replace("http://", "").rstrip("/")
+            ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+        except Exception as exc:  # noqa: BLE001
+            self._log(tag, f"CDP discovery error: {exc}")
+            return None
+
+        target_url = f"https://grok.com/project/{job.grok_project_id}"
+        self._log(tag, f"goto {target_url}")
+
+        async with async_playwright() as p:
+            try:
+                browser = await p.chromium.connect_over_cdp(ws_url, timeout=12000)
+            except Exception as exc:  # noqa: BLE001
+                self._log(tag, f"connect_over_cdp failed: {exc}")
+                return None
+
+            page = None
+            try:
+                ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+                page = await ctx.new_page()
+                lock = _nav_lock(profile_id)
+                async with lock:
+                    try:
+                        await page.goto(target_url, wait_until="domcontentloaded",
+                                        timeout=self.NAV_TIMEOUT_MS)
+                    except PWTimeout:
+                        self._log(tag, "nav timeout — falling back to /imagine")
+                        return None
+                    await asyncio.sleep(2)  # SPA hydrate
+
+                # Verify the project page loaded — sometimes Grok 404s on
+                # bad slugs and shows an "Error finding ID …" page. If we
+                # see that, abort and let caller fall back.
+                err_loc = page.locator("text=/error finding|not found/i").first
+                if await err_loc.count() > 0:
+                    snippet = await page.evaluate(
+                        "() => document.body.innerText.slice(0, 200)"
+                    )
+                    self._log(tag, f"project page errored: {snippet!r} — fallback to /imagine")
+                    return None
+
+                # Locate the chat input. Grok's chat uses a contenteditable
+                # div in current builds; fall back to <textarea>.
+                input_candidates = [
+                    "div[contenteditable='true'][role='textbox']",
+                    "textarea[placeholder*='ask' i]",
+                    "textarea[placeholder*='message' i]",
+                    "textarea",
+                    "[contenteditable='true']",
+                ]
+                chat_input = None
+                for sel in input_candidates:
+                    loc = page.locator(sel).first
+                    try:
+                        await loc.wait_for(timeout=4000, state="visible")
+                        chat_input = loc
+                        self._log(tag, f"chat input found via: {sel}")
+                        break
+                    except PWTimeout:
+                        continue
+                if chat_input is None:
+                    self._log(tag, "no chat input — fallback to /imagine")
+                    return None
+
+                # Send "/imagine <prompt>". Grok's project chat respects
+                # this slash command on Imagine-capable accounts.
+                slash_prompt = f"/imagine {job.prompt}"
+                try:
+                    await chat_input.click()
+                    # Empty the field in case React kept any draft.
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.press("Delete")
+                    await chat_input.type(slash_prompt, delay=12)
+                except Exception as exc:  # noqa: BLE001
+                    self._log(tag, f"typing failed: {exc} — fallback")
+                    return None
+
+                # Brief pause so React registers the input + send button
+                # enables, then submit via Enter.
+                await asyncio.sleep(0.6)
+                await page.keyboard.press("Enter")
+                self._log(tag, f"submitted /imagine (len={len(job.prompt)})")
+
+                # Poll for an image to appear in the chat. We accept any
+                # <img> whose src looks like Grok's generated-content CDN.
+                timeout_s = self.IMAGE_TIMEOUT_MS / 1000
+                start = time.monotonic()
+                found_url: str | None = None
+                last_log = -30
+                while time.monotonic() - start < timeout_s:
+                    elapsed = int(time.monotonic() - start)
+                    try:
+                        urls = await page.evaluate(
+                            """() => {
+                                const ok = s => s && (
+                                    s.includes('assets.grok.com') ||
+                                    s.includes('grok-content') ||
+                                    s.includes('assets.x.ai') ||
+                                    /\\/generated\\//i.test(s)
+                                );
+                                return Array.from(document.querySelectorAll('img'))
+                                    .map(i => i.src).filter(ok);
+                            }"""
+                        )
+                    except Exception:  # noqa: BLE001
+                        urls = []
+                    if urls:
+                        found_url = urls[-1]
+                        self._log(tag, f"image url after {elapsed}s: {found_url[:80]}…")
+                        break
+                    if elapsed - last_log >= 30:
+                        self._log(tag, f"polling chat… {elapsed}s")
+                        last_log = elapsed
+                    await asyncio.sleep(5)
+
+                if not found_url:
+                    return JobResult(
+                        success=False, error_code="timeout",
+                        error_message=(
+                            f"Project /imagine: no image in chat after "
+                            f"{int(timeout_s)}s. Account có thể chưa Pro "
+                            "hoặc Grok đang queue."
+                        ),
+                        retryable=True,
+                    )
+
+                # Pull the image bytes through the SAME Chromium so it
+                # carries the auth cookies Grok requires on its asset CDN.
+                try:
+                    cookies = await ctx.cookies("https://grok.com")
+                    jar = {c["name"]: c["value"] for c in cookies}
+                    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as cli:
+                        r = await cli.get(found_url, cookies=jar)
+                    if r.status_code != 200 or not r.content:
+                        return JobResult(
+                            success=False, error_code="network_error",
+                            error_message=f"Image download {r.status_code} (len={len(r.content)})",
+                            retryable=True,
+                        )
+                    mime = r.headers.get("content-type", "image/png").split(";")[0]
+                    ext = mime.split("/")[-1] or "png"
+                    return JobResult(
+                        success=True,
+                        files=[ResultFile(
+                            bytes=r.content,
+                            name=f"grok-project-{int(time.time())}.{ext}",
+                            mime=mime,
+                            source_url=found_url,
+                        )],
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    return JobResult(
+                        success=False, error_code="network_error",
+                        error_message=f"download failed: {exc}",
+                        retryable=True,
+                    )
+            finally:
+                try:
+                    if page:
+                        await page.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    await browser.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     async def _run_image(self, job: JobInput) -> JobResult:
         profile_id = self._profile_id_from_path(job.profile_path)
