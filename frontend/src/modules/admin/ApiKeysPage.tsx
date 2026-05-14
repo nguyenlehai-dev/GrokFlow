@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import {
   Key, Plus, Search, Globe, Mail, Trash2, Ban, Copy, X, CheckCircle2,
+  BookOpen, Terminal, Lock, Zap, AlertTriangle,
 } from "lucide-react";
 
 import { api } from "@/core/api/axios";
@@ -60,6 +61,7 @@ export function ApiKeysPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [domainFilter, setDomainFilter] = useState("");
   const [open, setOpen] = useState(false);
+  const [help, setHelp] = useState(false);
   const [created, setCreated] = useState<{ name: string; api_key: string } | null>(null);
 
   const { data: keys, isLoading } = useQuery({
@@ -154,12 +156,21 @@ export function ApiKeysPage() {
                 : "Keys của tài khoản bạn."}
             </p>
           </div>
-          <button
-            onClick={() => setOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-white/15 hover:bg-white/25 backdrop-blur-sm px-4 py-2 text-sm font-medium"
-          >
-            <Plus size={16} /> Tạo API Key
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setHelp(true)}
+              className="inline-flex items-center gap-1.5 rounded-md bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-2 text-sm font-medium border border-white/30"
+              title="Xem hướng dẫn dùng API key"
+            >
+              <BookOpen size={14} /> Hướng dẫn
+            </button>
+            <button
+              onClick={() => setOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md bg-white/15 hover:bg-white/25 backdrop-blur-sm px-4 py-2 text-sm font-medium"
+            >
+              <Plus size={16} /> Tạo API Key
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 text-xs">
           <Stat label="Tổng key" value={stats.total} />
@@ -241,6 +252,7 @@ export function ApiKeysPage() {
         />
       )}
 
+      {help && <HelpModal onClose={() => setHelp(false)} />}
       {open && <CreateModal onClose={() => setOpen(false)} onCreated={(c) => { setCreated(c); setOpen(false); }} />}
       {created && <CreatedModal value={created} onClose={() => setCreated(null)} />}
     </div>
@@ -502,16 +514,160 @@ function CreatedModal({ value, onClose }: { value: { name: string; api_key: stri
   );
 }
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+function Modal({ title, children, onClose, maxWidth = "max-w-lg" }: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  maxWidth?: string;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
+      <div className={`w-full ${maxWidth} max-h-[92vh] rounded-lg bg-white shadow-xl flex flex-col`}>
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="font-semibold">{title}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
         </div>
-        <div className="p-4">{children}</div>
+        <div className="p-4 overflow-auto">{children}</div>
       </div>
+    </div>
+  );
+}
+
+// ─── Help modal ────────────────────────────────────────────────────────────
+
+const CURL_EXAMPLES = {
+  verify: `curl -X POST https://YOUR-DOMAIN/api/api-keys/verify \\
+  -H 'Content-Type: application/json' \\
+  -d '{"key":"uxpm_live_..."}'`,
+  submitJob: `curl -X POST https://YOUR-DOMAIN/api/jobs \\
+  -H 'Authorization: Bearer uxpm_live_...' \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "provider": "grok",
+    "job_type": "image",
+    "prompt": "A dragon flying over Ha Long Bay, watercolor",
+    "options": { "aspect": "16:9", "size": "1024x576", "n": 1, "quality": "speed" }
+  }'`,
+  pollStatus: `curl https://YOUR-DOMAIN/api/jobs/<JOB_ID> \\
+  -H 'Authorization: Bearer uxpm_live_...'`,
+};
+
+function HelpModal({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal title="Hướng dẫn dùng API Key" onClose={onClose} maxWidth="max-w-3xl">
+      <div className="space-y-5 text-sm">
+        {/* Intro */}
+        <section className="rounded-md bg-violet-50 border border-violet-200 p-3 text-violet-900 text-xs leading-relaxed">
+          API Key là chuỗi <code className="font-mono px-1 rounded bg-violet-100">uxpm_live_...</code>{" "}
+          dùng để gọi GrokFlow API từ bên ngoài (CLI, server, ứng dụng khác).
+          Key được tạo trong dashboard này và chỉ <strong>hiển thị một lần</strong>.
+          Hãy copy + lưu vào nơi an toàn (1Password, .env, vault).
+        </section>
+
+        {/* Step 1 */}
+        <Step n={1} icon={Key} title="Tạo key">
+          Bấm <strong>+ Tạo API Key</strong> ở góc trên, đặt tên (vd <em>Production
+          Server</em>), chọn provider (`grok` / `flow`) + job types (`image` /
+          `video`) + daily limit (mặc định 1000 calls/ngày). Sau khi tạo,
+          modal hiển thị key đầy đủ — copy ngay.
+        </Step>
+
+        {/* Step 2 */}
+        <Step n={2} icon={Lock} title="Verify key (tuỳ chọn)">
+          Test xem key có valid không. Endpoint <code className="font-mono">/api/api-keys/verify</code> không cần auth
+          — trả về metadata của key nếu valid:
+          <CodeBlock code={CURL_EXAMPLES.verify} />
+        </Step>
+
+        {/* Step 3 */}
+        <Step n={3} icon={Zap} title="Submit job">
+          Gắn key vào header{" "}
+          <code className="font-mono">Authorization: Bearer &lt;key&gt;</code>.
+          Job sẽ chạy <strong>dưới account chủ sở hữu key</strong>, không phụ thuộc JWT của browser:
+          <CodeBlock code={CURL_EXAMPLES.submitJob} />
+          <p className="text-xs text-slate-500 mt-2">
+            Response trả về <code>job_id</code> + <code>status</code> = <code>queued</code>.
+          </p>
+        </Step>
+
+        {/* Step 4 */}
+        <Step n={4} icon={Terminal} title="Poll status / lấy kết quả">
+          Job xử lý async — bạn poll cho tới khi <code>status=success</code>:
+          <CodeBlock code={CURL_EXAMPLES.pollStatus} />
+          <p className="text-xs text-slate-500 mt-2">
+            Khi xong, <code>result_url</code> sẽ trỏ tới{" "}
+            <code className="font-mono">/api/files/&lt;file-id&gt;/download</code>.
+            Dùng cùng Bearer key để tải file.
+          </p>
+        </Step>
+
+        {/* Limits */}
+        <Step n={5} icon={AlertTriangle} title="Giới hạn + best practice">
+          <ul className="list-disc pl-5 space-y-1 text-xs">
+            <li><strong>Daily limit</strong> reset lúc <code>00:00 Asia/Ho_Chi_Minh</code>. Vượt → backend trả <code>429 Too Many Requests</code>.</li>
+            <li><strong>Rate limit</strong> mặc định 60 req/phút — chỉnh được khi tạo key.</li>
+            <li>Key bị <strong>Revoke</strong> sẽ stop nhận request ngay lập tức (status code 401).</li>
+            <li>Không commit key vào git. Dùng env var hoặc secret manager.</li>
+            <li>Mỗi môi trường (dev / prod) tạo 1 key riêng — Revoke độc lập khi bị lộ.</li>
+          </ul>
+        </Step>
+
+        {/* Playground tip */}
+        <section className="rounded-md bg-amber-50 border border-amber-200 p-3 text-amber-900 text-xs">
+          💡 <strong>Test nhanh không cần curl</strong>: vào{" "}
+          <a href="/grok/playground" className="underline font-medium">/grok/playground</a>{" "}
+          → bấm <em>Open System Auth</em> → paste key → Verify → submit job từ UI.
+          Đây là cùng đường mà external client của bạn sẽ đi.
+        </section>
+
+        <div className="flex justify-end pt-2 border-t">
+          <button onClick={onClose} className="btn-primary">Đã hiểu</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Step({
+  n, icon: Icon, title, children,
+}: {
+  n: number;
+  icon: any;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <h3 className="flex items-center gap-2 font-semibold text-slate-800 mb-1.5">
+        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold">
+          {n}
+        </span>
+        <Icon size={14} className="text-slate-500" />
+        {title}
+      </h3>
+      <div className="pl-8 text-slate-600 leading-relaxed text-xs">{children}</div>
+    </section>
+  );
+}
+
+function CodeBlock({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="relative mt-1">
+      <pre className="rounded-md bg-slate-900 text-slate-100 p-3 text-[11px] overflow-x-auto whitespace-pre-wrap break-all">
+        <code>{code}</code>
+      </pre>
+      <button
+        onClick={copy}
+        className="absolute top-1.5 right-1.5 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100"
+      >
+        {copied ? <><CheckCircle2 size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
+      </button>
     </div>
   );
 }
