@@ -505,8 +505,21 @@ async def _startup_recovery() -> None:
                 select(func.count()).select_from(Job)
                 .where(Job.profile_id == p.id, Job.status.in_(RUNNING_JOB_STATES))
             )).scalar_one()
+            live_video = (await db.execute(
+                select(func.count()).select_from(Job)
+                .where(
+                    Job.profile_id == p.id,
+                    Job.status.in_(RUNNING_JOB_STATES),
+                    Job.job_type == "video",
+                )
+            )).scalar_one()
             if p.active_jobs != live:
                 p.active_jobs = int(live or 0)
+            # Reset video counter too — release path used to skip this
+            # before max_concurrent_video landed, so old DBs have stale
+            # values that block new video jobs from getting slots.
+            if p.active_video_jobs != live_video:
+                p.active_video_jobs = int(live_video or 0)
             if p.active_jobs == 0 and p.status == "running_job":
                 p.status = "logged_in"
         await db.commit()
