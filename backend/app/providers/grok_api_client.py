@@ -25,6 +25,7 @@ Stream format (captured from devtools 2026-05-14):
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from typing import Any, Callable
@@ -279,6 +280,11 @@ class GrokAPIClient:
         # format (captured 2026-05-14). Likely the frontend does
         # `f"{url}  {prompt} --mode={mode}"` and Grok parses that.
         message = f"{asset_url}  {clean_prompt} --mode={mode}"
+
+        # Grok appears to need ~1-2s to register the uploaded file as a
+        # post-equivalent. Without this sleep the videoize POST 404s with
+        # `imagine:invalid-parent-post` even though the upload succeeded.
+        await asyncio.sleep(2.0)
 
         video_config: dict[str, Any] = {
             "parentPostId": file_metadata_id,
