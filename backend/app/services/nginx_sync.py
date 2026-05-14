@@ -164,13 +164,24 @@ def refresh_vnc_map() -> bool:
             if not c.name.startswith("grokflow-vnc-"):
                 continue
             short = c.name[len("grokflow-vnc-"):]
-            # Iterate networks; pick the first non-empty IPv4.
+            # Prefer the IPv4 from the `grokflow_default` compose network.
+            # Iterating `Networks` keys in dict order can return a stale
+            # ipam-reserved IP from a previous network the container was
+            # briefly attached to (observed after `docker restart`), and
+            # nginx then proxies to a dead IP → 502.
+            nets = c.attrs.get("NetworkSettings", {}).get("Networks") or {}
             ip = None
-            for net in (c.attrs.get("NetworkSettings", {}).get("Networks") or {}).values():
-                addr = net.get("IPAddress")
-                if addr:
-                    ip = addr
+            for preferred in ("grokflow_default",):
+                if preferred in nets and nets[preferred].get("IPAddress"):
+                    ip = nets[preferred]["IPAddress"]
                     break
+            if not ip:
+                # Fallback: first non-empty.
+                for net in nets.values():
+                    addr = net.get("IPAddress")
+                    if addr:
+                        ip = addr
+                        break
             if short and ip:
                 lines.append(f"    {short} {ip};")
     except Exception:
