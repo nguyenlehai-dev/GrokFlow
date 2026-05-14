@@ -764,8 +764,13 @@ class GrokProvider(Provider):
                 await page.keyboard.press("Enter")
                 self._log(tag, f"submitted /imagine (len={len(job.prompt)})")
 
-                # Poll for an image to appear in the chat. We accept any
-                # <img> whose src looks like Grok's generated-content CDN.
+                # Poll for an image to appear in the chat. ONLY accept
+                # URLs whose path contains `/generated/` — that's where
+                # Grok stores AI-rendered output. Without this filter we
+                # used to match `assets.grok.com/<project>/content` (the
+                # project sidebar icon) and download THAT instead of the
+                # actual generated image, producing tiny WebP files
+                # totally unrelated to the prompt.
                 timeout_s = self.IMAGE_TIMEOUT_MS / 1000
                 start = time.monotonic()
                 found_url: str | None = None
@@ -775,12 +780,17 @@ class GrokProvider(Provider):
                     try:
                         urls = await page.evaluate(
                             """() => {
-                                const ok = s => s && (
-                                    s.includes('assets.grok.com') ||
-                                    s.includes('grok-content') ||
-                                    s.includes('assets.x.ai') ||
-                                    /\\/generated\\//i.test(s)
-                                );
+                                // Only accept URLs whose PATH contains
+                                // /generated/ — project icons, avatars,
+                                // and other Grok CDN assets don't have
+                                // that segment.
+                                const ok = s => {
+                                    if (!s) return false;
+                                    // Reject obvious non-result assets early.
+                                    if (s.includes('grok-project-')) return false;
+                                    if (s.endsWith('/content')) return false;
+                                    return /\\/generated\\//i.test(s);
+                                };
                                 return Array.from(document.querySelectorAll('img'))
                                     .map(i => i.src).filter(ok);
                             }"""
@@ -788,6 +798,9 @@ class GrokProvider(Provider):
                     except Exception:  # noqa: BLE001
                         urls = []
                     if urls:
+                        # Use LAST match — chat appends new bubbles to
+                        # the bottom, so the freshest generated image is
+                        # at the end of the list.
                         found_url = urls[-1]
                         self._log(tag, f"image url after {elapsed}s: {found_url[:80]}…")
                         break
