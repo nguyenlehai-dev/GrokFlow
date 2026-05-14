@@ -90,18 +90,18 @@ export function ProjectsModal({
             </p>
             <div className="flex gap-1.5">
               <button
-                onClick={() => setAutoProvision(true)}
+                onClick={() => setCreating(true)}
                 className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-3 py-1.5 text-sm font-semibold hover:from-violet-700 hover:to-fuchsia-700 shadow-sm"
-                title="Tự động mở Grok qua browser của profile, tạo project, capture slug"
+                title="Tạo project trên grok.com → copy URL slug → paste vào đây"
               >
-                <Wand2 size={14} /> Tạo tự động
+                <Plus size={14} /> Thêm project
               </button>
               <button
-                onClick={() => setCreating(true)}
+                onClick={() => setAutoProvision(true)}
                 className="inline-flex items-center gap-1.5 rounded-md bg-white border border-slate-300 text-slate-700 px-3 py-1.5 text-sm font-semibold hover:bg-slate-50"
-                title="Tự copy slug từ grok.com vào đây"
+                title="(Beta) Tự động dùng VNC browser tạo project — đang fragile với Grok UI changes"
               >
-                <Plus size={14} /> Thủ công
+                <Wand2 size={14} /> Tự động <span className="text-[9px] font-bold uppercase tracking-wider px-1 rounded bg-amber-100 text-amber-700">Beta</span>
               </button>
             </div>
           </div>
@@ -358,11 +358,17 @@ function ProjectEditorModal({
               className="input mt-1 font-mono"
               value={grokId}
               onChange={(e) => setGrokId(e.target.value)}
-              placeholder="vd: 7c8a-tenant-abc"
+              placeholder="vd: 7c8a-1234-abcd-..."
             />
-            <p className="text-xs text-slate-500 mt-1">
-              Phần sau <code className="font-mono">/project/</code> trong URL grok.com
-            </p>
+            {!isEdit && (
+              <div className="mt-1.5 rounded-md bg-violet-50 border border-violet-100 p-2 text-[11px] text-violet-900 leading-relaxed">
+                <strong>Cách lấy slug:</strong>{" "}
+                Vào <a href="https://grok.com" target="_blank" rel="noreferrer" className="underline">grok.com</a> →
+                bấm <strong>+ New Project</strong> ở sidebar → khi URL đổi thành
+                <code className="font-mono bg-white px-1 rounded mx-0.5">grok.com/project/abc-123-...</code>
+                → copy phần sau <code className="font-mono">/project/</code> → paste vào đây.
+              </div>
+            )}
           </label>
           <label className="block text-sm">
             <span className="font-medium text-slate-700">
