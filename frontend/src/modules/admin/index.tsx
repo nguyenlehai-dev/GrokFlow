@@ -1,7 +1,7 @@
 import { Navigate } from "react-router-dom";
 import {
   LayoutDashboard, Key, CreditCard, ScrollText, Shield, Settings,
-  UserCog, Globe, Wrench, Rocket,
+  UserCog, Globe, Wrench, Rocket, Images, Film, MessageSquare,
 } from "lucide-react";
 
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
@@ -27,7 +27,15 @@ export const moduleManifest: FrontendModule = {
     { path: "checkout/:plan_code", element: lazyPage(() => import("./CheckoutPage"), "CheckoutPage") },
     { path: "audit-logs",  element: lazyPage(() => import("./AuditLogPage"), "AuditLogPage") },
     { path: "settings",    element: lazyPage(() => import("./SettingsPage"), "SettingsPage") },
-    { path: "gallery",     element: lazyPage(() => import("./GalleryPage"), "GalleryPage") },
+    // Gallery (super_admin sees everything, others scoped). Three views:
+    //   /gallery/images   — image grid
+    //   /gallery/videos   — video grid
+    //   /gallery/prompts  — prompt-focused list
+    // The legacy /gallery URL redirects to /gallery/images.
+    { path: "gallery",          element: lazyPage(() => import("./GalleryPage"), "GalleryPage") },
+    { path: "gallery/images",   element: lazyPage(() => import("./GalleryImagesPage"), "GalleryImagesPage") },
+    { path: "gallery/videos",   element: lazyPage(() => import("./GalleryVideosPage"), "GalleryVideosPage") },
+    { path: "gallery/prompts",  element: lazyPage(() => import("./GalleryPromptsPage"), "GalleryPromptsPage") },
     // Admin sub-routes
     { path: "admin",           element: <Navigate to="/admin/users" replace /> },
     { path: "admin/users",     element: lazyPage(() => import("./AdminUsersPage"), "AdminUsersPage") },
@@ -44,6 +52,20 @@ export const moduleManifest: FrontendModule = {
     { type: "link", to: "/api-keys", label: "API Keys", icon: Key },
     { type: "link", to: "/billing", label: "Billing", icon: CreditCard },
     { type: "link", to: "/audit-logs", label: "Audit Log", icon: ScrollText, feature: FEATURE_KEYS.uiAuditLog, adminOnly: true },
+    // Gallery — admin scope. Three sub-views: image grid, video grid,
+    // prompt-focused list. Super_admin can filter cross-domain.
+    {
+      type: "group",
+      key: "gallery",
+      label: "Gallery",
+      icon: Images,
+      adminOnly: true,
+      items: [
+        { type: "link", to: "/gallery/images",  label: "Ảnh", icon: Images },
+        { type: "link", to: "/gallery/videos",  label: "Video", icon: Film },
+        { type: "link", to: "/gallery/prompts", label: "Prompts", icon: MessageSquare },
+      ],
+    },
     // Admin/auth group
     {
       type: "group",
