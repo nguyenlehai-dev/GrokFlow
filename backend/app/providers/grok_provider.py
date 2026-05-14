@@ -9,6 +9,7 @@ Why CDP attach instead of launch_persistent_context:
 """
 
 import asyncio
+import os
 import re
 import time
 
@@ -207,7 +208,14 @@ class GrokProvider(Provider):
         None instead of failing the job: a 403 here usually means Grok
         rotated their statsig token, and the Playwright path can still
         complete because it runs inside a real browser session.
+
+        Gated behind GROK_API_ENABLED env var — disabled by default until
+        x-statsig-id extraction lands. When disabled the function returns
+        instantly with zero side-effects so every job goes straight to the
+        proven Playwright pipelines.
         """
+        if os.getenv("GROK_API_ENABLED", "").lower() not in ("1", "true", "yes"):
+            return None
         profile_id = self._profile_id_from_path(job.profile_path)
         tag = f"api:{profile_id[:8]}"
         info = self._ensure_vnc_running(job)
@@ -242,18 +250,17 @@ class GrokProvider(Provider):
                 except Exception as exc:  # noqa: BLE001
                     self._log(tag, f"connect_over_cdp failed: {exc}")
                     return None
-                try:
-                    ctx = browser.contexts[0] if browser.contexts else None
-                    if ctx is None:
-                        self._log(tag, "no browser context — fallback")
-                        return None
-                    raw_cookies = await ctx.cookies("https://grok.com")
-                    cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
-                finally:
-                    try:
-                        await browser.close()
-                    except Exception:  # noqa: BLE001
-                        pass
+                # Important: do NOT call browser.close() — that would
+                # terminate the remote Chromium that other paths (and the
+                # very fallback we may want to use) depend on. The
+                # async_playwright context manager only releases our
+                # client-side connection, leaving the remote alive.
+                ctx = browser.contexts[0] if browser.contexts else None
+                if ctx is None:
+                    self._log(tag, "no browser context — fallback")
+                    return None
+                raw_cookies = await ctx.cookies("https://grok.com")
+                cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
         except Exception as exc:  # noqa: BLE001
             self._log(tag, f"cookie extraction failed: {exc}")
             return None
