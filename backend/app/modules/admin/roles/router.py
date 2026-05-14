@@ -13,14 +13,15 @@ Scope rules:
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.deps import AdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
-from app.models import Domain, Role
+from app.models import Domain, Role, User
 from app.modules.admin.audit import service as audit
 
 router = APIRouter(prefix="/api/admin/roles", tags=["roles"])
@@ -50,6 +51,10 @@ class RoleOut(BaseModel):
     description: str | None
     allowed_pages: list[str]
     status: str
+    # How many users currently have this role assigned. Useful for the admin
+    # UI to flag roles that are still in use before deletion.
+    user_count: int = 0
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -88,14 +93,36 @@ async def _intersect_with_domain_pages(
 async def list_roles(
     admin: AdminUser, db: DbSession,
     domain_id: uuid.UUID | None = None,
-) -> list[Role]:
+) -> list[RoleOut]:
     q = select(Role).order_by(Role.name)
     if admin.role != "super_admin":
         q = q.where(Role.domain_id == admin.domain_id)
     elif domain_id:
         q = q.where(Role.domain_id == domain_id)
-    rows = (await db.execute(q)).scalars().all()
-    return list(rows)
+    rows = list((await db.execute(q)).scalars().all())
+
+    # Bulk-count users per role in one query so listing 100 roles doesn't
+    # do 100 round-trips. Empty result -> count = 0 for that role.
+    counts: dict[uuid.UUID, int] = {}
+    if rows:
+        role_ids = [r.id for r in rows]
+        count_q = (
+            select(User.role_id, func.count(User.id))
+            .where(User.role_id.in_(role_ids))
+            .group_by(User.role_id)
+        )
+        for rid, cnt in (await db.execute(count_q)).all():
+            counts[rid] = cnt
+
+    return [
+        RoleOut(
+            id=r.id, domain_id=r.domain_id, name=r.name,
+            description=r.description, allowed_pages=r.allowed_pages,
+            status=r.status, user_count=counts.get(r.id, 0),
+            created_at=getattr(r, "created_at", None),
+        )
+        for r in rows
+    ]
 
 
 @router.post("", response_model=RoleOut, status_code=status.HTTP_201_CREATED)

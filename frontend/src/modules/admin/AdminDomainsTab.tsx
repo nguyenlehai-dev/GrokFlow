@@ -1,9 +1,18 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Globe, Plus, Pencil, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Globe, Plus, Pencil, Trash2, Shield, ArrowRight } from "lucide-react";
 import { api } from "@/core/api/axios";
 import { toast } from "@/components/ui/Toast";
 import { PAGE_GROUPS } from "./pageCatalog";
+
+interface RoleLite {
+  id: string;
+  domain_id: string;
+  name: string;
+  status: "active" | "disabled";
+  user_count: number;
+}
 
 interface Domain {
   id: string;
@@ -32,6 +41,22 @@ export function AdminDomainsTab() {
     queryKey: ["admin-domains"],
     queryFn: async () => (await api.get<Domain[]>("/api/admin/domains")).data,
   });
+
+  // Pull every role at once so we can group by domain_id without one
+  // request per row. /api/admin/roles already returns user_count, which
+  // we surface in the per-domain tooltip.
+  const { data: roles } = useQuery({
+    queryKey: ["admin-roles"],
+    queryFn: async () => (await api.get<RoleLite[]>("/api/admin/roles")).data,
+  });
+
+  const rolesByDomain = useMemo(() => {
+    const map: Record<string, RoleLite[]> = {};
+    for (const r of roles ?? []) {
+      (map[r.domain_id] ||= []).push(r);
+    }
+    return map;
+  }, [roles]);
 
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/admin/domains/${id}`),
@@ -73,6 +98,7 @@ export function AdminDomainsTab() {
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Public flags</th>
                 <th className="px-3 py-2">Pages</th>
+                <th className="px-3 py-2">Roles</th>
                 <th className="px-3 py-2">Brand</th>
                 <th className="px-3 py-2">Actions</th>
               </tr>
@@ -99,6 +125,9 @@ export function AdminDomainsTab() {
                       </span>
                     )}
                   </td>
+                  <td className="px-3 py-2">
+                    <RolesCell roles={rolesByDomain[d.id] ?? []} />
+                  </td>
                   <td className="px-3 py-2 text-xs text-slate-600">{d.brand_name ?? "—"}</td>
                   <td className="px-3 py-2 space-x-1 whitespace-nowrap">
                     <button className="btn-ghost" onClick={() => setEditing(d)}>
@@ -117,7 +146,7 @@ export function AdminDomainsTab() {
               ))}
               {(domains ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
                     Chưa có domain nào.
                   </td>
                 </tr>
@@ -370,5 +399,57 @@ function Checkbox({
       />
       <span className="flex-1 min-w-0">{children}</span>
     </label>
+  );
+}
+
+/** Per-domain roles summary on the Domains list. Shows count + the first
+ *  few role names as chips, with total user-count and a link to manage
+ *  them. Empty state nudges admins to create one — roles are the standard
+ *  way to scope a domain's user menu. */
+function RolesCell({ roles }: { roles: RoleLite[] }) {
+  if (roles.length === 0) {
+    return (
+      <Link
+        to="/admin/roles"
+        className="inline-flex items-center gap-1 text-xs text-violet-600 hover:underline"
+      >
+        <Plus size={12} /> Tạo role
+      </Link>
+    );
+  }
+  const totalUsers = roles.reduce((sum, r) => sum + r.user_count, 0);
+  const tooltip = roles
+    .map((r) => `• ${r.name}${r.status === "disabled" ? " (disabled)" : ""} — ${r.user_count} user`)
+    .join("\n");
+  const preview = roles.slice(0, 2);
+  return (
+    <div className="text-xs" title={tooltip}>
+      <Link
+        to="/admin/roles"
+        className="inline-flex items-center gap-1 font-mono text-slate-700 hover:text-violet-600"
+      >
+        <Shield size={11} /> {roles.length} role · {totalUsers} user
+        <ArrowRight size={11} className="opacity-60" />
+      </Link>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {preview.map((r) => (
+          <span
+            key={r.id}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+              r.status === "active"
+                ? "bg-violet-50 text-violet-700"
+                : "bg-slate-100 text-slate-500 line-through"
+            }`}
+          >
+            {r.name}
+          </span>
+        ))}
+        {roles.length > preview.length && (
+          <span className="text-[10px] text-slate-400 self-center">
+            +{roles.length - preview.length}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

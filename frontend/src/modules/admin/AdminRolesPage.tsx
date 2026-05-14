@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Shield } from "lucide-react";
+import { Plus, Pencil, Trash2, Shield, Users, Search, Copy } from "lucide-react";
 import { api } from "@/core/api/axios";
 import { useAuthStore } from "@/core/auth/store";
 import { AdminGuard } from "./AdminGuard";
-import { PAGE_GROUPS } from "./pageCatalog";
+import { PAGE_GROUPS, findPage } from "./pageCatalog";
 import { toast } from "@/components/ui/Toast";
 
 interface Role {
@@ -14,6 +14,8 @@ interface Role {
   description: string | null;
   allowed_pages: string[];
   status: "active" | "disabled";
+  user_count: number;
+  created_at: string | null;
 }
 
 interface Domain {
@@ -37,8 +39,11 @@ function Inner() {
   const isSuper = me?.role === "super_admin";
   const qc = useQueryClient();
   const [filterDomain, setFilterDomain] = useState<string>("");
+  const [search, setSearch] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "disabled">("all");
   const [editing, setEditing] = useState<Role | null>(null);
   const [creating, setCreating] = useState(false);
+  const [duplicateFrom, setDuplicateFrom] = useState<Role | null>(null);
 
   const { data: domains } = useQuery<Domain[]>({
     queryKey: ["admin-domains"],
@@ -81,6 +86,22 @@ function Inner() {
   const domainLabel = (id: string) =>
     effectiveDomains.find((d) => d.id === id)?.hostname ?? id.slice(0, 8);
 
+  // Client-side filter so search feels instant — backend still filters by
+  // domain_id because that's a permission boundary.
+  const filteredRoles = useMemo(() => {
+    let rs = roles ?? [];
+    if (statusFilter !== "all") rs = rs.filter((r) => r.status === statusFilter);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      rs = rs.filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          (r.description?.toLowerCase().includes(q) ?? false),
+      );
+    }
+    return rs;
+  }, [roles, statusFilter, search]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -96,21 +117,51 @@ function Inner() {
         và được gán cho user khi tạo tài khoản — user chỉ thấy menu của role đó.
       </p>
 
-      {isSuper && (
-        <div className="card">
-          <label className="text-sm font-medium">Lọc theo domain</label>
+      {/* Filter bar — search + status + domain (super_admin only) */}
+      <div className="card flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[200px]">
+          <label className="text-xs font-medium text-slate-600">Tìm role</label>
+          <div className="mt-1 flex items-center rounded-md border border-slate-300 px-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
+            <Search size={14} className="text-slate-400" />
+            <input
+              className="w-full bg-transparent px-2 py-1.5 text-sm outline-none"
+              placeholder="Theo tên hoặc mô tả..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-slate-600">Status</label>
           <select
-            className="input mt-1"
-            value={filterDomain}
-            onChange={(e) => setFilterDomain(e.target.value)}
+            className="input mt-1 w-32"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
           >
-            <option value="">— Tất cả domain —</option>
-            {effectiveDomains.filter((d) => d.hostname !== "*").map((d) => (
-              <option key={d.id} value={d.id}>{d.hostname} — {d.label}</option>
-            ))}
+            <option value="all">Tất cả</option>
+            <option value="active">Active</option>
+            <option value="disabled">Disabled</option>
           </select>
         </div>
-      )}
+        {isSuper && (
+          <div className="min-w-[200px]">
+            <label className="text-xs font-medium text-slate-600">Domain</label>
+            <select
+              className="input mt-1"
+              value={filterDomain}
+              onChange={(e) => setFilterDomain(e.target.value)}
+            >
+              <option value="">— Tất cả domain —</option>
+              {effectiveDomains.filter((d) => d.hostname !== "*").map((d) => (
+                <option key={d.id} value={d.id}>{d.hostname}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="text-xs text-slate-500">
+          {filteredRoles.length} / {roles?.length ?? 0} role
+        </div>
+      </div>
 
       {isLoading ? (
         <p className="text-slate-500">Đang tải...</p>
@@ -119,43 +170,77 @@ function Inner() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>
-                <th className="px-3 py-2">Tên</th>
+                <th className="px-3 py-2">Tên / Mô tả</th>
                 <th className="px-3 py-2">Domain</th>
                 <th className="px-3 py-2">Pages</th>
+                <th className="px-3 py-2">User</th>
                 <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Actions</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {(roles ?? []).map((r) => (
-                <tr key={r.id} className="border-t hover:bg-slate-50">
-                  <td className="px-3 py-2 font-medium">{r.name}</td>
+              {filteredRoles.map((r) => (
+                <tr key={r.id} className="border-t hover:bg-slate-50 align-top">
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-800">{r.name}</div>
+                    {r.description && (
+                      <div className="text-xs text-slate-500 mt-0.5 line-clamp-2 max-w-xs">
+                        {r.description}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2 font-mono text-xs">{domainLabel(r.domain_id)}</td>
-                  <td className="px-3 py-2 text-xs text-slate-600">
-                    {r.allowed_pages.length} page
+                  <td className="px-3 py-2">
+                    <PagesCell paths={r.allowed_pages} />
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono">
+                      <Users size={11} /> {r.user_count}
+                    </span>
                   </td>
                   <td className="px-3 py-2">
                     <span className={`text-xs px-2 py-0.5 rounded ${r.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
                       {r.status}
                     </span>
                   </td>
-                  <td className="px-3 py-2 space-x-1 whitespace-nowrap">
-                    <button className="btn-ghost" onClick={() => setEditing(r)}>
+                  <td className="px-3 py-2 space-x-1 whitespace-nowrap text-right">
+                    <button
+                      className="btn-ghost"
+                      title="Sửa role"
+                      onClick={() => setEditing(r)}
+                    >
                       <Pencil size={14} className="inline mr-1" /> Sửa
                     </button>
                     <button
+                      className="btn-ghost"
+                      title="Tạo role mới copy từ role này"
+                      onClick={() => setDuplicateFrom(r)}
+                    >
+                      <Copy size={14} className="inline mr-1" /> Copy
+                    </button>
+                    <button
                       className="btn-ghost text-rose-600"
-                      onClick={() => confirm(`Xóa role ${r.name}?`) && remove.mutate(r.id)}
+                      title={
+                        r.user_count > 0
+                          ? `${r.user_count} user đang dùng — bỏ gán trước khi xóa`
+                          : "Xóa role"
+                      }
+                      disabled={r.user_count > 0}
+                      onClick={() =>
+                        confirm(`Xóa role ${r.name}?`) && remove.mutate(r.id)
+                      }
                     >
                       <Trash2 size={14} className="inline mr-1" /> Xóa
                     </button>
                   </td>
                 </tr>
               ))}
-              {(roles ?? []).length === 0 && (
+              {filteredRoles.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
-                    Chưa có role nào.
+                  <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                    {roles && roles.length > 0
+                      ? "Không có role nào khớp filter."
+                      : "Chưa có role nào — tạo role đầu tiên cho domain của bạn."}
                   </td>
                 </tr>
               )}
@@ -164,14 +249,47 @@ function Inner() {
         </div>
       )}
 
-      {(editing || creating) && (
+      {(editing || creating || duplicateFrom) && (
         <RoleEditorModal
-          role={editing}
-          isCreate={creating}
+          role={editing ?? (duplicateFrom ? {
+            ...duplicateFrom,
+            id: "",
+            name: `${duplicateFrom.name} (copy)`,
+            user_count: 0,
+          } : null)}
+          isCreate={creating || !!duplicateFrom}
           domains={effectiveDomains.filter((d) => d.hostname !== "*")}
-          defaultDomainId={filterDomain || (isSuper ? "" : me?.domain_id ?? "")}
-          onClose={() => { setEditing(null); setCreating(false); }}
+          defaultDomainId={
+            duplicateFrom?.domain_id ||
+            filterDomain ||
+            (isSuper ? "" : me?.domain_id ?? "")
+          }
+          onClose={() => {
+            setEditing(null);
+            setCreating(false);
+            setDuplicateFrom(null);
+          }}
         />
+      )}
+    </div>
+  );
+}
+
+/** Inline pages summary — shows count + the first 3 labels, with a
+ *  tooltip on hover listing the full set. Keeps the table dense but
+ *  still gives admins a quick sense of what's granted. */
+function PagesCell({ paths }: { paths: string[] }) {
+  const labels = paths.map((p) => findPage(p)?.label ?? p);
+  const tooltip = labels.join("\n");
+  const preview = labels.slice(0, 3).join(", ");
+  return (
+    <div className="text-xs" title={tooltip}>
+      <span className="font-mono text-slate-700">{paths.length} page</span>
+      {paths.length > 0 && (
+        <div className="text-slate-500 mt-0.5 line-clamp-1 max-w-[16rem]">
+          {preview}
+          {paths.length > 3 && <span className="text-slate-400"> +{paths.length - 3}</span>}
+        </div>
       )}
     </div>
   );
