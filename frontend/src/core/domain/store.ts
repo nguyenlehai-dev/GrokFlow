@@ -16,6 +16,14 @@ export interface DomainConfig {
   // admin, the AppShell + public route guard render a maintenance screen.
   maintenance_mode?: boolean;
   maintenance_message?: string | null;
+  // Optional scheduled window. When `maintenance_starts_at` is set:
+  //   • If still in the future → the UI shows a marquee banner with the
+  //     announcement + countdown.
+  //   • Once now >= starts_at → frontend treats the domain as if
+  //     maintenance_mode were true (full MaintenancePage).
+  // Admin clears these fields when the patch is done.
+  maintenance_starts_at?: string | null;
+  maintenance_announcement?: string | null;
 }
 
 interface DomainState {
@@ -53,6 +61,8 @@ const DEFAULT: DomainConfig = {
   require_playground_key: true,
   maintenance_mode: false,
   maintenance_message: null,
+  maintenance_starts_at: null,
+  maintenance_announcement: null,
 };
 
 export const useDomainStore = create<DomainState>((set, get) => ({

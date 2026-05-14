@@ -12,7 +12,14 @@ import { useDomainStore } from "@/core/domain/store";
 
 export function MaintenancePage() {
   const cfg = useDomainStore((s) => s.config);
-  const brand = cfg?.brand_name || cfg?.label || "GrokFlow";
+  // Resolve brand defensively — any of these can be null / empty string;
+  // the chained `||` and final fallback guarantees a non-empty string we
+  // can call `.charAt(0)` on without throwing.
+  const brand =
+    (cfg?.brand_name && cfg.brand_name.trim()) ||
+    (cfg?.label && cfg.label.trim()) ||
+    "GrokFlow";
+  const initial = (brand.charAt(0) || "G").toUpperCase();
   const message = (cfg?.maintenance_message || "").trim();
 
   return (
@@ -21,7 +28,7 @@ export function MaintenancePage() {
         {/* Brand */}
         <div className="flex items-center justify-center gap-2.5">
           <span className="w-10 h-10 rounded-xl bg-gradient-brand text-white flex items-center justify-center font-bold text-base shadow-brand">
-            {brand[0].toUpperCase()}
+            {initial}
           </span>
           <span className="font-bold text-lg text-ink-900">{brand}</span>
         </div>

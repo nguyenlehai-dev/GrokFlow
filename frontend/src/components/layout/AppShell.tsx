@@ -11,6 +11,7 @@ import { getAuthedNav } from "@/app/moduleRegistry";
 import { useDocumentTitle } from "@/core/useDocumentTitle";
 import { NotificationBell } from "./NotificationBell";
 import { QuickCreateMenu } from "./QuickCreateMenu";
+import { MaintenanceBanner } from "@/components/ui/MaintenanceBanner";
 
 /** Map nav-group key → i18n key under "nav.<x>". Falls back to the static
  *  label if there's no translation key (e.g. for module-specific items
@@ -172,6 +173,9 @@ export function AppShell() {
       </aside>
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Scheduled-maintenance countdown banner. Auto-hides when no
+            schedule is set OR once the cutover happens (gate kicks in). */}
+        <MaintenanceBanner />
         <header className="sticky top-0 z-20 glass border-b border-ink-200/60 px-3 sm:px-4 md:px-6 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <button

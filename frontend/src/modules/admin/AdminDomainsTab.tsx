@@ -29,6 +29,8 @@ interface Domain {
   require_playground_key: boolean;
   maintenance_mode?: boolean;
   maintenance_message?: string | null;
+  maintenance_starts_at?: string | null;
+  maintenance_announcement?: string | null;
 }
 
 // PAGE_GROUPS is imported from pageCatalog.ts — keeps the menu hierarchy in
@@ -218,6 +220,17 @@ function DomainEditorModal({
   const [requirePlaygroundKey, setRequirePlaygroundKey] = useState(domain?.require_playground_key ?? true);
   const [maintenanceMode, setMaintenanceMode] = useState(domain?.maintenance_mode ?? false);
   const [maintenanceMessage, setMaintenanceMessage] = useState(domain?.maintenance_message ?? "");
+  // Scheduled window — admin enters "X phút nữa" which is converted to an
+  // ISO timestamp on save. 0 / blank = no schedule (no banner).
+  const [scheduleMinutes, setScheduleMinutes] = useState<string>(() => {
+    if (!domain?.maintenance_starts_at) return "";
+    const startsAt = new Date(domain.maintenance_starts_at).getTime();
+    const remaining = Math.round((startsAt - Date.now()) / 60_000);
+    return remaining > 0 ? String(remaining) : "";
+  });
+  const [maintenanceAnnouncement, setMaintenanceAnnouncement] = useState(
+    domain?.maintenance_announcement ?? ""
+  );
 
   const togglePage = (path: string) => {
     setAllowedPages((prev) =>
@@ -236,6 +249,12 @@ function DomainEditorModal({
         require_playground_key: requirePlaygroundKey,
         maintenance_mode: maintenanceMode,
         maintenance_message: maintenanceMessage || null,
+        maintenance_starts_at: (() => {
+          const m = parseInt(scheduleMinutes, 10);
+          if (!m || m <= 0) return null;
+          return new Date(Date.now() + m * 60_000).toISOString();
+        })(),
+        maintenance_announcement: maintenanceAnnouncement || null,
       };
       if (isCreate) payload.hostname = hostname;
       return isCreate
@@ -360,6 +379,50 @@ function DomainEditorModal({
               )}
             </>
           )}
+
+          {/* Scheduled-maintenance window. Independent of the immediate
+              toggle — admin can either flip on instantly OR pre-announce
+              with a countdown. Both can be used together (toggle stays
+              off until elapsed, then auto-activates client-side). */}
+          <div className="border-t pt-3 mt-3 space-y-2">
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+              Lên lịch trước (banner đếm ngược)
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-700">
+                  Bảo trì sau X phút
+                </label>
+                <input
+                  className="input mt-1"
+                  type="number"
+                  min={0}
+                  max={1440}
+                  value={scheduleMinutes}
+                  onChange={(e) => setScheduleMinutes(e.target.value)}
+                  placeholder="VD: 5"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  0 hoặc rỗng = không lên lịch (không hiện banner).
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700">
+                  Dòng chữ chạy trên banner
+                </label>
+                <input
+                  className="input mt-1"
+                  value={maintenanceAnnouncement}
+                  onChange={(e) => setMaintenanceAnnouncement(e.target.value)}
+                  placeholder="VD: Vui lòng dừng các thao tác trước 22h00"
+                  maxLength={2000}
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Hiện trên top mỗi trang, chạy ngang (marquee).
+                </p>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="border-t pt-3 space-y-2">

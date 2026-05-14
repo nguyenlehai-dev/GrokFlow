@@ -15,12 +15,20 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const firstAllowedPath = useDomainStore((s) => s.firstAllowedPath);
   const location = useLocation();
 
-  // Per-domain maintenance mode: non-admin users see the maintenance
-  // screen regardless of which authed route they tried to hit. Admins
-  // still get through so they can finish the patch — but they can
-  // append `?preview=maintenance` to ANY URL to see what users see
-  // without having to log out.
-  if (domainConfig?.maintenance_mode) {
+  // Per-domain maintenance: visible to non-admin users when EITHER the
+  // toggle is on OR a scheduled window has elapsed. Admins still get
+  // through (so they can finish the patch); they can preview the screen
+  // with `?preview=maintenance`.
+  const effectiveMaintenance = (() => {
+    if (!domainConfig) return false;
+    if (domainConfig.maintenance_mode) return true;
+    if (domainConfig.maintenance_starts_at) {
+      const ts = new Date(domainConfig.maintenance_starts_at).getTime();
+      if (!isNaN(ts) && ts <= Date.now()) return true;
+    }
+    return false;
+  })();
+  if (effectiveMaintenance) {
     const isAdmin = user?.role === "admin" || user?.role === "super_admin";
     const previewing = new URLSearchParams(location.search).get("preview") === "maintenance";
     if (!isAdmin || previewing) return <MaintenancePage />;

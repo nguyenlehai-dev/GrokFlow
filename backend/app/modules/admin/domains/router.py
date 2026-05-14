@@ -5,6 +5,7 @@
   to decide which pages are accessible / whether landing is shown.
 """
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, status
@@ -45,6 +46,8 @@ class DomainIn(BaseModel):
     require_playground_key: bool = True
     maintenance_mode: bool = False
     maintenance_message: str | None = Field(default=None, max_length=2000)
+    maintenance_starts_at: datetime | None = None
+    maintenance_announcement: str | None = Field(default=None, max_length=2000)
 
 
 class DomainUpdate(BaseModel):
@@ -60,6 +63,8 @@ class DomainUpdate(BaseModel):
     require_playground_key: bool | None = None
     maintenance_mode: bool | None = None
     maintenance_message: str | None = Field(default=None, max_length=2000)
+    maintenance_starts_at: datetime | None = None
+    maintenance_announcement: str | None = Field(default=None, max_length=2000)
 
 
 class DomainOut(BaseModel):
@@ -77,6 +82,8 @@ class DomainOut(BaseModel):
     require_playground_key: bool
     maintenance_mode: bool = False
     maintenance_message: str | None = None
+    maintenance_starts_at: datetime | None = None
+    maintenance_announcement: str | None = None
 
     class Config:
         from_attributes = True
@@ -95,9 +102,12 @@ class DomainConfig(BaseModel):
     brand_name: str | None
     require_playground_key: bool
     # Per-domain maintenance window. Frontend renders the maintenance
-    # screen for non-admin users when this is true.
+    # screen for non-admin users when this is true OR when
+    # `maintenance_starts_at` has elapsed.
     maintenance_mode: bool = False
     maintenance_message: str | None = None
+    maintenance_starts_at: datetime | None = None
+    maintenance_announcement: str | None = None
 
 
 # ---------------- Admin CRUD ----------------
@@ -127,6 +137,8 @@ async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession)
         require_playground_key=payload.require_playground_key,
         maintenance_mode=payload.maintenance_mode,
         maintenance_message=payload.maintenance_message,
+        maintenance_starts_at=payload.maintenance_starts_at,
+        maintenance_announcement=payload.maintenance_announcement,
     )
     db.add(d)
     await db.flush()
@@ -159,6 +171,7 @@ async def update_domain(
         "label", "description", "status", "allow_landing", "allow_register",
         "allow_login", "allow_all_pages", "allowed_pages", "brand_name",
         "require_playground_key", "maintenance_mode", "maintenance_message",
+        "maintenance_starts_at", "maintenance_announcement",
     ):
         v = getattr(payload, field)
         if v is not None:
@@ -226,6 +239,8 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
             require_playground_key=d.require_playground_key,
             maintenance_mode=d.maintenance_mode,
             maintenance_message=d.maintenance_message,
+            maintenance_starts_at=d.maintenance_starts_at,
+            maintenance_announcement=d.maintenance_announcement,
         )
     # Fail-open default
     return DomainConfig(
@@ -234,4 +249,5 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
         allow_all_pages=True, allowed_pages=[], brand_name=None,
         require_playground_key=True,
         maintenance_mode=False, maintenance_message=None,
+        maintenance_starts_at=None, maintenance_announcement=None,
     )

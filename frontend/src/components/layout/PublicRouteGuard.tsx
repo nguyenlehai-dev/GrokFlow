@@ -27,9 +27,17 @@ export function PublicRouteGuard({
   // tick avoids a flash of "blocked" UI for legitimate visitors.
   if (!loaded || !config) return <>{children}</>;
 
-  // Per-domain maintenance window. Admins still get through so they can
-  // finish the patch from /admin/domains; everyone else sees the screen.
-  if (config.maintenance_mode) {
+  // Per-domain maintenance window — toggle OR elapsed schedule. Admins
+  // still get through so they can finish the patch from /admin/domains.
+  const inMaintenance = (() => {
+    if (config.maintenance_mode) return true;
+    if (config.maintenance_starts_at) {
+      const ts = new Date(config.maintenance_starts_at).getTime();
+      if (!isNaN(ts) && ts <= Date.now()) return true;
+    }
+    return false;
+  })();
+  if (inMaintenance) {
     const isAdmin = user?.role === "admin" || user?.role === "super_admin";
     if (!isAdmin) return <MaintenancePage />;
   }

@@ -467,6 +467,15 @@ class Domain(Base, TimestampMixin):
         Boolean, nullable=False, default=False, server_default="false"
     )
     maintenance_message: Mapped[str | None] = mapped_column(Text)
+    # When non-null and in the future, the frontend shows a marquee banner
+    # with a countdown ("Bảo trì trong 5:00") and the announcement text;
+    # once `now` passes this timestamp, the frontend treats the domain as
+    # if maintenance_mode were true (auto-activates without admin clicking
+    # again). When the patch is done, admin clears the timestamp.
+    maintenance_starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    maintenance_announcement: Mapped[str | None] = mapped_column(Text)
 
 
 class Role(Base, TimestampMixin):
