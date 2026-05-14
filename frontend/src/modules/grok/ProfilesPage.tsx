@@ -55,14 +55,16 @@ export function ProfilesPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-semibold">{isAdmin ? "Profile pool (Admin)" : "Available profiles"}</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="page-title">
+            {isAdmin ? <>Profile <span className="text-gradient">pool</span></> : "Available profiles"}
+          </h1>
+          <p className="page-subtitle">
             {isAdmin
-              ? "Mỗi profile = 1 Chromium nền. Tăng 'Max' để cho 1 profile chạy nhiều tab/job song song. Mỗi tab thêm ~150 MB RAM."
-              : "Pool admin đã đăng nhập sẵn. Bạn chọn profile lúc tạo job, hoặc để hệ thống tự pick (least-loaded)."}
+              ? "Mỗi profile = 1 Chromium nền. Tăng 'Max' để 1 profile chạy nhiều tab/job song song. Mỗi tab thêm ~150 MB RAM."
+              : "Pool admin đã đăng nhập sẵn. Chọn profile lúc tạo job, hoặc để hệ thống tự pick (least-loaded)."}
           </p>
         </div>
         {isAdmin && (
@@ -71,31 +73,32 @@ export function ProfilesPage() {
       </div>
 
       {isAdmin && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
-          <p className="font-semibold">⚠️ Giới hạn video theo từng tài khoản Grok</p>
-          <p>
-            Mỗi tài khoản Grok có quota video riêng (thường ~5-10 video/ngày tuỳ gói). Khi 1 profile
-            hết quota, job video chạy trên profile đó sẽ báo lỗi <code className="px-1 bg-amber-100 rounded text-xs">invalid-parent-post</code> hoặc{" "}
-            <code className="px-1 bg-amber-100 rounded text-xs">rate_limited</code>.
-          </p>
-          <p>
-            <strong>Cách xử lý:</strong>
-          </p>
-          <ul className="list-disc pl-5 space-y-1">
-            <li>
-              <strong>Tạm thời:</strong> bấm <em>Disable</em> profile đang hết quota → hệ thống auto-pick profile khác cho job tiếp theo.
-            </li>
-            <li>
-              <strong>Lâu dài:</strong> tạo thêm profile (mỗi profile = 1 tài khoản Grok riêng) để pool có nhiều quota gộp lại. Khi 1 cái hết, các cái khác gánh.
-            </li>
-            <li>
-              <strong>Theo dõi:</strong> profile vừa fail video sẽ thấy job status <code className="px-1 bg-amber-100 rounded text-xs">rate_limited</code> trong{" "}
-              <a href="/jobs" className="underline text-amber-700">Jobs</a> — đó là tín hiệu chuyển profile.
-            </li>
-          </ul>
-          <p className="text-xs text-amber-700 mt-2">
-            Lưu ý: image jobs dùng quota khác (riêng), nên 1 profile có thể vẫn chạy image bình thường dù đã hết quota video.
-          </p>
+        <div className="alert-warning">
+          <span className="text-xl leading-none">⚠️</span>
+          <div className="flex-1 space-y-2">
+            <p className="font-semibold text-amber-900">Giới hạn video theo từng tài khoản Grok</p>
+            <p>
+              Mỗi tài khoản Grok có quota video riêng (thường ~5-10 video/ngày tuỳ gói). Khi 1 profile
+              hết quota, job video chạy trên profile đó sẽ báo lỗi <code className="px-1 bg-amber-100 rounded text-xs">invalid-parent-post</code> hoặc{" "}
+              <code className="px-1 bg-amber-100 rounded text-xs">rate_limited</code>.
+            </p>
+            <p><strong>Cách xử lý:</strong></p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>
+                <strong>Tạm thời:</strong> bấm <em>Disable</em> profile đang hết quota → hệ thống auto-pick profile khác cho job tiếp theo.
+              </li>
+              <li>
+                <strong>Lâu dài:</strong> tạo thêm profile (mỗi profile = 1 tài khoản Grok riêng) để pool có nhiều quota gộp lại. Khi 1 cái hết, các cái khác gánh.
+              </li>
+              <li>
+                <strong>Theo dõi:</strong> profile vừa fail video sẽ thấy job status <code className="px-1 bg-amber-100 rounded text-xs">rate_limited</code> trong{" "}
+                <a href="/jobs" className="underline text-amber-700 font-medium">Jobs</a> — đó là tín hiệu chuyển profile.
+              </li>
+            </ul>
+            <p className="text-xs text-amber-700 mt-2">
+              Lưu ý: image jobs dùng quota khác (riêng), nên 1 profile có thể vẫn chạy image bình thường dù đã hết quota video.
+            </p>
+          </div>
         </div>
       )}
 
