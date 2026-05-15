@@ -191,18 +191,18 @@ function Hero({ brandName }: { brandName: string }) {
   const { t } = useTranslation();
   return (
     <section
-      className="relative overflow-hidden"
-      style={{
-        // Spotify Premium hero — saturated brand-coloured block with a
-        // subtle vignette so the giant headline reads cleanly. The
-        // colour stops are picked to match Spotify's "Premium" page
-        // (purple → blue) but stay on-brand for us.
-        background: "linear-gradient(135deg, #af2896 0%, #509bf5 100%)",
-      }}
+      className="relative overflow-hidden bg-black"
     >
-      {/* Soft radial highlight, top-left, like Spotify Premium hero. */}
-      <div className="absolute inset-0 pointer-events-none"
-           style={{ background: "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.15), transparent 60%)" }} />
+      {/* Reference gradient from the music-streaming demo:
+            linear-gradient(135deg, #1db954 0%, #191414 50%, #9333ea 100%)
+          rendered at 30% opacity over a black base. */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: "linear-gradient(135deg, rgb(29, 185, 84) 0%, rgb(25, 20, 20) 50%, rgb(147, 51, 234) 100%)",
+          opacity: 0.3,
+        }}
+      />
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-20 sm:pt-28 sm:pb-28">
         <div className="text-center max-w-3xl mx-auto space-y-6">
           {/* "Now playing" pill — translucent over the colour block. */}
