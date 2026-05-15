@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -16,12 +16,17 @@
   }
   body {
     @apply bg-ink-950 text-ink-100 font-sans;
-    /* Spotify-style true-black background. No mesh noise; cards carry
-       the colour, the page stays flat black so playlists pop. */
-    background-color: #0a0a0a;
+    /* Navy-tinted "studio" black (#0B0D17). Distinct from pure-black
+       streaming apps — has a faint blue undertone so the UI reads as
+       a software product, not a media player. */
+  }
+  /* Display type — Space Grotesk for headlines, geometric character. */
+  h1, h2, h3 {
+    @apply font-display tracking-tight;
   }
   ::selection {
-    @apply bg-accent-spotify/40 text-white;
+    background-color: rgba(255, 138, 76, 0.35);
+    color: #fff;
   }
   /* Custom scrollbar — dark theme. */
   ::-webkit-scrollbar {
@@ -53,13 +58,13 @@
            focus-visible:ring-offset-ink-950;
   }
   .btn-primary {
-    /* Spotify-style: solid green pill that scales on hover. */
-    @apply btn font-bold text-ink-950 rounded-full
-           hover:scale-105 active:scale-100;
-    background-color: #1db954;
+    /* Aurora coral pill. Distinctive primary — not green, not blue. */
+    @apply btn font-bold text-ink-950 rounded-full shadow-brand
+           hover:shadow-brand-lg hover:scale-[1.03] active:scale-100;
+    background-color: #ff8a4c;
   }
   .btn-primary:hover {
-    background-color: #1ed760;
+    background-color: #ffa570;
   }
   .btn-secondary {
     @apply btn rounded-full bg-transparent text-white border border-ink-600

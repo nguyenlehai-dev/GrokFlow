@@ -5,84 +5,97 @@ export default {
   theme: {
     extend: {
       fontFamily: {
+        // Two-font pairing: Space Grotesk gives display type a geometric,
+        // distinctive character (vs generic Inter-only SaaS); Inter
+        // handles body/UI; JetBrains Mono for code.
         sans: ["Inter", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
-        display: ["Inter", "ui-sans-serif", "system-ui"],
-        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        display: ["'Space Grotesk'", "Inter", "ui-sans-serif", "system-ui"],
+        mono: ["'JetBrains Mono'", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       colors: {
-        // Brand spine — vibrant violet that anchors the gradients. Stays
-        // identical for light/dark; the rest of the page handles tone.
+        // Brand spine — "Aurora coral" (#FF8A4C). Warm, distinctive,
+        // owned. Sits between orange and pink; reads as energy +
+        // creativity for an AI generation platform without copying
+        // Spotify green or generic SaaS blue.
         brand: {
-          50:  "#f5f3ff",
-          100: "#ede9fe",
-          200: "#ddd6fe",
-          300: "#c4b5fd",
-          400: "#a78bfa",
-          500: "#8b5cf6",
-          600: "#7c3aed",
-          700: "#6d28d9",
-          800: "#5b21b6",
-          900: "#4c1d95",
+          50:  "#fff4ee",
+          100: "#ffe5d3",
+          200: "#ffc6a3",
+          300: "#ffa570",
+          400: "#ff8a4c",
+          500: "#ff6b2c",
+          600: "#ef5311",
+          700: "#c63d0a",
+          800: "#9c2f0a",
+          900: "#7a260c",
         },
-        // Music-streaming accent set — Spotify green, Apple Music pink,
-        // YouTube Music red, Tidal cyan. Used as album-art-inspired tones
-        // across the landing + admin dashboards.
+        // Signature accents — mint + lavender pair the warm coral.
+        // Triadic harmony, intentionally NOT music-app brand colours.
         accent: {
-          spotify:  "#1db954",  // Spotify-style green
-          fuchsia:  "#ff2d92",  // Apple Music pink
-          coral:    "#ff5e62",  // Vibrant coral
-          cyan:     "#06b6d4",  // Tidal-ish cyan
-          rose:     "#f43f5e",
-          amber:    "#f59e0b",
-          emerald:  "#10b981",
+          coral:    "#ff8a4c",  // = brand-400 (primary CTA tint)
+          mint:     "#00e0b4",  // electric mint — success / "live" pulse
+          lavender: "#b794f6",  // tertiary highlight
+          magenta:  "#c147e9",  // mid-stop in hero gradient
+          indigo:   "#4a2fbd",  // deep hero end-stop
+          // Legacy aliases kept so unrelated module pages don't break.
+          // Re-pointed to the new palette.
+          spotify:  "#00e0b4",  // → now reads as mint, not Spotify green
+          fuchsia:  "#c147e9",  // → magenta
+          cyan:     "#4fc3f7",
+          rose:     "#ff6b6b",
+          amber:    "#ffb547",
+          emerald:  "#00e0b4",
         },
-        // Cool neutrals tuned for dark UI. ink-950 is the page background;
-        // ink-900 / ink-800 are surfaces; ink-200 / ink-100 are dividers
-        // and muted text on dark.
+        // Navy-tinted neutrals — distinct from pure-black streaming
+        // apps. ink-950 has a subtle blue undertone so the UI reads
+        // "software / studio" rather than "media player".
         ink: {
-          50:  "#f8fafc",
-          100: "#f1f5f9",
-          200: "#e2e8f0",
-          300: "#cbd5e1",
-          400: "#94a3b8",
-          500: "#64748b",
-          600: "#475569",
-          700: "#334155",
-          800: "#1e293b",
-          900: "#0f172a",
-          950: "#020617",
+          50:  "#f5f7fb",
+          100: "#e6eaf3",
+          200: "#c5cce0",
+          300: "#9ba3b8",
+          400: "#6b7390",
+          500: "#4e5571",
+          600: "#363c54",
+          700: "#262b3d",
+          800: "#1c2236",
+          900: "#141826",
+          950: "#0b0d17",
         },
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
-        "gradient-brand": "linear-gradient(135deg, #8b5cf6 0%, #ff2d92 100%)",
-        "gradient-brand-cyan": "linear-gradient(135deg, #6366f1 0%, #06b6d4 100%)",
-        // Spotify-ish hero gradient — vibrant magenta → cyan, like the
-        // edges of an album cover.
-        "gradient-album": "linear-gradient(135deg, #8b5cf6 0%, #ff2d92 45%, #ff5e62 100%)",
-        "gradient-album-cool": "linear-gradient(135deg, #6366f1 0%, #06b6d4 70%, #1db954 100%)",
-        // Subtle mesh for body — same hues as the gradient but desaturated
-        // and very low opacity so cards still pop on top.
-        "gradient-mesh":
-          "radial-gradient(at 0% 0%, rgba(139,92,246,0.10) 0px, transparent 50%), " +
-          "radial-gradient(at 100% 0%, rgba(255,45,146,0.08) 0px, transparent 50%), " +
-          "radial-gradient(at 50% 100%, rgba(6,182,212,0.06) 0px, transparent 50%)",
+        // Aurora signature — 3-stop warm→cool. Coral → magenta →
+        // indigo. Distinctive vs every 2-stop streaming-app gradient.
+        "gradient-aurora": "linear-gradient(135deg, #ff6b6b 0%, #c147e9 50%, #4a2fbd 100%)",
+        "gradient-aurora-soft": "linear-gradient(135deg, #ff8a4c 0%, #c147e9 60%, #4a2fbd 100%)",
+        // Per-module gradients — each owns a hue corner so modules
+        // read as distinct "albums".
+        "gradient-image":   "linear-gradient(135deg, #ff8a4c 0%, #ff3d71 100%)",
+        "gradient-video":   "linear-gradient(135deg, #ff3d71 0%, #b794f6 100%)",
+        "gradient-flow":    "linear-gradient(135deg, #00e0b4 0%, #4fc3f7 100%)",
+        "gradient-gateway": "linear-gradient(135deg, #b794f6 0%, #4a2fbd 100%)",
+        // Legacy aliases — repointed to the new system so older
+        // components using these tokens stay on-brand.
+        "gradient-brand":      "linear-gradient(135deg, #ff8a4c 0%, #c147e9 100%)",
+        "gradient-brand-cyan": "linear-gradient(135deg, #4a2fbd 0%, #4fc3f7 100%)",
+        "gradient-album":      "linear-gradient(135deg, #ff6b6b 0%, #c147e9 50%, #4a2fbd 100%)",
+        "gradient-album-cool": "linear-gradient(135deg, #4a2fbd 0%, #4fc3f7 70%, #00e0b4 100%)",
         "gradient-mesh-dark":
-          "radial-gradient(at 0% 0%, rgba(139,92,246,0.18) 0px, transparent 50%), " +
-          "radial-gradient(at 100% 0%, rgba(255,45,146,0.14) 0px, transparent 50%), " +
-          "radial-gradient(at 50% 100%, rgba(6,182,212,0.10) 0px, transparent 50%)",
+          "radial-gradient(at 0% 0%, rgba(255,138,76,0.16) 0px, transparent 50%), " +
+          "radial-gradient(at 100% 0%, rgba(193,71,233,0.14) 0px, transparent 50%), " +
+          "radial-gradient(at 50% 100%, rgba(0,224,180,0.10) 0px, transparent 50%)",
       },
       boxShadow: {
         card: "0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 1px 3px 0 rgba(15, 23, 42, 0.06)",
         "card-hover": "0 8px 24px -8px rgba(15, 23, 42, 0.12), 0 4px 12px -4px rgba(15, 23, 42, 0.08)",
         "card-dark": "0 1px 2px 0 rgba(0, 0, 0, 0.4), 0 4px 8px -2px rgba(0, 0, 0, 0.3)",
         "card-dark-hover": "0 8px 24px -8px rgba(0, 0, 0, 0.55), 0 4px 16px -4px rgba(139, 92, 246, 0.25)",
-        brand: "0 8px 24px -8px rgba(139, 92, 246, 0.5)",
-        "brand-lg": "0 16px 32px -12px rgba(139, 92, 246, 0.55)",
-        glow: "0 0 0 1px rgba(139, 92, 246, 0.18), 0 8px 28px -8px rgba(139, 92, 246, 0.45)",
-        // Album-art-style glow used on hover for hero / feature cards
-        "glow-pink": "0 0 0 1px rgba(255, 45, 146, 0.25), 0 12px 40px -8px rgba(255, 45, 146, 0.45)",
-        "glow-cyan": "0 0 0 1px rgba(6, 182, 212, 0.25), 0 12px 40px -8px rgba(6, 182, 212, 0.45)",
+        brand: "0 8px 24px -8px rgba(255, 138, 76, 0.45)",
+        "brand-lg": "0 16px 32px -12px rgba(255, 138, 76, 0.55)",
+        glow: "0 0 0 1px rgba(255, 138, 76, 0.20), 0 8px 28px -8px rgba(255, 138, 76, 0.40)",
+        "glow-pink": "0 0 0 1px rgba(193, 71, 233, 0.25), 0 12px 40px -8px rgba(193, 71, 233, 0.45)",
+        "glow-cyan": "0 0 0 1px rgba(0, 224, 180, 0.25), 0 12px 40px -8px rgba(0, 224, 180, 0.45)",
       },
       borderRadius: {
         xl: "0.875rem",

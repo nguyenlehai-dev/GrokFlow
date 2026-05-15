@@ -78,7 +78,8 @@ const MODULES: readonly ModuleCard[] = [
     label: "AI Image", tagline: "Generate · Edit · Stylize",
     desc: "Aurora · Grok-2 · Grok-3 — full aspect ratios, speed/quality mode, image-to-image.",
     icon: ImageIcon,
-    gradient: "from-violet-600 via-fuchsia-600 to-pink-500",
+    // Coral → rose. Warm, the "image" hue corner of our brand.
+    gradient: "from-[#ff8a4c] via-[#ff5e8a] to-[#ff3d71]",
     ctaText: "Thử ngay", to: "/try/image",
     badge: "Free",
     features: ["Aurora model", "Image-to-image", "5 tỉ lệ", "Quality mode (Pro)"],
@@ -87,7 +88,8 @@ const MODULES: readonly ModuleCard[] = [
     label: "AI Video", tagline: "Text · Image · Remix",
     desc: "Text-to-video & image-to-video. 480p/720p, 3-15s, fun + custom mode.",
     icon: Video,
-    gradient: "from-pink-500 via-rose-500 to-orange-500",
+    // Rose → lavender. Mid-spectrum, "video" hue.
+    gradient: "from-[#ff3d71] via-[#c147e9] to-[#b794f6]",
     ctaText: "Cần Basic+", to: "/register?plan=basic",
     badge: "199k+",
     features: ["Text-to-video", "Image-to-video", "Fun mode", "Đến 15s"],
@@ -96,7 +98,8 @@ const MODULES: readonly ModuleCard[] = [
     label: "Flow Tools", tagline: "Cut · Merge · Resize",
     desc: "Cắt ghép video, đổi tỉ lệ, tách audio. Xử lý local trong browser, không cần Adobe.",
     icon: Scissors,
-    gradient: "from-amber-500 via-orange-500 to-rose-500",
+    // Mint → cyan. Cool corner — "flow" reads as productivity / fresh.
+    gradient: "from-[#00e0b4] via-[#2ed3ce] to-[#4fc3f7]",
     ctaText: "Mở trong app", to: "/register",
     features: ["Cut video", "Merge audio", "Resize", "Trích frames"],
   },
@@ -104,7 +107,9 @@ const MODULES: readonly ModuleCard[] = [
     label: "LLM Gateway", tagline: "Route · Pool · Stream",
     desc: "1 API key — auto route OpenAI / Gemini / Claude / Grok. Pool + rotation tự động.",
     icon: Cpu,
-    gradient: "from-cyan-500 via-sky-500 to-indigo-500",
+    // Lavender → deep indigo. Deepest hue corner — "gateway" reads as
+    // infrastructure / serious tooling.
+    gradient: "from-[#b794f6] via-[#7c52e0] to-[#4a2fbd]",
     ctaText: "Cần Pro+", to: "/register?plan=pro",
     badge: "v1",
     features: ["Multi-provider", "Key rotation", "Rate limit", "Async + sync"],
@@ -164,10 +169,13 @@ function TopNav({ brandName }: { brandName: string }) {
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         <Link to="/" className="flex items-center gap-2.5 group">
-          <span className="w-9 h-9 rounded-full bg-white text-ink-950 flex items-center justify-center font-extrabold">
+          <span
+            className="w-9 h-9 rounded-xl text-white flex items-center justify-center font-display font-bold shadow-brand"
+            style={{ background: "linear-gradient(135deg, #ff8a4c 0%, #c147e9 100%)" }}
+          >
             {brandName[0].toUpperCase()}
           </span>
-          <span className="font-bold text-lg text-white">
+          <span className="font-display font-bold text-lg text-white tracking-tight">
             {brandName}
           </span>
         </Link>
@@ -191,16 +199,23 @@ function Hero({ brandName }: { brandName: string }) {
   const { t } = useTranslation();
   return (
     <section
-      className="relative overflow-hidden bg-black"
+      className="relative overflow-hidden"
+      style={{
+        // Aurora signature hero — coral → magenta → indigo. Three-stop
+        // warm-to-cool sweep, intentionally different from every
+        // streaming-app two-stop gradient. This is our brand block.
+        background: "linear-gradient(135deg, #ff6b6b 0%, #c147e9 50%, #4a2fbd 100%)",
+      }}
     >
-      {/* Reference gradient from the music-streaming demo:
-            linear-gradient(135deg, #1db954 0%, #191414 50%, #9333ea 100%)
-          rendered at 30% opacity over a black base. */}
+      {/* Aurora light: a soft warm highlight top-left, a cool mint hint
+          bottom-right. Layered so the gradient has depth without going
+          back to the generic mesh look. */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          background: "linear-gradient(135deg, rgb(29, 185, 84) 0%, rgb(25, 20, 20) 50%, rgb(147, 51, 234) 100%)",
-          opacity: 0.3,
+          background:
+            "radial-gradient(ellipse at 15% 10%, rgba(255,255,255,0.18), transparent 55%), " +
+            "radial-gradient(ellipse at 85% 90%, rgba(0,224,180,0.14), transparent 50%)",
         }}
       />
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-20 sm:pt-28 sm:pb-28">
@@ -217,9 +232,11 @@ function Hero({ brandName }: { brandName: string }) {
             </span>
           </div>
 
-          <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight leading-[1.05] text-white drop-shadow-sm">
+          <h1 className="font-display text-5xl sm:text-7xl font-bold tracking-[-0.03em] leading-[1.02] text-white">
             {t("landing.hero_title_1", "Một studio.")}<br />
-            {t("landing.hero_title_2", "Mọi mô hình AI.")}
+            <span className="italic font-medium text-white/90">
+              {t("landing.hero_title_2", "Mọi mô hình AI.")}
+            </span>
           </h1>
           <p className="text-lg sm:text-xl text-white/90 max-w-2xl mx-auto leading-relaxed">
             {brandName} — {t("landing.hero_subtitle", "Quản lý mọi dự án AI — sinh ảnh, video, văn bản, code — trong một giao diện duy nhất, theo phong cách bảng điều khiển âm nhạc.")}
@@ -552,10 +569,17 @@ function FinalCta() {
   const { t } = useTranslation();
   return (
     <section className="max-w-5xl mx-auto px-4 sm:px-6 py-20">
-      <div className="relative overflow-hidden rounded-2xl p-12 text-center" style={{ background: "linear-gradient(135deg, #1db954 0%, #166534 100%)" }}>
+      <div
+        className="relative overflow-hidden rounded-3xl p-12 text-center"
+        style={{ background: "linear-gradient(135deg, #ff8a4c 0%, #c147e9 60%, #4a2fbd 100%)" }}
+      >
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: "radial-gradient(ellipse at 80% 0%, rgba(0,224,180,0.18), transparent 55%)" }}
+        />
         <div className="relative">
           <Headphones size={48} className="mx-auto text-white mb-4" />
-          <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+          <h2 className="font-display text-3xl sm:text-5xl font-bold text-white tracking-[-0.02em] leading-tight">
             {t("landing.final_cta_title_a", "Sẵn sàng phát hành")}<br />{t("landing.final_cta_title_b", "studio AI của riêng bạn?")}
           </h2>
           <p className="mt-4 text-white/90 max-w-xl mx-auto">
@@ -638,9 +662,9 @@ function SectionHeader({
 }: { eyebrow: string; title: React.ReactNode; subtitle: string }) {
   return (
     <div className="text-center max-w-2xl mx-auto">
-      <p className="text-xs uppercase tracking-[0.2em] text-accent-spotify font-bold">{eyebrow}</p>
-      <h2 className="text-3xl sm:text-5xl font-extrabold text-white mt-3 tracking-tight">{title}</h2>
-      <p className="text-ink-400 mt-4 text-base sm:text-lg">{subtitle}</p>
+      <p className="text-xs uppercase tracking-[0.25em] text-brand-400 font-bold">{eyebrow}</p>
+      <h2 className="font-display text-3xl sm:text-5xl font-bold text-white mt-3 tracking-[-0.02em]">{title}</h2>
+      <p className="text-ink-300 mt-4 text-base sm:text-lg max-w-prose mx-auto">{subtitle}</p>
     </div>
   );
 }
@@ -662,20 +686,23 @@ const SIDEBAR_PLAYLISTS = [
   "Weekly Drop",
 ];
 
+// Aurora palette — coral / rose / lavender / indigo / mint / cyan.
+// Each tile owns one hue corner so the grid reads as a curated set
+// rather than rainbow noise.
 const QUICK_TILES = [
-  { name: "AI Image",       gradient: "from-violet-600 to-fuchsia-600" },
-  { name: "AI Video",       gradient: "from-pink-500 to-rose-500" },
-  { name: "Flow Tools",     gradient: "from-amber-500 to-orange-500" },
-  { name: "LLM Gateway",    gradient: "from-cyan-500 to-indigo-500" },
-  { name: "Liked Results",  gradient: "from-emerald-500 to-teal-500" },
-  { name: "Recent Jobs",    gradient: "from-purple-600 to-blue-500" },
+  { name: "AI Image",       gradient: "from-[#ff8a4c] to-[#ff3d71]" },
+  { name: "AI Video",       gradient: "from-[#ff3d71] to-[#c147e9]" },
+  { name: "Flow Tools",     gradient: "from-[#00e0b4] to-[#4fc3f7]" },
+  { name: "LLM Gateway",    gradient: "from-[#b794f6] to-[#4a2fbd]" },
+  { name: "Liked Results",  gradient: "from-[#c147e9] to-[#7c52e0]" },
+  { name: "Recent Jobs",    gradient: "from-[#4fc3f7] to-[#4a2fbd]" },
 ];
 
 const MADE_FOR_YOU_TILES = [
-  { title: "Daily Mix 1", subtitle: "Aurora · Grok-3 · Image",   gradient: "from-violet-700 via-fuchsia-600 to-pink-500" },
-  { title: "Daily Mix 2", subtitle: "Cinematic video · 4:5",     gradient: "from-rose-600 via-orange-500 to-amber-400" },
-  { title: "Daily Mix 3", subtitle: "GPT-4o · Claude · Gemini",  gradient: "from-indigo-600 via-cyan-500 to-emerald-400" },
-  { title: "Daily Mix 4", subtitle: "Flow · Cut · Merge",        gradient: "from-fuchsia-700 via-pink-500 to-rose-400" },
+  { title: "Daily Mix 1", subtitle: "Aurora · Grok-3 · Image",   gradient: "from-[#ff8a4c] via-[#ff3d71] to-[#c147e9]" },
+  { title: "Daily Mix 2", subtitle: "Cinematic video · 4:5",     gradient: "from-[#ff6b6b] via-[#c147e9] to-[#4a2fbd]" },
+  { title: "Daily Mix 3", subtitle: "GPT-4o · Claude · Gemini",  gradient: "from-[#4a2fbd] via-[#4fc3f7] to-[#00e0b4]" },
+  { title: "Daily Mix 4", subtitle: "Flow · Cut · Merge",        gradient: "from-[#00e0b4] via-[#4fc3f7] to-[#b794f6]" },
 ];
 
 function AppPreview() {
@@ -729,9 +756,16 @@ function AppPreview() {
             </div>
           </aside>
 
-          {/* Main — flat dark, Spotify-style. Subtle gradient at the
-              top so it feels like an album-tinted header. */}
-          <div className="bg-gradient-to-b from-ink-800 via-ink-950 to-ink-950 p-6 overflow-hidden">
+          {/* Main panel — subtle Aurora-tinted header fading into the
+              ink-950 base, so the mock reads as a real "album-tinted"
+              streaming view, not a flat dark surface. */}
+          <div
+            className="p-6 overflow-hidden"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(193,71,233,0.18) 0%, rgba(11,13,23,0.5) 40%, #0b0d17 100%)",
+            }}
+          >
             <p className="text-xs uppercase tracking-wider text-ink-400 font-semibold">
               Good evening
             </p>
@@ -782,7 +816,10 @@ function AppPreview() {
             true black background. */}
         <div className="border-t border-ink-800 bg-black px-4 py-2.5 flex items-center gap-4">
           <div className="flex items-center gap-3 min-w-0 w-48">
-            <div className="w-10 h-10 rounded bg-gradient-to-br from-violet-600 to-fuchsia-600 shrink-0 flex items-center justify-center">
+            <div
+              className="w-10 h-10 rounded shrink-0 flex items-center justify-center"
+              style={{ background: "linear-gradient(135deg, #ff8a4c 0%, #c147e9 100%)" }}
+            >
               <Disc3 size={18} className="text-white animate-spin" style={{ animationDuration: "8s" }} />
             </div>
             <div className="min-w-0">
@@ -836,14 +873,14 @@ const GENRES = [
 function GenrePills() {
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-10">
-      <p className="text-xs uppercase tracking-wider text-ink-400 font-semibold mb-3">
+      <p className="text-xs uppercase tracking-[0.2em] text-ink-400 font-bold mb-4">
         Browse by genre
       </p>
-      <div className="flex flex-wrap gap-2.5">
+      <div className="flex flex-wrap gap-2">
         {GENRES.map((g) => (
           <span
             key={g.label}
-            className={`relative overflow-hidden rounded-full px-4 py-2 text-sm font-semibold text-white cursor-pointer hover:scale-105 transition shadow-card-dark bg-gradient-to-br ${g.gradient}`}
+            className="rounded-full bg-ink-900 hover:bg-ink-800 border border-ink-800 hover:border-brand-400/60 px-4 py-1.5 text-sm font-medium text-ink-200 hover:text-white cursor-pointer transition-colors"
           >
             {g.label}
           </span>
@@ -863,21 +900,21 @@ type PlaylistTile = {
 };
 
 const MADE_FOR_YOU: PlaylistTile[] = [
-  { title: "Daily Mix 1", subtitle: "Aurora · photorealism",      gradient: "from-violet-700 via-fuchsia-600 to-pink-500" },
-  { title: "Daily Mix 2", subtitle: "Cinematic 4:5 video",         gradient: "from-rose-600 via-orange-500 to-amber-400" },
-  { title: "Daily Mix 3", subtitle: "LLM gateway · multi-route",   gradient: "from-indigo-600 via-cyan-500 to-emerald-400" },
-  { title: "Daily Mix 4", subtitle: "Flow productivity",           gradient: "from-fuchsia-700 via-pink-500 to-rose-400" },
-  { title: "Discover Weekly", subtitle: "Aurora drops + remix",    gradient: "from-emerald-600 via-teal-500 to-cyan-400" },
-  { title: "Release Radar",   subtitle: "Models phát hành tuần này", gradient: "from-amber-500 via-rose-500 to-fuchsia-500" },
+  { title: "Daily Mix 1",     subtitle: "Aurora · photorealism",        gradient: "from-[#ff8a4c] via-[#ff3d71] to-[#c147e9]" },
+  { title: "Daily Mix 2",     subtitle: "Cinematic 4:5 video",          gradient: "from-[#ff6b6b] via-[#c147e9] to-[#4a2fbd]" },
+  { title: "Daily Mix 3",     subtitle: "LLM gateway · multi-route",    gradient: "from-[#4a2fbd] via-[#4fc3f7] to-[#00e0b4]" },
+  { title: "Daily Mix 4",     subtitle: "Flow productivity",            gradient: "from-[#00e0b4] via-[#4fc3f7] to-[#b794f6]" },
+  { title: "Discover Weekly", subtitle: "Aurora drops + remix",         gradient: "from-[#b794f6] via-[#c147e9] to-[#ff3d71]" },
+  { title: "Release Radar",   subtitle: "Models phát hành tuần này",    gradient: "from-[#ff8a4c] via-[#ff3d71] to-[#4a2fbd]" },
 ];
 
 const TRENDING: PlaylistTile[] = [
-  { title: "Brand campaign", subtitle: "Logo · poster · banner",  gradient: "from-violet-600 to-fuchsia-600" },
-  { title: "TikTok shorts",  subtitle: "image-to-video · 15s",    gradient: "from-pink-500 to-rose-500" },
-  { title: "E-commerce",     subtitle: "Product photoreal",       gradient: "from-orange-500 to-amber-400" },
-  { title: "AI Avatar",      subtitle: "Talking head + voice",    gradient: "from-cyan-500 to-indigo-500" },
-  { title: "Storyboard",     subtitle: "Concept → final frame",   gradient: "from-purple-600 to-pink-500" },
-  { title: "Music cover",    subtitle: "Album art · cover photo", gradient: "from-emerald-500 to-cyan-500" },
+  { title: "Brand campaign", subtitle: "Logo · poster · banner",  gradient: "from-[#ff8a4c] to-[#c147e9]" },
+  { title: "TikTok shorts",  subtitle: "image-to-video · 15s",    gradient: "from-[#ff3d71] to-[#b794f6]" },
+  { title: "E-commerce",     subtitle: "Product photoreal",       gradient: "from-[#ff8a4c] to-[#ff3d71]" },
+  { title: "AI Avatar",      subtitle: "Talking head + voice",    gradient: "from-[#4fc3f7] to-[#4a2fbd]" },
+  { title: "Storyboard",     subtitle: "Concept → final frame",   gradient: "from-[#c147e9] to-[#ff3d71]" },
+  { title: "Music cover",    subtitle: "Album art · cover photo", gradient: "from-[#00e0b4] to-[#4fc3f7]" },
 ];
 
 function PlaylistCarousel({
@@ -887,7 +924,7 @@ function PlaylistCarousel({
     <section className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
       <div className="flex items-end justify-between mb-5">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-accent-spotify font-bold">{eyebrow}</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-brand-400 font-bold">{eyebrow}</p>
           <h3 className="text-2xl sm:text-3xl font-extrabold text-white mt-2">{title}</h3>
         </div>
         <a href="#modules" className="text-xs uppercase tracking-wider text-ink-400 hover:text-white font-semibold">
@@ -927,9 +964,15 @@ function StickyPlayerBar() {
   const [playing, setPlaying] = useState(true);
   if (dismissed) return null;
   return (
-    <div className="hidden md:flex fixed bottom-0 left-0 right-0 z-40 bg-black border-t border-ink-800 px-4 py-3 items-center gap-4 animate-slide-up">
+    <div
+      className="hidden md:flex fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(960px,calc(100vw-2rem))] rounded-2xl border border-ink-700/70 bg-ink-900/90 backdrop-blur-md px-4 py-3 items-center gap-4 animate-slide-up shadow-2xl"
+      style={{ boxShadow: "0 24px 48px -16px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,138,76,0.10)" }}
+    >
       <div className="flex items-center gap-3 min-w-0 w-72 shrink-0">
-        <div className="w-12 h-12 rounded bg-gradient-to-br from-violet-600 to-fuchsia-600 shrink-0 flex items-center justify-center">
+        <div
+          className="w-12 h-12 rounded-lg shrink-0 flex items-center justify-center"
+          style={{ background: "linear-gradient(135deg, #ff8a4c 0%, #c147e9 100%)" }}
+        >
           <Disc3 size={22} className={`text-white ${playing ? "animate-spin" : ""}`} style={{ animationDuration: "8s" }} />
         </div>
         <div className="min-w-0">
