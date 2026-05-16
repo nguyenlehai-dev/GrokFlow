@@ -12,6 +12,7 @@ import { useDocumentTitle } from "@/core/useDocumentTitle";
 import { NotificationBell } from "./NotificationBell";
 import { QuickCreateMenu } from "./QuickCreateMenu";
 import { MaintenanceBanner } from "@/components/ui/MaintenanceBanner";
+import { SubscriptionBanner } from "@/components/layout/SubscriptionBanner";
 
 /** Map nav-group key → i18n key under "nav.<x>". Falls back to the static
  *  label if there's no translation key (e.g. for module-specific items
@@ -97,7 +98,7 @@ export function AppShell() {
   };
 
   return (
-    <div className="flex h-screen bg-ink-950">
+    <div className="flex h-screen bg-slate-50">
       {/* Mobile backdrop — tap to dismiss. md+ never renders this. */}
       {mobileOpen && (
         <button
@@ -110,25 +111,25 @@ export function AppShell() {
 
       <aside
         className={
-          "fixed inset-y-0 left-0 z-40 w-64 border-r border-ink-800/80 " +
-          "bg-ink-900/80 backdrop-blur-md flex flex-col " +
+          "fixed inset-y-0 left-0 z-40 w-64 border-r border-slate-200 " +
+          "bg-white flex flex-col " +
           "transform transition-transform duration-200 md:static md:transform-none md:w-64 " +
           (mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0")
         }
       >
-        <div className="px-5 py-5 border-b border-ink-800/70 flex items-center justify-between">
+        <div className="px-5 py-5 border-b border-slate-200 flex items-center justify-between">
           <Link to="/dashboard" className="flex items-center gap-2.5 min-w-0 group">
-            <span className="w-9 h-9 rounded-xl bg-gradient-album text-white flex items-center justify-center font-bold text-base shadow-brand shrink-0">
+            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 text-white flex items-center justify-center font-bold text-base shadow-sm shrink-0">
               {(brandName?.[0] ?? "G").toUpperCase()}
             </span>
-            <span className="font-bold text-lg text-white truncate group-hover:text-gradient transition-all">
+            <span className="font-bold text-lg text-slate-800 truncate group-hover:text-blue-600 transition-colors">
               {brandName}
             </span>
           </Link>
           <button
             type="button"
             onClick={() => setMobileOpen(false)}
-            className="md:hidden -mr-1 p-1.5 rounded-lg text-ink-400 hover:text-white hover:bg-ink-800"
+            className="md:hidden -mr-1 p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100"
             aria-label="Close menu"
           >
             <X size={18} />
@@ -148,14 +149,14 @@ export function AppShell() {
           )}
         </nav>
         {user && (
-          <div className="border-t border-ink-800/70 p-3 space-y-2">
+          <div className="border-t border-slate-200 p-3 space-y-2">
             <div className="flex items-center gap-2.5 px-2 py-1.5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-album text-white flex items-center justify-center font-semibold text-sm shrink-0 shadow-brand">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white flex items-center justify-center font-semibold text-sm shrink-0 shadow-sm">
                 {(user.email?.[0] ?? "U").toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-white truncate">{user.email}</p>
-                <p className="text-[10px] text-ink-400 uppercase tracking-wider">{user.role}</p>
+                <p className="text-xs font-semibold text-slate-800 truncate">{user.email}</p>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider">{user.role}</p>
               </div>
             </div>
             {planName && (
@@ -171,12 +172,13 @@ export function AppShell() {
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <MaintenanceBanner />
-        <header className="sticky top-0 z-20 glass border-b border-ink-800/60 px-3 sm:px-4 md:px-6 py-3 flex items-center justify-between gap-2">
+        <SubscriptionBanner />
+        <header className="sticky top-0 z-20 bg-white/85 backdrop-blur border-b border-slate-200/70 px-3 sm:px-4 md:px-6 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
               onClick={() => setMobileOpen(true)}
-              className="md:hidden p-2 -ml-1 text-ink-300 hover:text-white rounded-lg hover:bg-ink-800"
+              className="md:hidden p-2 -ml-1 text-slate-600 hover:text-slate-800 rounded-lg hover:bg-slate-100"
               aria-label="Open menu"
             >
               <Menu size={20} />
@@ -213,17 +215,17 @@ function LeafLink({ item }: { item: NavLeaf }) {
       className={({ isActive }) =>
         `relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 ${
           isActive
-            ? "bg-gradient-to-r from-brand-500/20 via-accent-fuchsia/10 to-transparent text-white"
-            : "text-ink-300 hover:bg-ink-800/60 hover:text-white"
+            ? "bg-blue-50 text-blue-700"
+            : "text-slate-600 hover:bg-slate-100 hover:text-slate-800"
         }`
       }
     >
       {({ isActive }) => (
         <>
           {isActive && (
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-gradient-album" />
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-blue-600" />
           )}
-          <Icon size={16} className={isActive ? "text-accent-fuchsia" : ""} />
+          <Icon size={16} className={isActive ? "text-blue-600" : ""} />
           <span className="truncate">{item.label}</span>
         </>
       )}
@@ -266,11 +268,11 @@ function CollapsibleGroup({
         onClick={() => setOpen((v) => !v)}
         className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
           hasActive
-            ? "text-white bg-ink-800/60"
-            : "text-ink-300 hover:bg-ink-800/60 hover:text-white"
+            ? "text-slate-800 bg-slate-100"
+            : "text-slate-600 hover:bg-slate-100 hover:text-slate-800"
         }`}
       >
-        <Icon size={16} className={hasActive ? "text-accent-fuchsia" : ""} />
+        <Icon size={16} className={hasActive ? "text-blue-600" : ""} />
         <span className="flex-1 text-left">{label}</span>
         <ChevronDown
           size={14}
@@ -278,7 +280,7 @@ function CollapsibleGroup({
         />
       </button>
       {open && (
-        <div className="ml-3.5 pl-3 border-l-2 border-ink-800 mt-1 space-y-0.5 animate-slide-up">
+        <div className="ml-3.5 pl-3 border-l-2 border-slate-200 mt-1 space-y-0.5 animate-slide-up">
           {group.items.map((item) =>
             item.type === "link" ? (
               <LeafLink key={item.to} item={item} />

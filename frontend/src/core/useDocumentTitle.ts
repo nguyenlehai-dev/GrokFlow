@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
 import { useDomainStore } from "@/core/domain/store";
-import { ALL_PAGES } from "@/modules/admin/pageCatalog";
+import { titleize } from "@/core/utils/format";
+import { ALL_PAGES } from "@/modules/admin/configs/pageCatalog";
 
 /** Update <title> as the user navigates so it reads "<Page> · <Brand>".
  *
@@ -42,13 +43,4 @@ export function useDocumentTitle() {
 
     document.title = label ? `${label} · ${brand}` : brand;
   }, [location.pathname, brand]);
-}
-
-/** "cut-video" → "Cut Video", "audit-logs" → "Audit Logs". */
-function titleize(slug: string): string {
-  return slug
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
 }

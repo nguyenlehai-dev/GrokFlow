@@ -54,6 +54,12 @@ deploy/inspect*.py
 # Build artefacts
 *.tgz
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+# Local SQLite dev database (created by backend/seed_local.py — never commit)
+backend/local.db
+backend/local.db-shm
+backend/local.db-wal
 
 check_domain.py
 deploy_fe.py

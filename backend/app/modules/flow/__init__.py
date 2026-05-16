@@ -11,3 +11,13 @@ directly out of this backend. Same FE shape, simpler ops:
 
 See `docs/FLOW-SETUP.md` for the operator runbook.
 """
+
+from app.core.module_registry import ModuleManifest
+from .router import router
+
+manifest = ModuleManifest(
+    name="flow",
+    label="Flow (video)",
+    router=router,
+    tags=("product", "flow",),
+)

@@ -2,12 +2,13 @@ import { Globe } from "lucide-react";
 
 import type { FrontendModule, NavEntry, NavGroup, ModuleRoute } from "./types";
 
-import { moduleManifest as admin } from "@/modules/admin";
-import { moduleManifest as auth } from "@/modules/auth";
-import { moduleManifest as landing } from "@/modules/landing";
-import { moduleManifest as grok } from "@/modules/grok";
-import { moduleManifest as flow } from "@/modules/flow";
-import { moduleManifest as gateway } from "@/modules/gateway";
+import { moduleManifest as admin } from "@/modules/admin/router";
+import { moduleManifest as auth } from "@/modules/auth/router";
+import { moduleManifest as landing } from "@/modules/landing/router";
+import { moduleManifest as grok } from "@/modules/grok/router";
+import { moduleManifest as flow } from "@/modules/flow/router";
+import { moduleManifest as gateway } from "@/modules/gateway/router";
+import { moduleManifest as servers } from "@/modules/servers/router";
 
 /** The single source of truth for which modules are loaded into the app.
  *
@@ -30,6 +31,7 @@ export const MODULES: FrontendModule[] = [
   grok,     // Profiles / Jobs / API Docs
   flow,     // Video tools
   gateway,  // LLM Gateway
+  servers,  // VPS management (super_admin)
   // Public (mounted outside the auth shell)
   auth,
   landing,

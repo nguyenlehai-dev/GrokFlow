@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { api } from "@/core/api/axios";
 import { useAuthStore, userCanSeePath } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
+import { setLocale } from "@/core/i18n";
 import { MaintenancePage } from "@/components/ui/MaintenancePage";
 import type { ReactNode } from "react";
 
@@ -14,6 +15,32 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const isPageAllowed = useDomainStore((s) => s.isPageAllowed);
   const firstAllowedPath = useDomainStore((s) => s.firstAllowedPath);
   const location = useLocation();
+
+  // ⚠️ Rules of Hooks — every useEffect MUST run before any early return,
+  // otherwise React's hook-call order changes between renders (maintenance
+  // toggling mid-session would cause a runtime crash).
+  //
+  // Refresh /me on app boot so cached entitlements stay in sync after an
+  // admin changes the user's plan / overrides server-side. Skip when
+  // there's no token to avoid an unauth API call.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get("/api/auth/me");
+        if (cancelled) return;
+        setUser(r.data);
+        // Sync i18next with the user's saved preference so a fresh login
+        // on a new device picks up the right language immediately —
+        // without this it would only honour browser detection / localStorage.
+        if (r.data?.locale) setLocale(r.data.locale);
+      } catch {
+        /* keep cached state — axios interceptor handles 401s */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, setUser]);
 
   // Per-domain maintenance: visible to non-admin users when EITHER the
   // toggle is on OR a scheduled window has elapsed. Admins still get
@@ -34,23 +61,8 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     if (!isAdmin || previewing) return <MaintenancePage />;
   }
 
-  // Refresh /me on app boot — keeps cached entitlements in sync after admin
-  // changes the user's plan/overrides server-side. Skip if no token.
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await api.get("/api/auth/me");
-        if (!cancelled) setUser(r.data);
-      } catch {
-        /* keep cached state — auth interceptor handles 401s */
-      }
-    })();
-  }, [token]);
-
   if (!token) {
-    // No login → push to landing if domain allows, else to login.
+    // No login → push to landing if the domain allows it, else /login.
     if (domainConfig && !domainConfig.allow_landing) {
       return <Navigate to="/login" replace />;
     }
@@ -63,19 +75,19 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   //   user/support → role ∩ domain
   if (!userCanSeePath(user ?? null, location.pathname, isPageAllowed)) {
     const target = firstAllowedPath();
-    // Avoid an infinite redirect if even the fallback target isn't allowed —
+    // Avoid an infinite redirect if even the fallback isn't allowed —
     // render the block panel so the user sees what's going on.
     if (target !== location.pathname && isPageAllowed(target)) {
       return <Navigate to={target} replace />;
     }
     return (
-      <div className="flex h-screen items-center justify-center bg-ink-900">
+      <div className="flex h-screen items-center justify-center bg-slate-50">
         <div className="card max-w-md text-center">
-          <h2 className="text-lg font-semibold text-white">Trang không khả dụng</h2>
-          <p className="text-sm text-ink-300 mt-2">
+          <h2 className="text-lg font-semibold text-slate-800">Trang không khả dụng</h2>
+          <p className="text-sm text-slate-600 mt-2">
             Domain <code className="font-mono">{domainConfig?.hostname}</code> chưa được cấp quyền vào trang nào.
           </p>
-          <p className="text-xs text-ink-400 mt-3">
+          <p className="text-xs text-slate-500 mt-3">
             Liên hệ admin để được cấp quyền.
           </p>
         </div>

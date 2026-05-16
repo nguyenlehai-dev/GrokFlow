@@ -1,9 +1,21 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export type SubscriptionStatus =
+  | "active"
+  | "pending"
+  | "past_due"
+  | "expired"
+  | "cancelled"
+  | "none";
+
 export interface Entitlements {
   plan_code: string | null;
   plan_name: string | null;
+  /** Billing health for the current paid plan. UI shows a "renew now"
+   *  banner when this is `past_due` or `expired`. See backend
+   *  `resolve_user_plan_with_status` for the resolution rules. */
+  subscription_status: SubscriptionStatus;
   features: Record<string, boolean>;
   limits: Record<string, number>;
 }

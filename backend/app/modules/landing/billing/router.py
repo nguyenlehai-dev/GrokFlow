@@ -186,6 +186,25 @@ async def create_checkout(
             "provider": payload.provider,
         },
     )
+
+    # Ping admins so they don't have to refresh the billing list manually.
+    # `domain_id=user.domain_id` scopes the broadcast to admins of THIS
+    # tenant + every super_admin. Free-tier / unscoped users only reach
+    # super_admins (correct behaviour).
+    from app.modules.admin.notifications.service import notify_admins_async
+    await notify_admins_async(
+        db,
+        domain_id=user.domain_id,
+        kind="billing_pending_review",
+        title=f"Yêu cầu nâng gói {plan.name}",
+        body=(
+            f"{user.email} muốn nâng lên gói {plan.name} ({payload.billing_cycle}). "
+            f"Số tiền: {amount:,.0f} VND. Hóa đơn {inv_no}."
+        ),
+        target_url=f"/admin/billing?subscription_id={sub.id}",
+        severity="info",
+    )
+
     await db.commit()
 
     # No payment provider integration yet — manual instructions

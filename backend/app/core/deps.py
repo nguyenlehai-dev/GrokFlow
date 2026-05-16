@@ -1,16 +1,51 @@
+import uuid
 from typing import Annotated
 
 from fastapi import Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.exceptions import InvalidApiKey, InvalidCredentials, PermissionDenied
+from app.core.exceptions import (
+    AppError,
+    InvalidApiKey,
+    InvalidCredentials,
+    PermissionDenied,
+)
 from app.core.security import decode_access_token, hash_api_key
-from app.models import ApiKey, User
+from app.models import ApiKey, Domain, User
 from sqlalchemy import select
 
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def _coerce_uuid(value: str | uuid.UUID) -> uuid.UUID | str:
+    """JWT `sub` is a string; SQLAlchemy's Uuid type on SQLite explodes
+    on strings (calls `.hex`). Coerce to uuid.UUID when possible —
+    a bad-format value returns the original so the lookup raises 404
+    rather than 500."""
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(value)
+    except (ValueError, TypeError):
+        return value
+
+
+async def _assert_domain_active(db: AsyncSession, user: User) -> None:
+    """Block any API call from a tenant whose domain has been disabled
+    (manual freeze, non-payment, etc). super_admin is unscoped → skip.
+    Called from both `get_current_user` and `get_current_user_optional`
+    so the rule is enforced on every authenticated request, not just at
+    login time (an admin can disable a tenant mid-session)."""
+    if user.role == "super_admin" or not user.domain_id:
+        return
+    domain = await db.get(Domain, user.domain_id)
+    if domain and domain.status == "disabled":
+        raise AppError(
+            403, "domain_disabled",
+            "Tenant đang bị tạm dừng. Liên hệ admin để kích hoạt lại.",
+        )
 
 
 async def get_current_user(
@@ -23,9 +58,10 @@ async def get_current_user(
     payload = decode_access_token(token)
     if not payload or "sub" not in payload:
         raise InvalidCredentials()
-    user = await db.get(User, payload["sub"])
+    user = await db.get(User, _coerce_uuid(payload["sub"]))
     if not user or user.status != "active":
         raise InvalidCredentials()
+    await _assert_domain_active(db, user)
     return user
 
 
@@ -46,7 +82,7 @@ async def get_current_user_optional(
     payload = decode_access_token(token)
     if not payload or "sub" not in payload:
         return None
-    user = await db.get(User, payload["sub"])
+    user = await db.get(User, _coerce_uuid(payload["sub"]))
     if not user or user.status != "active":
         return None
     return user

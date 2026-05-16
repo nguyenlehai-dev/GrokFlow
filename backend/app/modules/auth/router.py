@@ -5,6 +5,7 @@ from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
 from app.core.exceptions import EmailAlreadyRegistered, InvalidCredentials
 from app.core.security import create_access_token, hash_password, verify_password
+from app.core.exceptions import AppError
 from app.models import Domain, Plan, Role, User
 from app.modules.admin.audit import service as audit
 from app.modules.entitlements.service import get_effective_entitlements
@@ -24,10 +25,55 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 async def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(payload.password, user.password_hash):
+
+    # Audit failures too — brute-force / credential-stuffing patterns only
+    # show up if both halves of the pair are logged. We record by email
+    # (not user_id) when the account doesn't exist, so the audit row still
+    # surfaces in the dashboard. Status='inactive' is treated as a credential
+    # failure (don't leak account existence + don't issue a token).
+    if not user or not verify_password(payload.password, user.password_hash) or user.status != "active":
+        await audit.log_action(
+            db,
+            user_id=user.id if user else None,
+            action="login_failed",
+            target_type="user",
+            target_id=user.id if user else None,
+            metadata={
+                "email": payload.email,
+                "reason": (
+                    "user_not_found" if not user
+                    else "wrong_password" if user.status == "active"
+                    else "inactive"
+                ),
+            },
+        )
+        await db.commit()
         raise InvalidCredentials()
-    if user.status != "active":
-        raise InvalidCredentials()
+
+    # Domain billing / status check — block login when the tenant the user
+    # belongs to has been disabled (manual freeze, non-payment, etc).
+    # super_admin is unscoped, never bound to a domain → always allowed.
+    if user.role != "super_admin" and user.domain_id:
+        domain = await db.get(Domain, user.domain_id)
+        if domain and domain.status == "disabled":
+            await audit.log_action(
+                db,
+                user_id=user.id,
+                action="login_failed",
+                target_type="user",
+                target_id=user.id,
+                metadata={
+                    "email": payload.email,
+                    "reason": "domain_disabled",
+                    "domain_id": str(domain.id),
+                },
+            )
+            await db.commit()
+            raise AppError(
+                403, "domain_disabled",
+                "Tenant đang bị tạm dừng. Liên hệ admin để kích hoạt lại.",
+            )
+
     token = create_access_token(subject=str(user.id), extra={"role": user.role})
     await audit.log_action(db, user_id=user.id, action="login", target_type="user", target_id=user.id)
     await db.commit()

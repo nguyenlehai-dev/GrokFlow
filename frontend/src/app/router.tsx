@@ -5,10 +5,10 @@ import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { PublicRouteGuard } from "@/components/layout/PublicRouteGuard";
 import { RouteErrorBoundary } from "@/components/layout/RouteErrorBoundary";
 
-import { LoginPage } from "@/modules/auth/LoginPage";
-import { RegisterPage } from "@/modules/auth/RegisterPage";
-import { LandingPage } from "@/modules/landing/LandingPage";
-import { TryImagePage } from "@/modules/landing/TryImagePage";
+import { LoginPage } from "@/modules/auth/views/LoginPage";
+import { RegisterPage } from "@/modules/auth/views/RegisterPage";
+import { LandingPage } from "@/modules/landing/views/LandingPage";
+import { TryImagePage } from "@/modules/landing/views/TryImagePage";
 
 import { getAuthedRoutes } from "./moduleRegistry";
 

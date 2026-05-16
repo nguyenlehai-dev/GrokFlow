@@ -23,14 +23,27 @@ class Base(DeclarativeBase):
 #
 # pool_pre_ping catches stale connections after Postgres restarts /
 # network blips without an obvious "connection closed" error to the user.
+# Pool kwargs only apply to server-backed dialects (Postgres etc.); SQLite
+# uses a thread-local connection by default and errors when passed pool_size.
+# We auto-detect to keep local dev (sqlite+aiosqlite) working without forking
+# the engine config.
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+_pg_pool_kwargs: dict = (
+    {}
+    if _is_sqlite
+    else dict(
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        pool_recycle=1800,  # recycle conns every 30min to dodge stale TCP
+    )
+)
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.APP_DEBUG,
     future=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    pool_recycle=1800,  # recycle conns every 30min to dodge stale TCP
+    **_pg_pool_kwargs,
 )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 

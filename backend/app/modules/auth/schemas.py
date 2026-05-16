@@ -34,6 +34,15 @@ class UserResponse(BaseModel):
 class EntitlementsResponse(BaseModel):
     plan_code: str | None
     plan_name: str | None
+    # Subscription state echoed from `resolve_user_plan_with_status`.
+    # The FE shows a "renew now" banner when this is past_due / expired.
+    #   active        — subscription paid and current
+    #   pending       — admin created sub, awaiting payment confirmation
+    #   past_due      — last payment failed; grace window before downgrade
+    #   expired       — period ended; user has been auto-downgraded to default plan
+    #   cancelled     — user cancelled; still active until period end (sub.cancel_at_period_end)
+    #   none          — no subscription record (free / admin / legacy)
+    subscription_status: str = "none"
     features: dict[str, bool]
     limits: dict[str, int]
 

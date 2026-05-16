@@ -512,3 +512,45 @@ async def dashboard_admin(
     # Per-domain admin: cannot peek into other tenants — force the filter.
     effective_domain = admin.domain_id if admin.role != "super_admin" else domain_id
     return await _build(db, period, "admin", admin.id, domain_filter=effective_domain)
+
+
+@router.get("/admin/pending-billing")
+async def pending_billing_widget(admin: AdminUser, db: DbSession) -> dict:
+    """List of subscriptions awaiting admin confirmation.
+
+    Powers the "Pending upgrade requests" widget on the admin dashboard.
+    Scope mirrors the dashboard:
+      super_admin → every tenant
+      admin       → their own domain only (via the user.domain_id join)
+    """
+    from app.models import Plan, Subscription, User
+
+    q = (
+        select(Subscription, User, Plan)
+        .join(User, User.id == Subscription.user_id)
+        .join(Plan, Plan.id == Subscription.plan_id)
+        .where(Subscription.status == "pending")
+        .order_by(Subscription.created_at.desc())
+        .limit(25)
+    )
+    if admin.role != "super_admin":
+        q = q.where(User.domain_id == admin.domain_id)
+
+    rows = (await db.execute(q)).all()
+    return {
+        "count": len(rows),
+        "items": [
+            {
+                "subscription_id": str(s.id),
+                "user_email": u.email,
+                "user_id": str(u.id),
+                "plan_code": p.code,
+                "plan_name": p.name,
+                "amount": float(s.amount),
+                "currency": s.currency,
+                "billing_cycle": s.billing_cycle,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s, u, p in rows
+        ],
+    }

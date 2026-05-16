@@ -71,6 +71,55 @@ async def log_notification_async(
         logger.exception("notification staging failed for user=%s kind=%s", user_id, kind)
 
 
+async def notify_admins_async(
+    db: AsyncSession,
+    *,
+    domain_id: uuid.UUID | None,
+    kind: str,
+    title: str,
+    body: str | None = None,
+    target_url: str | None = None,
+    severity: str = "info",
+) -> int:
+    """Broadcast a notification to every active admin / super_admin.
+
+    Targeting rule:
+      • domain_id given  → admins of that domain + every super_admin
+      • domain_id None   → super_admins only (system-wide event)
+
+    Used for events admins need to action — new upgrade request, large
+    job failure, gateway key abuse, etc. Returns the number of rows
+    staged so the caller can audit "broadcast hit N admins".
+    """
+    try:
+        q = select(User).where(User.status == "active")
+        if domain_id is None:
+            q = q.where(User.role == "super_admin")
+        else:
+            # Either super_admin (global) OR admin tied to this domain.
+            q = q.where(
+                (User.role == "super_admin")
+                | ((User.role == "admin") & (User.domain_id == domain_id))
+            )
+        admins = (await db.execute(q)).scalars().all()
+        count = 0
+        for admin in admins:
+            if not _in_app_enabled(admin, kind):
+                continue
+            db.add(
+                Notification(
+                    user_id=admin.id, kind=kind, title=title, body=body,
+                    target_url=target_url, severity=severity,
+                )
+            )
+            count += 1
+        # Caller commits.
+        return count
+    except Exception:
+        logger.exception("notify_admins failed kind=%s domain_id=%s", kind, domain_id)
+        return 0
+
+
 def log_notification_sync(
     *,
     user_id: uuid.UUID,

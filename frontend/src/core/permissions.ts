@@ -26,7 +26,13 @@ export interface PermissionUser {
 /** Pages a per-domain admin can always reach (their domain's user + role
  *  management). Without this, granting a domain only /gateway/* would
  *  lock the domain admin out of managing their own tenant's users.
- *  Keep this list short — it bypasses domain.allowed_pages. */
+ *  Keep this list short — it bypasses domain.allowed_pages.
+ *
+ *  ⚠️ Do NOT add global-infra routes here (`/servers`, `/admin/plans`,
+ *  `/admin/domains`, `/admin/billing`, `/admin/git`). Those use
+ *  `SuperAdminUser` on the backend — a domain admin sneaking past the
+ *  FE menu would just hit 403 from every API call.
+ */
 export const ADMIN_BUILTIN_PATHS: readonly string[] = [
   "/admin/users",
   "/admin/roles",

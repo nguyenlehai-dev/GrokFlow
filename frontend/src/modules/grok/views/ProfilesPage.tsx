@@ -1,0 +1,276 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import { useAuthStore } from "@/core/auth/store";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { UploadCookiesModal } from "../components/UploadCookiesModal";
+import { AutoLoginModal } from "../components/AutoLoginModal";
+import { ProjectsModal } from "../components/ProjectsModal";
+import type { Profile } from "../models/profile";
+import { profilesService } from "../services/profiles.service";
+
+export function ProfilesPage() {
+  const { t } = useTranslation();
+  const me = useAuthStore((s) => s.user);
+  const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
+  const isSuper = me?.role === "super_admin";
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["profiles"],
+    queryFn: () => profilesService.list(),
+    refetchInterval: 4000,  // poll so slot count updates live
+  });
+  const [open, setOpen] = useState(false);
+  const [cookiesFor, setCookiesFor] = useState<string | null>(null);
+  const [autoLoginFor, setAutoLoginFor] = useState<string | null>(null);
+  // Per-row state for the domain assignment modal — super_admin only.
+  const [projectsFor, setProjectsFor] = useState<{ id: string; name: string } | null>(null);
+
+  const disable = useMutation({
+    mutationFn: (id: string) => profilesService.disable(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  const stopVnc = useMutation({
+    mutationFn: (id: string) => profilesService.stopVnc(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => profilesService.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  const updateMax = useMutation({
+    mutationFn: ({ id, max }: { id: string; max: number }) =>
+      profilesService.update(id, { max_concurrent_jobs: max }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  const updateMaxVideo = useMutation({
+    mutationFn: ({ id, max }: { id: string; max: number }) =>
+      profilesService.update(id, { max_concurrent_video: max }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+
+  return (
+    <div className="space-y-5">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">
+            {isAdmin ? <>{t("grok.profiles_admin_title_a")} <span className="text-gradient">{t("grok.profiles_admin_title_b")}</span></> : t("grok.profiles_user_title")}
+          </h1>
+          <p className="page-subtitle">
+            {isAdmin
+              ? t("grok.profiles_admin_subtitle")
+              : t("grok.profiles_user_subtitle")}
+          </p>
+        </div>
+        {isAdmin && (
+          <button onClick={() => setOpen(true)} className="btn-primary">+ {t("grok.profiles_create")}</button>
+        )}
+      </div>
+
+      {isAdmin && (
+        <div className="alert-warning">
+          <span className="text-xl leading-none">⚠️</span>
+          <div className="flex-1 space-y-2">
+            <p className="font-semibold text-amber-900">{t("grok.profiles_alert_title")}</p>
+            <p>
+              {t("grok.profiles_alert_intro_a")} <code className="px-1 bg-amber-100 rounded text-xs">invalid-parent-post</code> {t("grok.profiles_alert_intro_or")}{" "}
+              <code className="px-1 bg-amber-100 rounded text-xs">rate_limited</code>.
+            </p>
+            <p><strong>{t("grok.profiles_alert_howto")}</strong></p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>
+                <strong>{t("grok.profiles_alert_temp_label")}</strong> {t("grok.profiles_alert_temp_a")} <em>Disable</em> {t("grok.profiles_alert_temp_b")}
+              </li>
+              <li>
+                <strong>{t("grok.profiles_alert_long_label")}</strong> {t("grok.profiles_alert_long_body")}
+              </li>
+              <li>
+                <strong>{t("grok.profiles_alert_watch_label")}</strong> {t("grok.profiles_alert_watch_a")} <code className="px-1 bg-amber-100 rounded text-xs">rate_limited</code> {t("grok.profiles_alert_watch_in")}{" "}
+                <a href="/jobs" className="underline text-amber-700 font-medium">{t("grok.profiles_alert_watch_jobs")}</a> {t("grok.profiles_alert_watch_b")}
+              </li>
+            </ul>
+            <p className="text-xs text-amber-700 mt-2">
+              {t("grok.profiles_alert_note")}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-slate-500">{t("grok.profiles_loading")}</p>
+      ) : (
+        <div className="card overflow-x-auto p-0">
+          <table className="w-full text-sm">
+            <thead className="bg-white text-left">
+              <tr>
+                <th className="px-4 py-2">{t("grok.profiles_th_name")}</th>
+                <th className="px-4 py-2">{t("grok.profiles_th_provider")}</th>
+                <th className="px-4 py-2">{t("grok.profiles_th_status")}</th>
+                <th className="px-4 py-2" title={t("grok.profiles_th_image_slots_title")}>{t("grok.profiles_th_image_slots")}</th>
+                <th className="px-4 py-2" title={t("grok.profiles_th_video_slots_title")}>{t("grok.profiles_th_video_slots")}</th>
+                <th className="px-4 py-2">{t("grok.profiles_th_last_used")}</th>
+                {isAdmin && <th className="px-4 py-2">{t("grok.profiles_th_actions")}</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {data?.map((p) => {
+                const usage = p.max_concurrent_jobs > 0 ? p.active_jobs / p.max_concurrent_jobs : 0;
+                const slotColor = usage >= 1 ? "text-rose-600" : usage >= 0.7 ? "text-amber-600" : "text-emerald-600";
+                const videoUsage = p.max_concurrent_video > 0
+                  ? (p.active_video_jobs ?? 0) / p.max_concurrent_video
+                  : 0;
+                const videoColor = videoUsage >= 1
+                  ? "text-rose-600"
+                  : videoUsage >= 0.7
+                  ? "text-amber-600"
+                  : "text-emerald-600";
+                return (
+                  <tr key={p.id} className="border-t">
+                    <td className="px-4 py-2 font-medium">{p.name}</td>
+                    <td className="px-4 py-2">{p.provider}</td>
+                    <td className="px-4 py-2"><StatusBadge status={p.status} /></td>
+                    <td className="px-4 py-2">
+                      <span className={`font-mono font-semibold ${slotColor}`}>
+                        {p.active_jobs}/{p.max_concurrent_jobs}
+                      </span>
+                      {isAdmin && (
+                        <input
+                          type="number"
+                          min={1}
+                          max={16}
+                          defaultValue={p.max_concurrent_jobs}
+                          className="ml-2 w-14 px-2 py-0.5 text-xs border rounded"
+                          title={t("grok.profiles_edit_max_image_title")}
+                          onBlur={(e) => {
+                            const v = Number(e.target.value);
+                            if (v >= 1 && v <= 16 && v !== p.max_concurrent_jobs) {
+                              updateMax.mutate({ id: p.id, max: v });
+                            }
+                          }}
+                        />
+                      )}
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className={`font-mono font-semibold ${videoColor}`}>
+                        {p.active_video_jobs ?? 0}/{p.max_concurrent_video ?? 4}
+                      </span>
+                      {isAdmin && (
+                        <input
+                          type="number"
+                          min={1}
+                          max={12}
+                          defaultValue={p.max_concurrent_video ?? 4}
+                          className="ml-2 w-14 px-2 py-0.5 text-xs border rounded"
+                          title={t("grok.profiles_edit_max_video_title")}
+                          onBlur={(e) => {
+                            const v = Number(e.target.value);
+                            if (v >= 1 && v <= 12 && v !== p.max_concurrent_video) {
+                              updateMaxVideo.mutate({ id: p.id, max: v });
+                            }
+                          }}
+                        />
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-slate-500 text-xs">
+                      {p.last_used_at ? new Date(p.last_used_at).toLocaleString() : "—"}
+                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-2 space-x-2 whitespace-nowrap">
+                        <button className="btn-primary" onClick={() => setAutoLoginFor(p.id)}>{t("grok.profiles_action_auto_login")}</button>
+                        {isSuper && (
+                          <button
+                            className="btn-ghost"
+                            onClick={() => setProjectsFor({ id: p.id, name: p.name })}
+                            title={t("grok.profiles_action_projects_title")}
+                          >
+                            {t("grok.profiles_action_projects")}
+                          </button>
+                        )}
+                        <button className="btn-ghost" onClick={() => stopVnc.mutate(p.id)} title={t("grok.profiles_action_stop_title")}>{t("grok.profiles_action_stop")}</button>
+                        <button className="btn-ghost" onClick={() => disable.mutate(p.id)}>{t("grok.profiles_action_disable")}</button>
+                        <button className="btn-ghost text-rose-600" onClick={() => remove.mutate(p.id)}>{t("grok.profiles_action_delete")}</button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+              {data?.length === 0 && (
+                <tr>
+                  <td colSpan={isAdmin ? 6 : 5} className="px-4 py-6 text-center text-slate-500">
+                    {isAdmin ? t("grok.profiles_empty_admin") : t("grok.profiles_empty_user")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {open && <CreateProfileModal onClose={() => setOpen(false)} />}
+      {cookiesFor && <UploadCookiesModal profileId={cookiesFor} onClose={() => setCookiesFor(null)} />}
+      {autoLoginFor && <AutoLoginModal profileId={autoLoginFor} onClose={() => setAutoLoginFor(null)} />}
+      {projectsFor && (
+        <ProjectsModal
+          profileId={projectsFor.id}
+          profileName={projectsFor.name}
+          onClose={() => setProjectsFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+interface CreateValues {
+  name: string;
+  provider: "grok" | "flow";
+  max_concurrent_jobs: number;
+}
+
+function CreateProfileModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { register, handleSubmit, formState: { isSubmitting } } = useForm<CreateValues>({
+    defaultValues: { provider: "grok", max_concurrent_jobs: 4 },
+  });
+  const onSubmit = async (v: CreateValues) => {
+    await profilesService.create({ ...v, max_concurrent_jobs: Number(v.max_concurrent_jobs) });
+    qc.invalidateQueries({ queryKey: ["profiles"] });
+    onClose();
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/50 backdrop-blur-sm animate-fade-in p-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-sm rounded-lg bg-white p-4 shadow-lg space-y-3">
+        <h2 className="text-lg font-semibold">{t("grok.profiles_modal_title")}</h2>
+        <div>
+          <label className="text-sm font-medium">{t("grok.profiles_modal_name")}</label>
+          <input className="input" {...register("name", { required: true })} />
+        </div>
+        <div>
+          <label className="text-sm font-medium">{t("grok.profiles_modal_provider")}</label>
+          <select className="input" {...register("provider")}>
+            <option value="grok">Grok</option>
+            <option value="flow">Flow</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-sm font-medium">{t("grok.profiles_modal_max_jobs")}</label>
+          <input
+            type="number"
+            min={1}
+            max={16}
+            className="input"
+            {...register("max_concurrent_jobs", { required: true, min: 1, max: 16 })}
+          />
+          <p className="text-xs text-slate-500 mt-1">
+            {t("grok.profiles_modal_max_jobs_hint")}
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-ghost">{t("grok.profiles_modal_cancel")}</button>
+          <button className="btn-primary" disabled={isSubmitting}>{t("grok.profiles_modal_create")}</button>
+        </div>
+      </form>
+    </div>
+  );
+}

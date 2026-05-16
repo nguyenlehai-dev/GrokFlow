@@ -40,5 +40,15 @@ export default defineConfig({
     // Allow any hostname so per-domain branding works for new customer hosts
     // without having to redeploy. Dev server only — prod uses nginx.
     allowedHosts: true,
+    // Proxy /api → API host configured via VITE_DEV_API_TARGET (default:
+    // local BE on :8000 — start it with `python -m uvicorn app.main:app
+    // --port 8000` from backend/). Override the env var to hit the remote
+    // VPS BE during integration testing.
+    proxy: {
+      "/api": {
+        target: process.env.VITE_DEV_API_TARGET ?? "http://localhost:8000",
+        changeOrigin: true,
+      },
+    },
   },
 });

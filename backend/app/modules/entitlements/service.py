@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Job, Plan, User
+from app.models import Job, Plan, Subscription, User
 
 from .catalog import ADMIN_ENTITLEMENTS, DEFAULT_PLANS, FEATURES, LIMITS
 
@@ -60,12 +60,62 @@ async def get_default_plan(db: AsyncSession) -> Plan | None:
 
 
 async def resolve_user_plan(db: AsyncSession, user: User) -> Plan | None:
+    """Compat alias kept for callers that don't care about subscription
+    state. Prefer `resolve_user_plan_with_status` for new code so the
+    UI can react to past-due / expired states."""
+    plan, _ = await resolve_user_plan_with_status(db, user)
+    return plan
+
+
+async def resolve_user_plan_with_status(
+    db: AsyncSession, user: User,
+) -> tuple[Plan | None, str]:
+    """Return (Plan, subscription_status).
+
+    Resolution order:
+      1. user.plan_id with an `active` Subscription   → that plan, "active"
+      2. user.plan_id with NO active Subscription     → default plan, "expired"|"past_due"|"none"
+      3. no user.plan_id                              → default plan, "none"
+
+    Without the subscription gate, a user whose payment lapses keeps
+    full plan features until an admin manually clears `user.plan_id`.
+    This couples access to billing state automatically so a renewal
+    failure downgrades the user the next time `/api/auth/me` resolves.
+    """
+    target_plan: Plan | None = None
+    sub_status: str = "none"
+
     if user.plan_id:
-        r = await db.execute(select(Plan).where(Plan.id == user.plan_id))
-        plan = r.scalar_one_or_none()
-        if plan:
-            return plan
-    return await get_default_plan(db)
+        # Latest subscription for this user (any status).
+        latest_sub = (await db.execute(
+            select(Subscription)
+            .where(Subscription.user_id == user.id)
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+
+        if latest_sub:
+            sub_status = latest_sub.status  # active | pending | past_due | expired | cancelled
+
+        # Only honor the paid plan when the subscription is currently active
+        # (and, for safety, points at the same plan). Otherwise we fall
+        # through to the default plan — same effect as if admin had
+        # cleared plan_id.
+        if latest_sub and latest_sub.status == "active" and latest_sub.plan_id == user.plan_id:
+            r = await db.execute(select(Plan).where(Plan.id == user.plan_id))
+            target_plan = r.scalar_one_or_none()
+
+    if target_plan is None:
+        target_plan = await get_default_plan(db)
+        # If user paid before but sub is no longer active, mark status
+        # so the UI can show a "renew now" banner. When there's never
+        # been a paid subscription we leave status="none".
+        if user.plan_id and sub_status == "active":
+            # User has plan_id pointing at a non-default plan but no
+            # active subscription record (legacy data). Treat as expired.
+            sub_status = "expired"
+
+    return target_plan, sub_status
 
 
 def _merge_entitlements(plan_ents: dict | None, overrides: dict | None) -> dict:
@@ -92,14 +142,22 @@ def _merge_entitlements(plan_ents: dict | None, overrides: dict | None) -> dict:
 
 
 async def get_effective_entitlements(db: AsyncSession, user: User) -> dict:
-    """Resolve final feature/limit map for a user. Admins always get full grant."""
-    if user.role == "admin":
+    """Resolve final feature/limit map for a user. Admin tiers always
+    get full grant — both `admin` (per-domain) and `super_admin` (global).
+
+    Without the super_admin branch a global super tied to a free-plan
+    default would silently lose features (e.g. video gen) on a fresh
+    install. Same blanket grant for both tiers matches the auth-deps
+    contract (`require_admin` accepts both).
+    """
+    if user.role in ("admin", "super_admin"):
         return {
             "plan_code": "admin",
             "plan_name": "Admin (full access)",
+            "subscription_status": "active",
             **ADMIN_ENTITLEMENTS,
         }
-    plan = await resolve_user_plan(db, user)
+    plan, sub_status = await resolve_user_plan_with_status(db, user)
     eff = _merge_entitlements(
         plan.entitlements if plan else None,
         user.entitlement_overrides,
@@ -107,6 +165,7 @@ async def get_effective_entitlements(db: AsyncSession, user: User) -> dict:
     return {
         "plan_code": plan.code if plan else None,
         "plan_name": plan.name if plan else None,
+        "subscription_status": sub_status,
         **eff,
     }
 

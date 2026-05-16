@@ -38,21 +38,21 @@ export function RouteErrorBoundary() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-ink-900 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-white px-4">
       <div className="w-full max-w-md text-center">
         <div className="w-16 h-16 mx-auto rounded-full bg-amber-100 flex items-center justify-center">
           <AlertTriangle size={28} className="text-amber-600" />
         </div>
-        <p className="mt-4 text-xs uppercase tracking-wider text-ink-400 font-mono">
+        <p className="mt-4 text-xs uppercase tracking-wider text-slate-500 font-mono">
           HTTP {status}
         </p>
         <h1 className="mt-1 text-2xl font-bold text-white">{title}</h1>
-        <p className="mt-2 text-sm text-ink-300">{message}</p>
+        <p className="mt-2 text-sm text-slate-600">{message}</p>
 
         <div className="mt-6 flex items-center justify-center gap-2">
           <button
             onClick={() => navigate(-1)}
-            className="btn-ghost border border-ink-700 inline-flex items-center gap-1.5"
+            className="btn-ghost border border-slate-200 inline-flex items-center gap-1.5"
           >
             <ArrowLeft size={14} /> Quay lại
           </button>
@@ -64,7 +64,7 @@ export function RouteErrorBoundary() {
           </Link>
           <button
             onClick={() => window.location.reload()}
-            className="btn-ghost border border-ink-700 inline-flex items-center gap-1.5"
+            className="btn-ghost border border-slate-200 inline-flex items-center gap-1.5"
             title="Tải lại trang"
           >
             <RefreshCw size={14} /> Reload

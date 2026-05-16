@@ -1,15 +1,10 @@
 /**
  * Sticky top banner with a marquee announcement + live countdown.
- *
- * Shown when `domain.maintenance_starts_at` is in the future. Once the
- * timestamp elapses, ProtectedRoute / PublicRouteGuard switch to the
- * full MaintenancePage automatically.
- *
- * Admin-supplied `maintenance_announcement` is the marquee text; it's
- * concatenated with the auto-formatted countdown ("còn 4:32").
+ * Shown when `domain.maintenance_starts_at` is in the future.
  */
 import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useDomainStore } from "@/core/domain/store";
 
 function formatRemaining(ms: number): string {
@@ -25,18 +20,16 @@ function formatRemaining(ms: number): string {
 }
 
 export function MaintenanceBanner() {
+  const { t } = useTranslation();
   const cfg = useDomainStore((s) => s.config);
   const [now, setNow] = useState(() => Date.now());
 
-  // Tick once per second while the banner is visible — cheap enough.
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
   if (!cfg?.maintenance_starts_at) return null;
-  // If already in maintenance, the gate renders MaintenancePage instead —
-  // this banner is only for the lead-up.
   if (cfg.maintenance_mode) return null;
 
   const startsAt = new Date(cfg.maintenance_starts_at).getTime();
@@ -45,7 +38,9 @@ export function MaintenanceBanner() {
   if (remaining <= 0) return null;
 
   const announcement = (cfg.maintenance_announcement || "").trim()
-    || "Hệ thống sẽ bảo trì trong giây lát. Vui lòng dừng các thao tác đang chạy.";
+    || t("header.maint_banner_default");
+  const countdown = formatRemaining(remaining);
+  const countdownLine = t("header.maint_banner_countdown", { time: countdown });
 
   return (
     <div
@@ -56,18 +51,14 @@ export function MaintenanceBanner() {
         <AlertTriangle size={18} className="shrink-0 animate-pulse-soft" />
         <div className="overflow-hidden flex-1 relative h-5">
           <div className="whitespace-nowrap absolute inset-0 animate-marquee">
-            <span className="font-semibold mr-6">
-              ⚠️ Bảo trì trong {formatRemaining(remaining)} —
-            </span>
+            <span className="font-semibold mr-6">⚠️ {countdownLine} —</span>
             <span className="font-medium">{announcement}</span>
-            <span className="ml-12 font-semibold">
-              ⚠️ Bảo trì trong {formatRemaining(remaining)} —
-            </span>
+            <span className="ml-12 font-semibold">⚠️ {countdownLine} —</span>
             <span className="ml-6 font-medium">{announcement}</span>
           </div>
         </div>
-        <span className="shrink-0 font-mono font-bold bg-ink-900/20 backdrop-blur-sm px-3 py-0.5 rounded-full text-sm">
-          {formatRemaining(remaining)}
+        <span className="shrink-0 font-mono font-bold bg-white/20 backdrop-blur-sm px-3 py-0.5 rounded-full text-sm">
+          {countdown}
         </span>
       </div>
     </div>

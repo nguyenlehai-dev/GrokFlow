@@ -56,10 +56,10 @@ export function PublicRouteGuard({
 
 function BlockedPanel({ reason }: { reason: string }) {
   return (
-    <div className="flex h-screen items-center justify-center bg-ink-900 px-4">
+    <div className="flex h-screen items-center justify-center bg-white px-4">
       <div className="card max-w-md text-center">
         <h2 className="text-lg font-semibold text-white">Trang không khả dụng</h2>
-        <p className="text-sm text-ink-300 mt-2">{reason}</p>
+        <p className="text-sm text-slate-600 mt-2">{reason}</p>
       </div>
     </div>
   );

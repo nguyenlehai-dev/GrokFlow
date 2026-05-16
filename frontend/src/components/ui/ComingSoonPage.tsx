@@ -1,8 +1,10 @@
 import { Construction } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export function ComingSoonPage({
   title, description,
 }: { title: string; description?: string }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">{title}</h1>
@@ -11,9 +13,9 @@ export function ComingSoonPage({
           <Construction size={24} className="text-amber-600" />
         </div>
         <div>
-          <h2 className="font-semibold text-white">Sắp ra mắt</h2>
-          <p className="text-sm text-ink-300 mt-1">
-            {description ?? `Tính năng "${title}" đang được phát triển. Quay lại sau nhé!`}
+          <h2 className="font-semibold text-slate-800">{t("header.coming_soon_title")}</h2>
+          <p className="text-sm text-slate-600 mt-1">
+            {description ?? t("header.coming_soon_default", { title })}
           </p>
         </div>
       </div>

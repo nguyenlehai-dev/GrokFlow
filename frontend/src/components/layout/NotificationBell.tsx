@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bell, Check, AlertCircle, Info, AlertTriangle, CheckCheck } from "lucide-react";
 
@@ -34,6 +35,7 @@ const SEVERITY_VISUAL: Record<string, { icon: typeof Info; color: string }> = {
  *  item click (or for-all via the panel's footer button). Closes on
  *  outside-click + route change. */
 export function NotificationBell() {
+  const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -72,8 +74,8 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="relative rounded-md p-1.5 text-ink-300 hover:bg-ink-800"
-        aria-label={`${unread} thông báo chưa đọc`}
+        className="relative rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
+        aria-label={t("header.unread_aria", { count: unread })}
       >
         <Bell size={18} />
         {unread > 0 && (
@@ -84,9 +86,9 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1 w-80 z-50 rounded-lg border border-ink-800 bg-ink-900 shadow-xl overflow-hidden">
-          <header className="flex items-center justify-between px-3 py-2 border-b border-ink-800">
-            <h3 className="font-semibold text-sm">Thông báo</h3>
+        <div className="absolute right-0 mt-1 w-80 z-50 rounded-lg border border-slate-200 bg-white shadow-xl overflow-hidden">
+          <header className="flex items-center justify-between px-3 py-2 border-b border-slate-200">
+            <h3 className="font-semibold text-sm">{t("header.notifications")}</h3>
             {unread > 0 && (
               <button
                 type="button"
@@ -94,31 +96,31 @@ export function NotificationBell() {
                 disabled={markAllRead.isPending}
                 className="text-xs text-violet-600 hover:text-violet-700 inline-flex items-center gap-1"
               >
-                <CheckCheck size={12} /> Đánh dấu tất cả đã đọc
+                <CheckCheck size={12} /> {t("header.mark_all_read")}
               </button>
             )}
           </header>
 
           <div className="max-h-96 overflow-y-auto">
             {(data?.items ?? []).length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-ink-400">
-                Chưa có thông báo nào.
+              <p className="px-3 py-6 text-center text-sm text-slate-500">
+                {t("header.notif_empty")}
               </p>
             ) : (
-              <ul className="divide-y divide-ink-800">
+              <ul className="divide-y divide-slate-200">
                 {data!.items.map((n) => {
                   const visual = SEVERITY_VISUAL[n.severity] ?? SEVERITY_VISUAL.info;
                   const Icon = visual.icon;
                   const isUnread = !n.read_at;
                   const rowClass = `flex gap-3 px-3 py-2.5 ${
                     isUnread ? "bg-violet-50/50" : ""
-                  } hover:bg-ink-900 cursor-pointer text-left transition`;
+                  } hover:bg-white cursor-pointer text-left transition`;
                   const inner = (
                     <>
                       <Icon size={16} className={`${visual.color} flex-shrink-0 mt-0.5`} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <p className={`text-sm ${isUnread ? "font-semibold" : ""} text-ink-100`}>
+                          <p className={`text-sm ${isUnread ? "font-semibold" : ""} text-slate-800`}>
                             {n.title}
                           </p>
                           {isUnread && (
@@ -126,10 +128,10 @@ export function NotificationBell() {
                           )}
                         </div>
                         {n.body && (
-                          <p className="text-xs text-ink-400 mt-0.5 line-clamp-2">{n.body}</p>
+                          <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.body}</p>
                         )}
-                        <p className="text-[10px] text-ink-500 mt-0.5">
-                          {new Date(n.created_at).toLocaleString("vi-VN")}
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {new Date(n.created_at).toLocaleString(i18n.language?.startsWith("en") ? "en-US" : "vi-VN")}
                         </p>
                       </div>
                     </>
@@ -157,13 +159,13 @@ export function NotificationBell() {
             )}
           </div>
 
-          <footer className="border-t border-ink-800 px-3 py-2 text-center">
+          <footer className="border-t border-slate-200 px-3 py-2 text-center">
             <Link
               to="/settings"
               onClick={() => setOpen(false)}
-              className="text-xs text-ink-400 hover:text-ink-200"
+              className="text-xs text-slate-500 hover:text-slate-700"
             >
-              Cấu hình thông báo →
+              {t("header.notif_config")}
             </Link>
           </footer>
         </div>

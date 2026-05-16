@@ -33,17 +33,17 @@ const TOAST_VARIANTS = {
   success: {
     icon: CheckCircle2,
     iconClass: "text-emerald-500",
-    surface: "bg-ink-900/95 border-emerald-200 text-emerald-900",
+    surface: "bg-white border-emerald-200 text-emerald-900",
   },
   error: {
     icon: AlertCircle,
     iconClass: "text-rose-500",
-    surface: "bg-ink-900/95 border-rose-200 text-rose-900",
+    surface: "bg-white border-rose-200 text-rose-900",
   },
   info: {
     icon: Info,
-    iconClass: "text-brand-500",
-    surface: "bg-ink-900/95 border-brand-200 text-ink-900",
+    iconClass: "text-blue-600",
+    surface: "bg-white border-brand-200 text-slate-900",
   },
 } as const;
 
@@ -65,7 +65,7 @@ export function ToastContainer() {
             <button
               type="button"
               onClick={() => remove(t.id)}
-              className="text-ink-400 hover:text-ink-700 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="text-slate-500 hover:text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity"
               aria-label="Dismiss"
             >
               <X size={14} />
