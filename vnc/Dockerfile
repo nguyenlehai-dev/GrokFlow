@@ -29,6 +29,13 @@ COPY supervisord.conf /etc/supervisor/conf.d/grokflow.conf
 COPY entrypoint.sh /entrypoint.sh
 COPY launch-chromium.sh /launch-chromium.sh
 COPY cdp-proxy.conf /etc/nginx/cdp-proxy.conf
+# Debian noVNC strips package.json (which ui.js fetches for version display).
+# Add a stub so the browser console doesn't spam 404s + "Couldn't fetch
+# package.json" errors. Also strip the <link rel="preload"> tags for SVGs
+# that fire benign "preloaded but not used" warnings (noVNC only uses them
+# on connection errors, which Chrome can't predict from the preload hint).
+RUN printf '{"name":"noVNC","version":"1.4.0"}\n' > /usr/share/novnc/package.json \
+    && sed -i '/<link rel="preload"/d' /usr/share/novnc/vnc.html
 RUN chmod +x /entrypoint.sh /launch-chromium.sh
 
 EXPOSE 6901 9223

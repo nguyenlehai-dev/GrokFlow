@@ -37,6 +37,16 @@ export const jobsService = {
   cancel: (id: string) => api.post(`/api/jobs/${id}/cancel`),
   remove: (id: string) => api.delete(`/api/jobs/${id}`),
 
+  /** Delete many jobs in one request. Backend skips in-flight rows and
+   *  rows the caller doesn't own; the response counts each bucket. */
+  bulkDelete: (ids: string[]) =>
+    api
+      .post<{ deleted: number; skipped_in_flight: number; skipped_not_owned: number }>(
+        "/api/jobs/bulk-delete",
+        { ids },
+      )
+      .then((r) => r.data),
+
   /** Multipart upload of a reference image — returns the file_id to
    *  attach via `input_image_file_id`. */
   uploadInput: (file: File) => {

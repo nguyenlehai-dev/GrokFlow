@@ -49,6 +49,14 @@ export function ProfilesPage() {
       profilesService.update(id, { max_concurrent_video: max }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
   });
+  // Toggle that decides whether a profile is allowed to accept video
+  // jobs. Off ⇒ the resolver (backend) skips this profile when picking
+  // for video — the video slots column is also greyed out below.
+  const updateAllowsVideo = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) =>
+      profilesService.update(id, { allows_video: value }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
 
   return (
     <div className="space-y-5">
@@ -107,6 +115,7 @@ export function ProfilesPage() {
                 <th className="px-4 py-2">{t("grok.profiles_th_name")}</th>
                 <th className="px-4 py-2">{t("grok.profiles_th_provider")}</th>
                 <th className="px-4 py-2">{t("grok.profiles_th_status")}</th>
+                <th className="px-4 py-2" title={t("grok.profiles_th_mode_title")}>{t("grok.profiles_th_mode")}</th>
                 <th className="px-4 py-2" title={t("grok.profiles_th_image_slots_title")}>{t("grok.profiles_th_image_slots")}</th>
                 <th className="px-4 py-2" title={t("grok.profiles_th_video_slots_title")}>{t("grok.profiles_th_video_slots")}</th>
                 <th className="px-4 py-2">{t("grok.profiles_th_last_used")}</th>
@@ -117,19 +126,34 @@ export function ProfilesPage() {
               {data?.map((p) => {
                 const usage = p.max_concurrent_jobs > 0 ? p.active_jobs / p.max_concurrent_jobs : 0;
                 const slotColor = usage >= 1 ? "text-rose-600" : usage >= 0.7 ? "text-amber-600" : "text-emerald-600";
-                const videoUsage = p.max_concurrent_video > 0
+                const allowsVideo = p.allows_video !== false; // default true for old rows
+                const videoUsage = allowsVideo && p.max_concurrent_video > 0
                   ? (p.active_video_jobs ?? 0) / p.max_concurrent_video
                   : 0;
-                const videoColor = videoUsage >= 1
+                const videoColor = !allowsVideo
+                  ? "text-slate-400"
+                  : videoUsage >= 1
                   ? "text-rose-600"
                   : videoUsage >= 0.7
                   ? "text-amber-600"
                   : "text-emerald-600";
                 return (
                   <tr key={p.id} className="border-t">
-                    <td className="px-4 py-2 font-medium">{p.name}</td>
+                    <td className="px-4 py-2">
+                      <div className="font-medium">{p.name}</div>
+                    </td>
                     <td className="px-4 py-2">{p.provider}</td>
                     <td className="px-4 py-2"><StatusBadge status={p.status} /></td>
+                    <td className="px-4 py-2">
+                      <ModeToggle
+                        allowsVideo={allowsVideo}
+                        canEdit={!!isAdmin}
+                        busy={updateAllowsVideo.isPending}
+                        onChange={(v) => updateAllowsVideo.mutate({ id: p.id, value: v })}
+                        labelImageOnly={t("grok.profiles_mode_image_only")}
+                        labelBoth={t("grok.profiles_mode_image_video")}
+                      />
+                    </td>
                     <td className="px-4 py-2">
                       <span className={`font-mono font-semibold ${slotColor}`}>
                         {p.active_jobs}/{p.max_concurrent_jobs}
@@ -152,10 +176,15 @@ export function ProfilesPage() {
                       )}
                     </td>
                     <td className="px-4 py-2">
-                      <span className={`font-mono font-semibold ${videoColor}`}>
-                        {p.active_video_jobs ?? 0}/{p.max_concurrent_video ?? 4}
+                      <span
+                        className={`font-mono font-semibold ${videoColor}`}
+                        title={!allowsVideo ? t("grok.profiles_video_disabled_hint") : undefined}
+                      >
+                        {allowsVideo
+                          ? `${p.active_video_jobs ?? 0}/${p.max_concurrent_video ?? 4}`
+                          : "—"}
                       </span>
-                      {isAdmin && (
+                      {isAdmin && allowsVideo && (
                         <input
                           type="number"
                           min={1}
@@ -197,7 +226,7 @@ export function ProfilesPage() {
               })}
               {data?.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 6 : 5} className="px-4 py-6 text-center text-slate-500">
+                  <td colSpan={isAdmin ? 7 : 6} className="px-4 py-6 text-center text-slate-500">
                     {isAdmin ? t("grok.profiles_empty_admin") : t("grok.profiles_empty_user")}
                   </td>
                 </tr>
@@ -221,20 +250,65 @@ export function ProfilesPage() {
   );
 }
 
+/** Pill-style two-option toggle: "Ảnh + Video" / "Chỉ ảnh".
+ *  - Customers see it as a read-only badge.
+ *  - Admins click to flip; backend call rejects mid-flight so the UI
+ *    optimistic state stays in sync via React Query invalidation.
+ *  - Greyed out while the mutation is in flight to avoid double-clicks. */
+function ModeToggle({
+  allowsVideo, canEdit, busy, onChange, labelImageOnly, labelBoth,
+}: {
+  allowsVideo: boolean;
+  canEdit: boolean;
+  busy: boolean;
+  onChange: (v: boolean) => void;
+  labelImageOnly: string;
+  labelBoth: string;
+}) {
+  const label = allowsVideo ? labelBoth : labelImageOnly;
+  const tone = allowsVideo
+    ? "bg-violet-100 text-violet-700 border-violet-200"
+    : "bg-amber-100 text-amber-700 border-amber-200";
+  if (!canEdit) {
+    return (
+      <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-semibold rounded border ${tone}`}>
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!allowsVideo)}
+      disabled={busy}
+      className={`inline-flex items-center px-2 py-0.5 text-[11px] font-semibold rounded border transition ${tone} hover:opacity-80 disabled:opacity-50`}
+      title="Click để chuyển chế độ"
+    >
+      {label}
+    </button>
+  );
+}
+
+
 interface CreateValues {
   name: string;
   provider: "grok" | "flow";
   max_concurrent_jobs: number;
+  allows_video: boolean;
 }
 
 function CreateProfileModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<CreateValues>({
-    defaultValues: { provider: "grok", max_concurrent_jobs: 4 },
+    defaultValues: { provider: "grok", max_concurrent_jobs: 4, allows_video: true },
   });
   const onSubmit = async (v: CreateValues) => {
-    await profilesService.create({ ...v, max_concurrent_jobs: Number(v.max_concurrent_jobs) });
+    await profilesService.create({
+      ...v,
+      max_concurrent_jobs: Number(v.max_concurrent_jobs),
+      allows_video: Boolean(v.allows_video),
+    });
     qc.invalidateQueries({ queryKey: ["profiles"] });
     onClose();
   };
@@ -266,6 +340,15 @@ function CreateProfileModal({ onClose }: { onClose: () => void }) {
             {t("grok.profiles_modal_max_jobs_hint")}
           </p>
         </div>
+        <label className="flex items-start gap-2 cursor-pointer pt-1">
+          <input type="checkbox" className="mt-1" {...register("allows_video")} />
+          <span>
+            <span className="text-sm font-medium">{t("grok.profiles_modal_allows_video")}</span>
+            <span className="block text-xs text-slate-500 mt-0.5">
+              {t("grok.profiles_modal_allows_video_hint")}
+            </span>
+          </span>
+        </label>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-ghost">{t("grok.profiles_modal_cancel")}</button>
           <button className="btn-primary" disabled={isSubmitting}>{t("grok.profiles_modal_create")}</button>

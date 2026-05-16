@@ -136,17 +136,7 @@ export function AppShell() {
           </button>
         </div>
         <nav className="p-3 flex-1 overflow-y-auto space-y-0.5">
-          {visibleNav.map((entry) =>
-            entry.type === "link" ? (
-              <LeafLink key={entry.to} item={entry} />
-            ) : (
-              <CollapsibleGroup
-                key={entry.key}
-                group={entry}
-                currentPath={location.pathname}
-              />
-            )
-          )}
+          <NavAccordion items={visibleNav} currentPath={location.pathname} />
         </nav>
         {user && (
           <div className="border-t border-slate-200 p-3 space-y-2">
@@ -208,28 +198,40 @@ export function AppShell() {
 
 function LeafLink({ item }: { item: NavLeaf }) {
   const Icon = item.icon;
+  const location = useLocation();
+  // Split `to` so we can match pathname AND query separately. NavLink's
+  // built-in `isActive` ignores `?kind=video` etc. — that caused all 3
+  // Flow sub-tabs (video / audio / frame) to highlight at the same time
+  // since they share `/gallery/flow` as the pathname.
+  const [toPath, toQs = ""] = item.to.split("?");
+  const isExact = item.to === "/dashboard";
+  const samePath = isExact
+    ? location.pathname === toPath
+    : location.pathname === toPath
+      || location.pathname.startsWith(toPath + "/");
+  // Compare query strings only when the entry actually pins one. A leaf
+  // with no `?kind=...` should still highlight when user lands on a
+  // page that DOES have query (e.g. clicked "Flow > Video" then deep
+  // links to "All" — both share the same pathname).
+  const sameQs = toQs === ""
+    ? true
+    : new URLSearchParams(location.search).toString() === new URLSearchParams(toQs).toString();
+  const isActive = samePath && sameQs;
   return (
-    <NavLink
+    <Link
       to={item.to}
-      end={item.to === "/dashboard"}
-      className={({ isActive }) =>
-        `relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 ${
-          isActive
-            ? "bg-blue-50 text-blue-700"
-            : "text-slate-600 hover:bg-slate-100 hover:text-slate-800"
-        }`
-      }
+      className={`relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 ${
+        isActive
+          ? "bg-blue-50 text-blue-700"
+          : "text-slate-600 hover:bg-slate-100 hover:text-slate-800"
+      }`}
     >
-      {({ isActive }) => (
-        <>
-          {isActive && (
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-blue-600" />
-          )}
-          <Icon size={16} className={isActive ? "text-blue-600" : ""} />
-          <span className="truncate">{item.label}</span>
-        </>
+      {isActive && (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-blue-600" />
       )}
-    </NavLink>
+      <Icon size={16} className={isActive ? "text-blue-600" : ""} />
+      <span className="truncate">{item.label}</span>
+    </Link>
   );
 }
 
@@ -245,27 +247,68 @@ function groupHasActiveLeaf(items: NavEntry[], currentPath: string): boolean {
   });
 }
 
+/** Accordion container for one nesting level. Only one sibling group can
+ *  be open at a time — opening another closes the previous one. Each level
+ *  has its own state, so opening a nested sub-group doesn't collapse the
+ *  parent. Leaves render inline (no accordion participation). */
+function NavAccordion({
+  items, currentPath,
+}: { items: NavEntry[]; currentPath: string }) {
+  const activeKey = (() => {
+    for (const it of items) {
+      if (it.type === "group" && groupHasActiveLeaf(it.items, currentPath)) {
+        return it.key;
+      }
+    }
+    return null;
+  })();
+  const [openKey, setOpenKey] = useState<string | null>(activeKey);
+
+  // Re-sync when route changes (e.g. programmatic nav).
+  useEffect(() => {
+    if (activeKey) setOpenKey(activeKey);
+  }, [activeKey]);
+
+  return (
+    <>
+      {items.map((item) =>
+        item.type === "link" ? (
+          <LeafLink key={item.to} item={item} />
+        ) : (
+          <CollapsibleGroup
+            key={item.key}
+            group={item}
+            currentPath={currentPath}
+            isOpen={openKey === item.key}
+            onToggle={() => setOpenKey((k) => (k === item.key ? null : item.key))}
+          />
+        )
+      )}
+    </>
+  );
+}
+
+
 function CollapsibleGroup({
-  group, currentPath,
-}: { group: NavGroup; currentPath: string }) {
+  group, currentPath, isOpen, onToggle,
+}: {
+  group: NavGroup;
+  currentPath: string;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
   const { t } = useTranslation();
   const Icon = group.icon;
   const hasActive = groupHasActiveLeaf(group.items, currentPath);
-  const [open, setOpen] = useState(hasActive);
   const i18nKey = NAV_KEY_I18N[group.key];
   // i18nKey present → translate; else fall through to the static label.
   const label = i18nKey ? t(i18nKey, group.label) : group.label;
-
-  // Keep in sync if the route changes from elsewhere (e.g. programmatic nav).
-  useEffect(() => {
-    if (hasActive) setOpen(true);
-  }, [hasActive]);
 
   return (
     <div>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
           hasActive
             ? "text-slate-800 bg-slate-100"
@@ -276,25 +319,15 @@ function CollapsibleGroup({
         <span className="flex-1 text-left">{label}</span>
         <ChevronDown
           size={14}
-          className={`transition-transform ${open ? "rotate-0" : "-rotate-90"}`}
+          className={`transition-transform ${isOpen ? "rotate-0" : "-rotate-90"}`}
         />
       </button>
-      {open && (
+      {isOpen && (
         <div className="ml-3.5 pl-3 border-l-2 border-slate-200 mt-1 space-y-0.5 animate-slide-up">
-          {group.items.map((item) =>
-            item.type === "link" ? (
-              <LeafLink key={item.to} item={item} />
-            ) : (
-              // Nested group — recurse. Used by super_admin's "Web" wrapper
-              // around Grok/Flow/Gateway. Indent steps via the parent's
-              // `ml-3 pl-3 border-l` so each level visually nests further.
-              <CollapsibleGroup
-                key={item.key}
-                group={item}
-                currentPath={currentPath}
-              />
-            )
-          )}
+          {/* Nested groups recurse through NavAccordion so each level keeps
+           *  its own one-open-at-a-time state. Used by super_admin's "Web"
+           *  wrapper around Grok/Flow/Gateway. */}
+          <NavAccordion items={group.items} currentPath={currentPath} />
         </div>
       )}
     </div>

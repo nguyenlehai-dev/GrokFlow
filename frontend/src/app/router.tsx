@@ -21,7 +21,8 @@ import { getAuthedRoutes } from "./moduleRegistry";
  *  Authed routes come from the moduleRegistry — every module's manifest
  *  contributes its routes here automatically. Adding a new module is a
  *  one-import change in moduleRegistry.ts. */
-export const router = createBrowserRouter([
+export const router = createBrowserRouter(
+  [
   {
     path: "/landing",
     element: <PublicRouteGuard flag="allow_landing"><LandingPage /></PublicRouteGuard>,
@@ -30,6 +31,14 @@ export const router = createBrowserRouter([
   {
     path: "/login",
     element: <PublicRouteGuard flag="allow_login"><LoginPage /></PublicRouteGuard>,
+    errorElement: <RouteErrorBoundary />,
+  },
+  // Dedicated admin login URL. Always renders the "admin" console layout
+  // regardless of the active domain's login_template. Useful when a domain
+  // is set to the branded "default" but staff still want the minimal form.
+  {
+    path: "/admin/login",
+    element: <LoginPage forceTemplate="admin" />,
     errorElement: <RouteErrorBoundary />,
   },
   {
@@ -68,4 +77,10 @@ export const router = createBrowserRouter([
       { path: "*", element: <RouteErrorBoundary /> },
     ],
   },
-]);
+  ],
+  {
+    future: {
+      v7_startTransition: true,
+    },
+  },
+);

@@ -48,6 +48,7 @@ class DomainIn(BaseModel):
     maintenance_message: str | None = Field(default=None, max_length=2000)
     maintenance_starts_at: datetime | None = None
     maintenance_announcement: str | None = Field(default=None, max_length=2000)
+    login_template: str = Field(default="default", pattern="^(default|admin)$")
 
 
 class DomainUpdate(BaseModel):
@@ -65,6 +66,7 @@ class DomainUpdate(BaseModel):
     maintenance_message: str | None = Field(default=None, max_length=2000)
     maintenance_starts_at: datetime | None = None
     maintenance_announcement: str | None = Field(default=None, max_length=2000)
+    login_template: str | None = Field(default=None, pattern="^(default|admin)$")
 
 
 class DomainOut(BaseModel):
@@ -84,6 +86,7 @@ class DomainOut(BaseModel):
     maintenance_message: str | None = None
     maintenance_starts_at: datetime | None = None
     maintenance_announcement: str | None = None
+    login_template: str = "default"
 
     class Config:
         from_attributes = True
@@ -108,6 +111,7 @@ class DomainConfig(BaseModel):
     maintenance_message: str | None = None
     maintenance_starts_at: datetime | None = None
     maintenance_announcement: str | None = None
+    login_template: str = "default"
 
 
 # ---------------- Admin CRUD ----------------
@@ -139,6 +143,7 @@ async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession)
         maintenance_message=payload.maintenance_message,
         maintenance_starts_at=payload.maintenance_starts_at,
         maintenance_announcement=payload.maintenance_announcement,
+        login_template=payload.login_template,
     )
     db.add(d)
     await db.flush()
@@ -172,7 +177,7 @@ async def update_domain(
         "label", "description", "status", "allow_landing", "allow_register",
         "allow_login", "allow_all_pages", "allowed_pages", "brand_name",
         "require_playground_key", "maintenance_mode", "maintenance_message",
-        "maintenance_announcement",
+        "maintenance_announcement", "login_template",
     ):
         v = getattr(payload, field)
         if v is not None:
@@ -259,6 +264,7 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
             maintenance_message=d.maintenance_message,
             maintenance_starts_at=d.maintenance_starts_at,
             maintenance_announcement=d.maintenance_announcement,
+            login_template=d.login_template,
         )
     # Fail-open default
     return DomainConfig(
@@ -268,4 +274,5 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
         require_playground_key=True,
         maintenance_mode=False, maintenance_message=None,
         maintenance_starts_at=None, maintenance_announcement=None,
+        login_template="default",
     )

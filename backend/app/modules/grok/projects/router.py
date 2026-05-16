@@ -377,6 +377,145 @@ class ProjectAutoProvisionIn(BaseModel):
     user_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
+class DiscoveredProject(BaseModel):
+    """One project row as Grok itself reports it.
+
+    `imported` flags whether this slug is already in our `grok_projects`
+    table for the same profile — the FE uses it to disable the
+    "Import" button so admin doesn't create duplicate rows.
+    """
+    grok_project_id: str
+    name: str
+    description: str | None = None
+    imported: bool = False
+
+
+@router.get("/discover", response_model=list[DiscoveredProject])
+async def discover_projects(
+    profile_id: uuid.UUID,
+    _super: SuperAdminUser,
+    db: DbSession,
+) -> list[DiscoveredProject]:
+    """List every Grok workspace/project this profile currently owns.
+
+    Implementation: connect to the profile's VNC Chromium via CDP, open
+    a page, run `fetch('/rest/workspaces?…')` inside the page context so
+    the request carries the user's cookies + Chrome's TLS fingerprint
+    (which is what beats Cloudflare). Return the parsed list, marking
+    each row as already-imported if it matches an existing
+    GrokProject(profile_id, grok_project_id).
+
+    Admin clicks one of these in the UI → POST /api/grok-projects to
+    persist a row, no manual slug copy.
+    """
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise NotFound("profile")
+    if profile.status not in ("logged_in", "running_job"):
+        raise InvalidPayload(
+            f"Profile chưa logged_in (status={profile.status}). "
+            "Auto-login trước khi discover."
+        )
+
+    import re
+    import httpx
+    from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+
+    cdp_endpoint = f"http://grokflow-vnc-{str(profile.id).replace('-','')[:12]}:9223"
+    try:
+        async with httpx.AsyncClient(timeout=10) as cli:
+            resp = await cli.get(f"{cdp_endpoint}/json/version")
+            ws_url = resp.json().get("webSocketDebuggerUrl", "")
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidPayload(
+            f"Không kết nối được CDP ({type(exc).__name__}): {exc}",
+        )
+    if not ws_url:
+        raise InvalidPayload("Chromium chưa trả wsEndpoint — đợi vài giây.")
+    host = cdp_endpoint.replace("http://", "").rstrip("/")
+    ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+
+    raw_payload: dict | list | None = None
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(ws_url, timeout=12_000)
+            ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = await ctx.new_page()
+            try:
+                # We just need any same-origin page so fetch() lands as
+                # `https://grok.com/rest/...`. Root is fastest to load.
+                await page.goto(
+                    "https://grok.com/", wait_until="domcontentloaded", timeout=25_000,
+                )
+                try:
+                    raw_payload = await page.evaluate(
+                        """async () => {
+                            const r = await fetch(
+                                '/rest/workspaces?pageSize=200&orderBy=ORDER_BY_LAST_USE_TIME',
+                                { credentials: 'include' },
+                            );
+                            return { status: r.status, body: await r.text() };
+                        }"""
+                    )
+                except PWTimeout as exc:
+                    raise InvalidPayload(f"Fetch /rest/workspaces timeout: {exc}")
+            finally:
+                try:
+                    await page.close()
+                except Exception:  # noqa: BLE001
+                    pass
+    except InvalidPayload:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidPayload(
+            f"CDP/Playwright failure ({type(exc).__name__}): {exc}",
+        )
+
+    if not isinstance(raw_payload, dict) or raw_payload.get("status") != 200:
+        status_code = (raw_payload or {}).get("status") if isinstance(raw_payload, dict) else None
+        snippet = (raw_payload or {}).get("body", "")[:200] if isinstance(raw_payload, dict) else ""
+        raise InvalidPayload(
+            f"Grok trả {status_code} cho /rest/workspaces: {snippet!r}",
+        )
+
+    import json as _json
+    try:
+        data = _json.loads(raw_payload["body"])
+    except _json.JSONDecodeError as exc:
+        raise InvalidPayload(f"/rest/workspaces không phải JSON: {exc}")
+
+    # Response shape (captured): {"workspaces": [...], "pageToken": ...}
+    rows = data.get("workspaces") or data.get("items") or data.get("results") or []
+    if not isinstance(rows, list):
+        raise InvalidPayload(f"Shape lạ — không tìm thấy list workspaces: keys={list(data.keys())}")
+
+    # Existing imported slugs so we can disable repeat-import in the UI.
+    already = set(
+        (await db.execute(
+            select(GrokProject.grok_project_id).where(GrokProject.profile_id == profile_id)
+        )).scalars().all()
+    )
+
+    out: list[DiscoveredProject] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        slug = (
+            row.get("workspaceId") or row.get("id") or row.get("workspace_id")
+            or row.get("projectId") or row.get("project_id")
+        )
+        name = row.get("title") or row.get("name") or row.get("displayName")
+        if not slug or not name:
+            continue
+        out.append(DiscoveredProject(
+            grok_project_id=str(slug),
+            name=str(name),
+            description=row.get("description"),
+            imported=str(slug) in already,
+        ))
+    return out
+
+
 @router.post("/auto-provision", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 async def auto_provision_project(
     payload: ProjectAutoProvisionIn,

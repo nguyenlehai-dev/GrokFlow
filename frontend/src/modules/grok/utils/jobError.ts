@@ -13,6 +13,7 @@ export const ERROR_HINTS: Record<string, string> = {
   retries_exhausted: "Hết số lần retry. Bấm Retry để thử lại.",
   unknown_error: "Lỗi chưa xác định. Xem chi tiết log bên dưới.",
   unsupported_job_type: "Provider hiện không hỗ trợ loại job này.",
+  content_moderated: "Ảnh upload vi phạm chính sách của Grok — đổi ảnh khác.",
 };
 
 export function parseErrorCode(msg: string | null): { code: string; rest: string } | null {

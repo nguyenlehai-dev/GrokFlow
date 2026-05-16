@@ -15,6 +15,7 @@ export interface Domain {
   maintenance_message?: string | null;
   maintenance_starts_at?: string | null;
   maintenance_announcement?: string | null;
+  login_template?: "default" | "admin";
 }
 
 /** Slimmer projection used inside the Roles editor — only fields needed

@@ -33,6 +33,9 @@ export function AdminDomainEditorModal({
   const [maintenanceAnnouncement, setMaintenanceAnnouncement] = useState(
     domain?.maintenance_announcement ?? ""
   );
+  const [loginTemplate, setLoginTemplate] = useState<"default" | "admin">(
+    domain?.login_template ?? "default"
+  );
 
   const togglePage = (path: string) => {
     setAllowedPages((prev) =>
@@ -57,6 +60,7 @@ export function AdminDomainEditorModal({
           return new Date(Date.now() + m * 60_000).toISOString();
         })(),
         maintenance_announcement: maintenanceAnnouncement || null,
+        login_template: loginTemplate,
       };
       if (isCreate) payload.hostname = hostname;
       return isCreate
@@ -124,6 +128,33 @@ export function AdminDomainEditorModal({
               placeholder={t("admin.de_brand_placeholder")} />
           </div>
         </div>
+
+        <section className="border-t pt-3 space-y-2">
+          <h3 className="text-sm font-semibold">{t("admin.de_login_template_title", "Giao diện login")}</h3>
+          <div>
+            <label className="text-sm font-medium">
+              {t("admin.de_login_template_label", "Login template")}
+            </label>
+            <select
+              className="input"
+              value={loginTemplate}
+              onChange={(e) => setLoginTemplate(e.target.value as "default" | "admin")}
+            >
+              <option value="default">
+                {t("admin.de_login_template_default", "Default (branded)")}
+              </option>
+              <option value="admin">
+                {t("admin.de_login_template_admin", "Admin console (minimal)")}
+              </option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              {t(
+                "admin.de_login_template_hint",
+                "Khi user vào /login từ hostname này sẽ thấy template tương ứng. URL /admin/login luôn ép template 'admin'."
+              )}
+            </p>
+          </div>
+        </section>
 
         <section className="border-t pt-3 space-y-2">
           <h3 className="text-sm font-semibold">{t("admin.de_playground_title")}</h3>

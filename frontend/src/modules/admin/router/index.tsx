@@ -2,7 +2,7 @@ import { Navigate } from "react-router-dom";
 import {
   LayoutDashboard, Key, CreditCard, ScrollText, Shield, Settings,
   UserCog, Globe, Wrench, Rocket, Images, Film, MessageSquare,
-  Wallet, BadgeDollarSign,
+  Wallet, BadgeDollarSign, LogIn, Sparkles, Workflow, Music,
 } from "lucide-react";
 
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
@@ -37,6 +37,8 @@ export const moduleManifest: FrontendModule = {
     { path: "gallery/images",   element: lazyPage(() => import("../views/GalleryImagesPage"), "GalleryImagesPage") },
     { path: "gallery/videos",   element: lazyPage(() => import("../views/GalleryVideosPage"), "GalleryVideosPage") },
     { path: "gallery/prompts",  element: lazyPage(() => import("../views/GalleryPromptsPage"), "GalleryPromptsPage") },
+    { path: "gallery/flow",     element: lazyPage(() => import("../views/GalleryFlowPage"), "GalleryFlowPage") },
+    { path: "gallery/gateway",  element: lazyPage(() => import("../views/GalleryGatewayPage"), "GalleryGatewayPage") },
     // Admin sub-routes
     { path: "admin",           element: <Navigate to="/admin/users" replace /> },
     { path: "admin/users",     element: lazyPage(() => import("../views/AdminUsersPage"), "AdminUsersPage") },
@@ -44,6 +46,7 @@ export const moduleManifest: FrontendModule = {
     { path: "admin/plans",     element: lazyPage(() => import("../views/AdminPlansPage"), "AdminPlansPage") },
     { path: "admin/billing",   element: lazyPage(() => import("../views/AdminBillingPage"), "AdminBillingPage") },
     { path: "admin/domains",   element: lazyPage(() => import("../views/AdminDomainsPage"), "AdminDomainsPage") },
+    { path: "admin/login-templates", element: lazyPage(() => import("../views/AdminLoginTemplatesPage"), "AdminLoginTemplatesPage") },
     { path: "admin/git",       element: lazyPage(() => import("../views/AdminGitPage"), "AdminGitPage") },
     { path: "admin/legacy",    element: lazyPage(() => import("../views/AdminPage"), "AdminPage") },
   ],
@@ -55,8 +58,11 @@ export const moduleManifest: FrontendModule = {
     // from the super-admin Billing Manager that lives under Auth group.
     { type: "link", to: "/billing", label: "Gói của tôi", icon: Wallet },
     { type: "link", to: "/audit-logs", label: "Audit Log", icon: ScrollText, feature: FEATURE_KEYS.uiAuditLog, adminOnly: true },
-    // Gallery — admin scope. Three sub-views: image grid, video grid,
-    // prompt-focused list. Super_admin can filter cross-domain.
+    // Gallery — admin scope. Nested groups split outputs by product:
+    //   Grok    — image / video / prompt history (existing routes)
+    //   Flow    — video processing tool outputs (cut, merge, audio, ...)
+    //   Gateway — LLM gateway request log with response excerpts
+    // Sub-groups so the sidebar stays scannable as more products ship.
     {
       type: "group",
       key: "gallery",
@@ -64,9 +70,37 @@ export const moduleManifest: FrontendModule = {
       icon: Images,
       adminOnly: true,
       items: [
-        { type: "link", to: "/gallery/images",  label: "Ảnh", icon: Images },
-        { type: "link", to: "/gallery/videos",  label: "Video", icon: Film },
-        { type: "link", to: "/gallery/prompts", label: "Prompts", icon: MessageSquare },
+        {
+          type: "group",
+          key: "gallery-grok",
+          label: "Grok",
+          icon: Sparkles,
+          items: [
+            { type: "link", to: "/gallery/images",  label: "Ảnh", icon: Images },
+            { type: "link", to: "/gallery/videos",  label: "Video", icon: Film },
+            { type: "link", to: "/gallery/prompts", label: "Prompts", icon: MessageSquare },
+          ],
+        },
+        {
+          type: "group",
+          key: "gallery-flow",
+          label: "Flow",
+          icon: Film,
+          items: [
+            { type: "link", to: "/gallery/flow?kind=video", label: "Video", icon: Film },
+            { type: "link", to: "/gallery/flow?kind=audio", label: "Âm thanh", icon: Music },
+            { type: "link", to: "/gallery/flow?kind=frame", label: "Frames", icon: Images },
+          ],
+        },
+        {
+          type: "group",
+          key: "gallery-gateway",
+          label: "Gateway",
+          icon: Workflow,
+          items: [
+            { type: "link", to: "/gallery/gateway", label: "Requests", icon: Workflow },
+          ],
+        },
       ],
     },
     // Admin/auth group — users, roles, domains.
@@ -81,6 +115,7 @@ export const moduleManifest: FrontendModule = {
         { type: "link", to: "/admin/users", label: "Admin", icon: UserCog },
         { type: "link", to: "/admin/roles", label: "Roles", icon: Shield },
         { type: "link", to: "/admin/domains", label: "Domains", icon: Globe, superOnly: true },
+        { type: "link", to: "/admin/login-templates", label: "Login Templates", icon: LogIn, superOnly: true },
       ],
     },
     // Billing & monetisation (super_admin) — grouped so the user-side

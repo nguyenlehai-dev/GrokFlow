@@ -61,6 +61,12 @@ class Domain(Base, TimestampMixin):
         DateTime(timezone=True)
     )
     maintenance_announcement: Mapped[str | None] = mapped_column(Text)
+    # Per-domain login UI variant — "default" (branded marketing-style
+    # split layout) or "admin" (minimal console layout). The /admin/login
+    # URL always forces "admin" regardless of this setting.
+    login_template: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="default", server_default="default"
+    )
 
 
 class Role(Base, TimestampMixin):

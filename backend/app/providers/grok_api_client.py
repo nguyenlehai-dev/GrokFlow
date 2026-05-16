@@ -171,16 +171,26 @@ class GrokAPIClient:
         self,
         prompt: str,
         project_id: str | None = None,
+        attachment: dict[str, str] | None = None,
         log: Callable[[str], None] | None = None,
     ) -> list[bytes]:
-        """Submit `/imagine <prompt>` and return the bytes of every completed image."""
-        results = await self.imagine_meta(prompt, project_id=project_id, log=log)
+        """Submit `/imagine <prompt>` and return the bytes of every completed image.
+
+        `attachment` (optional) — when set, makes this an image-to-image
+        request. Pass the dict returned by `upload_file()` (must contain
+        `fileMetadataId` + `fileUri`). The caller is responsible for
+        having uploaded the user's reference image first.
+        """
+        results = await self.imagine_meta(
+            prompt, project_id=project_id, attachment=attachment, log=log,
+        )
         return [r["bytes"] for r in results]
 
     async def imagine_meta(
         self,
         prompt: str,
         project_id: str | None = None,
+        attachment: dict[str, str] | None = None,
         log: Callable[[str], None] | None = None,
     ) -> list[dict[str, Any]]:
         """Like imagine() but also returns each image's relative URL and UUID.
@@ -190,11 +200,39 @@ class GrokAPIClient:
         ID that Grok rejects on the subsequent video request.
 
         Each entry: { bytes: bytes, image_url: str, image_uuid: str }.
+
+        Image-to-image: pass `attachment={fileMetadataId, fileUri}` (the
+        return of `upload_file()`). The asset URL gets inlined into the
+        message (mirroring the videoize wire format) and the metadata id
+        is attached to `imageAttachments` for Grok to bind to the
+        Imagine pipeline.
         """
         body = dict(_IMAGE_BODY)
-        body["message"] = (
-            prompt if prompt.lstrip().startswith("/imagine") else f"/imagine {prompt}"
-        )
+        # Clone the list slot the template carries so we don't mutate
+        # the module-level dict on subsequent calls.
+        body["imageAttachments"] = []
+        body["fileAttachments"] = []
+        clean_prompt = prompt.lstrip()
+        if clean_prompt.startswith("/imagine"):
+            clean_prompt = clean_prompt[len("/imagine"):].lstrip()
+        if attachment:
+            file_id = attachment.get("fileMetadataId")
+            file_uri = attachment.get("fileUri")
+            if not file_id or not file_uri:
+                raise GrokAPIError(
+                    "unknown_error",
+                    f"imagine attachment missing ids: {attachment!r}",
+                )
+            asset_url = f"{ASSETS_BASE}/{file_uri.lstrip('/')}"
+            # Two-space gap before prompt mirrors the captured videoize
+            # wire format — Grok parses URL → prompt boundary on the gap.
+            body["message"] = f"{asset_url}  /imagine {clean_prompt}"
+            body["imageAttachments"] = [file_id]
+            body["fileAttachments"] = [file_id]
+            if log:
+                log(f"imagine i2i: attachment={file_id[:12]}…")
+        else:
+            body["message"] = f"/imagine {clean_prompt}"
         body["workspaceIds"] = [project_id] if project_id else []
         referer_path = f"/project/{project_id}" if project_id else "/"
 
@@ -298,6 +336,16 @@ class GrokAPIClient:
                     "provider_blocked", "403 from upload-file", retryable=True
                 )
             if resp.status_code >= 400:
+                # Grok content moderation rejects ảnh nhạy cảm BEFORE the
+                # prompt runs. Surface it as a terminal error so the user
+                # gets the "đổi ảnh khác" message in the UI instead of
+                # silently retrying for 30 minutes.
+                body = resp.text or ""
+                if "content-moderated" in body.lower() or "content is moderated" in body.lower():
+                    raise GrokAPIError(
+                        "content_moderated",
+                        "Ảnh upload vi phạm Grok content policy — đổi ảnh khác.",
+                    )
                 raise GrokAPIError(
                     "unknown_error",
                     f"upload-file {resp.status_code}: {resp.text[:200]!r}",

@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, File as FastapiFile, Query, Response, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.core.deps import CurrentUser, DbSession
@@ -103,6 +103,7 @@ async def create_job(payload: JobCreate, user: CurrentUser, db: DbSession) -> Jo
         job_type=payload.job_type,
         prompt=payload.prompt,
         profile_id=payload.profile_id,
+        project_id=payload.project_id,
         options=options or None,
     )
 
@@ -115,14 +116,76 @@ async def upload_input(
 ) -> JobInputUploadOut:
     """Upload a reference image for image-to-image / video jobs.
 
-    Stored as a regular File record with file_type='input'. Returns file_id
-    that you pass into POST /api/jobs as `input_image_file_id`.
+    Pre-flight validation: probe Grok's `/rest/app-chat/upload-file` with the
+    bytes before persisting locally so a moderated image (NSFW / minor /
+    violence / etc.) returns 400 IMMEDIATELY instead of waiting for the
+    user to submit a job + 180s retry timeout. If Grok rejects, we delete
+    nothing because we haven't saved anything yet.
+
+    Validation requires at least one `logged_in` Grok profile so we have
+    cookies to authenticate the probe. If no profile is online, we skip
+    validation and accept the upload — better to save than to block when
+    the validation rail is unavailable.
     """
     if not file.content_type or not file.content_type.startswith("image/"):
         raise InvalidPayload("Only image/* uploads are accepted as input")
     raw = await file.read()
     if len(raw) > 20_000_000:
         raise InvalidPayload("Input image too large (>20MB)")
+
+    # ── Pre-flight Grok moderation check ──
+    # Borrow any active profile's cookies to probe the moderation endpoint.
+    from app.models import Profile
+    from app.providers.grok_provider import GrokProvider
+    from app.providers.grok_api_client import GrokAPIError
+    from app.providers.base import JobInput
+
+    probe_profile = (await db.execute(
+        select(Profile)
+        .where(Profile.provider == "grok", Profile.status == "logged_in")
+        .order_by(Profile.last_used_at.desc().nulls_last())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    print(f"[upload-probe] start user={user.id} file={file.filename} ({len(raw)}b)", flush=True)
+    if probe_profile is not None:
+        print(f"[upload-probe] using profile={probe_profile.name} ({probe_profile.id})", flush=True)
+        provider = GrokProvider()
+        try:
+            session = await provider._build_api_session(JobInput(
+                prompt="", job_type="image", options=None,
+                profile_path=probe_profile.profile_path,
+            ))
+        except Exception as exc:  # noqa: BLE001 — never let probe crash the upload
+            print(f"[upload-probe] _build_api_session raised: {type(exc).__name__}: {exc}", flush=True)
+            session = None
+        if session is None:
+            print("[upload-probe] session=None → skipping moderation check, saving as-is", flush=True)
+        else:
+            client, _pid, _tag = session
+            print(f"[upload-probe] session ready, calling Grok upload-file…", flush=True)
+            try:
+                meta = await client.upload_file(
+                    content=raw,
+                    filename=file.filename or "input.png",
+                    mime=file.content_type,
+                )
+                print(f"[upload-probe] Grok accepted: fileMetadataId={meta.get('fileMetadataId', '?')[:12]}…", flush=True)
+            except GrokAPIError as exc:
+                print(f"[upload-probe] Grok REJECTED: code={exc.code} msg={exc.message}", flush=True)
+                if exc.code == "content_moderated":
+                    raise InvalidPayload(
+                        "Ảnh vi phạm chính sách Grok (content moderation). "
+                        "Đổi ảnh khác — không lưu, không tạo job.",
+                    )
+                # Other API errors (network glitch, cookie_expired on probe
+                # profile) shouldn't block the upload — let the actual job
+                # retry on a fresh profile/session.
+            except Exception as exc:  # noqa: BLE001
+                print(f"[upload-probe] unexpected exception: {type(exc).__name__}: {exc}", flush=True)
+    else:
+        print("[upload-probe] no logged_in profile available — skipping check", flush=True)
+
     rec = await files_service.save_job_result(
         db,
         user_id=user.id,
@@ -220,6 +283,56 @@ async def delete_job(job_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Non
         )
     await db.delete(job)
     await db.commit()
+
+
+class BulkDeleteIn(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class BulkDeleteOut(BaseModel):
+    deleted: int
+    skipped_in_flight: int
+    skipped_not_owned: int
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteOut)
+async def bulk_delete_jobs(
+    payload: BulkDeleteIn, user: CurrentUser, db: DbSession,
+) -> BulkDeleteOut:
+    """Delete many jobs in one request.
+
+    Per-row authz: each job must belong to the caller (admins/super_admin
+    bypass via `assert_job_owner`). Rows that don't pass are silently
+    skipped — the response reports how many fell into each bucket so the
+    FE can show "X deleted, Y skipped".
+
+    In-flight jobs (running / processing / uploading) are NEVER deleted
+    here. Caller can pass them in the list — they end up in
+    `skipped_in_flight` and the rest are still processed (vs aborting
+    the whole batch on the first running job).
+    """
+    deleted = 0
+    skipped_in_flight = 0
+    skipped_not_owned = 0
+    IN_FLIGHT = {"running", "processing_provider", "uploading_result"}
+    is_admin = user.role in ("admin", "super_admin")
+    for jid in payload.ids:
+        try:
+            job = await service.assert_job_owner(db, jid, user.id, is_admin)
+        except Exception:  # noqa: BLE001 — NotFound or PermissionDenied
+            skipped_not_owned += 1
+            continue
+        if job.status in IN_FLIGHT:
+            skipped_in_flight += 1
+            continue
+        await db.delete(job)
+        deleted += 1
+    await db.commit()
+    return BulkDeleteOut(
+        deleted=deleted,
+        skipped_in_flight=skipped_in_flight,
+        skipped_not_owned=skipped_not_owned,
+    )
 
 
 @router.get("/{job_id}/logs", response_model=list[JobLogOut])

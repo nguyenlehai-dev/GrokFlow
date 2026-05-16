@@ -9,5 +9,6 @@ export interface Profile {
   max_concurrent_jobs: number;
   active_video_jobs: number;
   max_concurrent_video: number;
+  allows_video: boolean;
   created_at: string;
 }

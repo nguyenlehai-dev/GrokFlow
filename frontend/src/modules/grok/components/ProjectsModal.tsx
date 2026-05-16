@@ -3,12 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   X, Plus, Pencil, Trash2, Layers, Globe, ExternalLink, Wand2,
+  DownloadCloud, Loader2, Check,
 } from "lucide-react";
 
 import { toast } from "@/components/ui/Toast";
 import type { Project } from "../models/project";
 import { domainsService } from "../services/domains.service";
-import { projectsService } from "../services/projects.service";
+import { projectsService, type DiscoveredProject } from "../services/projects.service";
 import { ProjectEditorModal } from "./ProjectEditorModal";
 import { ProjectAutoProvisionModal } from "./ProjectAutoProvisionModal";
 import { AssignDomainsModal } from "./AssignDomainsModal";
@@ -94,6 +95,8 @@ export function ProjectsModal({
               </button>
             </div>
           </div>
+
+          <DiscoverSection profileId={profileId} />
 
           {isLoading ? (
             <p className="text-sm text-slate-500">{t("grok.projects_loading")}</p>
@@ -214,6 +217,123 @@ function ProjectRow({
     </li>
   );
 }
+
+// ─── Discover from VNC ──────────────────────────────────────────────────
+//
+// Pulls the profile's actual Grok project list straight from grok.com
+// (via VNC Chromium fetch — same TLS fingerprint and cookies as the
+// admin's real session). Admin picks one from the dropdown → click
+// Import → backend creates the row with the exact slug/name. No more
+// manual copy-paste of /project/<slug>.
+function DiscoverSection({ profileId }: { profileId: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<string>("");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const discover = useMutation({
+    mutationFn: () => projectsService.discover(profileId),
+    onSuccess: (data) => {
+      setOpen(true);
+      setErrorMsg(null);
+      // Default pick: first row that hasn't been imported yet.
+      const firstAvailable = data.find((r) => !r.imported);
+      setPicked(firstAvailable?.grok_project_id ?? "");
+    },
+    onError: (e: any) => {
+      const msg = e?.response?.data?.detail?.message
+        ?? e?.response?.data?.detail
+        ?? e?.message
+        ?? "Discover failed";
+      setErrorMsg(typeof msg === "string" ? msg : JSON.stringify(msg));
+      setOpen(true);
+    },
+  });
+
+  const importOne = useMutation({
+    mutationFn: (row: DiscoveredProject) =>
+      projectsService.create({
+        profile_id: profileId,
+        grok_project_id: row.grok_project_id,
+        name: row.name,
+        description: row.description ?? null,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["grok-projects", profileId] });
+      qc.invalidateQueries({ queryKey: ["profiles"] });
+      toast("Đã import project", "success");
+      // Re-fetch discover so the row flips to `imported`.
+      discover.mutate();
+    },
+    onError: (e: any) =>
+      toast(e?.response?.data?.detail?.message ?? "Import lỗi", "error"),
+  });
+
+  const rows = discover.data ?? [];
+  const selected = rows.find((r) => r.grok_project_id === picked) ?? null;
+
+  return (
+    <section className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm">
+          <div className="font-semibold text-violet-900 inline-flex items-center gap-1.5">
+            <DownloadCloud size={14} /> Discover từ VNC
+          </div>
+          <p className="text-xs text-violet-700/80 mt-0.5">
+            Đọc danh sách project hiện có trên Grok account này (cần VNC đã Auto-login).
+          </p>
+        </div>
+        <button
+          onClick={() => { setOpen(true); discover.mutate(); }}
+          disabled={discover.isPending}
+          className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-violet-700 disabled:opacity-60"
+        >
+          {discover.isPending ? <Loader2 size={14} className="animate-spin" /> : <DownloadCloud size={14} />}
+          {discover.isPending ? "Đang quét…" : "Quét project"}
+        </button>
+      </div>
+
+      {open && errorMsg && (
+        <div className="mt-3 rounded bg-rose-50 border border-rose-200 text-rose-700 px-2 py-1.5 text-xs">
+          {errorMsg}
+        </div>
+      )}
+
+      {open && !errorMsg && rows.length > 0 && (
+        <div className="mt-3 flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+          <select
+            value={picked}
+            onChange={(e) => setPicked(e.target.value)}
+            className="flex-1 rounded-md border border-violet-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+          >
+            <option value="" disabled>Chọn project…</option>
+            {rows.map((r) => (
+              <option key={r.grok_project_id} value={r.grok_project_id} disabled={r.imported}>
+                {r.imported ? "✓ " : ""}{r.name} — {r.grok_project_id.slice(0, 12)}…
+                {r.imported ? " (đã import)" : ""}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => selected && !selected.imported && importOne.mutate(selected)}
+            disabled={!selected || selected.imported || importOne.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {importOne.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            Import
+          </button>
+        </div>
+      )}
+
+      {open && !errorMsg && rows.length === 0 && !discover.isPending && (
+        <p className="mt-3 text-xs text-violet-700/80">
+          Không tìm thấy project nào trên account. Tạo trước trên grok.com hoặc dùng "Auto provision".
+        </p>
+      )}
+    </section>
+  );
+}
+
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useTranslation();

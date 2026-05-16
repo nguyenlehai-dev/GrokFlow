@@ -45,4 +45,21 @@ export const projectsService = {
     api
       .post<Project>("/api/grok-projects/auto-provision", payload)
       .then((r) => r.data),
+
+  /** Read the profile's Grok account project list directly from grok.com
+   *  via the running VNC Chromium. Returns rows already in our DB flagged
+   *  with `imported=true` so the UI can disable duplicate-import. */
+  discover: (profileId: string) =>
+    api
+      .get<DiscoveredProject[]>("/api/grok-projects/discover", {
+        params: { profile_id: profileId },
+      })
+      .then((r) => r.data),
 };
+
+export interface DiscoveredProject {
+  grok_project_id: string;
+  name: string;
+  description: string | null;
+  imported: boolean;
+}

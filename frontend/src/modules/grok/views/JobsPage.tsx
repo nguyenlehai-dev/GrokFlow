@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Eye, Images, Pencil, Trash2, RefreshCw, Ban, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus } from "lucide-react";
 import { toast } from "@/components/ui/Toast";
+import { confirm } from "@/components/ui/ConfirmDialog";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { JobDetailDrawer } from "../components/JobDetailDrawer";
 import { CreateJobModal } from "../components/CreateJobModal";
@@ -23,6 +24,10 @@ export function JobsPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  // Bulk-select state. Empty set = no selection visible. Set of job IDs
+  // for rows the user has ticked. We clear on page/filter change so a
+  // stale selection from page 1 can't accidentally delete from page 2.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const STATUS_FILTERS = [
     { v: "",                     label: t("grok.jobs_filter_all_status") },
@@ -119,6 +124,18 @@ export function JobsPage() {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
   });
+  const bulkDelete = useMutation({
+    mutationFn: (ids: string[]) => jobsService.bulkDelete(ids),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      setSelectedIds(new Set());
+      const parts = [`Đã xoá ${r.deleted}`];
+      if (r.skipped_in_flight) parts.push(`bỏ qua ${r.skipped_in_flight} đang chạy`);
+      if (r.skipped_not_owned) parts.push(`${r.skipped_not_owned} không có quyền`);
+      toast(parts.join(" · "), "success");
+    },
+    onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Bulk delete lỗi", "error"),
+  });
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -128,6 +145,31 @@ export function JobsPage() {
   ).length;
 
   useEffect(() => { setPage(1); }, [statusFilter, providerFilter, typeFilter, search, pageSize]);
+  // Reset bulk selection whenever the visible row set changes so the
+  // user can't accidentally apply page-1 selections to page-2 rows.
+  useEffect(() => { setSelectedIds(new Set()); }, [statusFilter, providerFilter, typeFilter, search, page, pageSize]);
+
+  // Items selectable for bulk delete = visible page only, not in-flight.
+  const deletableOnPage = (data?.items ?? []).filter(
+    (j) => !["running", "processing_provider", "uploading_result"].includes(j.status),
+  );
+  const allDeletableSelected =
+    deletableOnPage.length > 0 && deletableOnPage.every((j) => selectedIds.has(j.id));
+  const toggleSelectAll = () => {
+    if (allDeletableSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(deletableOnPage.map((j) => j.id)));
+    }
+  };
+  const toggleRow = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-5">
@@ -139,8 +181,13 @@ export function JobsPage() {
         <div className="flex items-center gap-2 flex-wrap">
           {inFlightCount > 0 && (
             <button
-              onClick={() => {
-                if (confirm(t("grok.jobs_cancel_all_confirm", { count: inFlightCount }))) cancelAll.mutate();
+              onClick={async () => {
+                if (await confirm({
+                  title: "Cancel tất cả?",
+                  message: t("grok.jobs_cancel_all_confirm", { count: inFlightCount }),
+                  variant: "warning",
+                  confirmLabel: "Cancel hết",
+                })) cancelAll.mutate();
               }}
               className="btn-secondary text-amber-700 border-amber-200 hover:border-amber-300"
               disabled={cancelAll.isPending}
@@ -188,6 +235,35 @@ export function JobsPage() {
         </div>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="card flex items-center justify-between py-3 px-4 bg-rose-50 border border-rose-200">
+          <div className="text-sm">
+            <strong>{selectedIds.size}</strong> job đã chọn
+            <button
+              className="ml-3 text-xs text-slate-500 hover:underline"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Bỏ chọn
+            </button>
+          </div>
+          <button
+            className="btn-primary bg-rose-600 hover:bg-rose-700 inline-flex items-center gap-1.5"
+            disabled={bulkDelete.isPending}
+            onClick={async () => {
+              if (await confirm({
+                title: `Xoá ${selectedIds.size} job?`,
+                message: "Job đang chạy sẽ bị bỏ qua. Job đã xoá không khôi phục được.",
+                variant: "danger",
+                confirmLabel: `Xoá ${selectedIds.size}`,
+              })) bulkDelete.mutate(Array.from(selectedIds));
+            }}
+          >
+            <Trash2 size={14} />
+            {bulkDelete.isPending ? "Đang xoá…" : `Xoá ${selectedIds.size} job`}
+          </button>
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-slate-500">{t("common.loading")}</p>
       ) : (
@@ -195,6 +271,16 @@ export function JobsPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>
+                <th className="px-3 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allDeletableSelected}
+                    onChange={toggleSelectAll}
+                    disabled={deletableOnPage.length === 0}
+                    title={allDeletableSelected ? "Bỏ chọn tất cả" : "Chọn tất cả (xoá được)"}
+                    className="cursor-pointer"
+                  />
+                </th>
                 <th className="px-3 py-2">{t("grok.jobs_th_id")}</th>
                 <th className="px-3 py-2">{t("grok.jobs_th_provider")}</th>
                 <th className="px-3 py-2">{t("grok.jobs_th_type")}</th>
@@ -212,7 +298,17 @@ export function JobsPage() {
                 const retryable = ["failed", "cancelled"].includes(j.status);
                 const deletable = !["running", "processing_provider", "uploading_result"].includes(j.status);
                 return (
-                  <tr key={j.id} className="border-t hover:bg-slate-50">
+                  <tr key={j.id} className={`border-t hover:bg-slate-50 ${selectedIds.has(j.id) ? "bg-rose-50/50" : ""}`}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(j.id)}
+                        onChange={() => toggleRow(j.id)}
+                        disabled={!deletable}
+                        title={deletable ? "Chọn để xoá hàng loạt" : "Job đang chạy không xoá được"}
+                        className="cursor-pointer"
+                      />
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs">{j.id.slice(0, 8)}</td>
                     <td className="px-3 py-2">{j.provider}</td>
                     <td className="px-3 py-2">{j.job_type}</td>
@@ -266,8 +362,12 @@ export function JobsPage() {
                           <button
                             className="p-1.5 rounded hover:bg-amber-100 text-amber-600"
                             title={t("grok.jobs_cancel_title")}
-                            onClick={() => {
-                              if (confirm(t("grok.jobs_cancel_confirm"))) cancel.mutate(j.id);
+                            onClick={async () => {
+                              if (await confirm({
+                                message: t("grok.jobs_cancel_confirm"),
+                                variant: "warning",
+                                confirmLabel: "Cancel job",
+                              })) cancel.mutate(j.id);
                             }}
                           >
                             <Ban size={16} />
@@ -277,8 +377,14 @@ export function JobsPage() {
                           className={`p-1.5 rounded ${deletable ? "hover:bg-rose-100 text-rose-600" : "text-slate-400 cursor-not-allowed"}`}
                           title={deletable ? t("grok.jobs_delete_title") : t("grok.jobs_delete_locked")}
                           disabled={!deletable}
-                          onClick={() => {
-                            if (deletable && confirm(t("grok.jobs_delete_confirm", { id: j.id.slice(0, 8) }))) remove.mutate(j.id);
+                          onClick={async () => {
+                            if (!deletable) return;
+                            if (await confirm({
+                              title: "Xoá job?",
+                              message: t("grok.jobs_delete_confirm", { id: j.id.slice(0, 8) }),
+                              variant: "danger",
+                              confirmLabel: "Xoá",
+                            })) remove.mutate(j.id);
                           }}
                         >
                           <Trash2 size={16} />
@@ -290,7 +396,7 @@ export function JobsPage() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
                     {t("grok.jobs_empty")}
                   </td>
                 </tr>

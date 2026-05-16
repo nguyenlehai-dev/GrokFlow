@@ -22,6 +22,10 @@ class ProfileCreate(BaseModel):
     # Video uses Playwright DOM — cap separately. 4 is empirically the
     # sweet spot before Chromium starts crashing tabs on heavy video pages.
     max_concurrent_video: int = Field(default=4, ge=1, le=12)
+    # Image-only toggle. Default True keeps the historical "accepts both
+    # image and video" behavior so existing FE forms that don't send this
+    # field still produce video-capable profiles.
+    allows_video: bool = True
 
 
 class ProfileUpdate(BaseModel):
@@ -29,6 +33,7 @@ class ProfileUpdate(BaseModel):
     status: str | None = None
     max_concurrent_jobs: int | None = Field(default=None, ge=1, le=16)
     max_concurrent_video: int | None = Field(default=None, ge=1, le=12)
+    allows_video: bool | None = None
 
 
 class ProfileOut(BaseModel):
@@ -43,6 +48,7 @@ class ProfileOut(BaseModel):
     max_concurrent_jobs: int = 1
     active_video_jobs: int = 0
     max_concurrent_video: int = 4
+    allows_video: bool = True
     created_at: datetime
 
     class Config:

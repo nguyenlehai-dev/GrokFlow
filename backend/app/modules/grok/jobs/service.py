@@ -18,6 +18,7 @@ async def _resolve_profile_for_job(
     provider: str,
     requester_domain_id: uuid.UUID | None = None,
     excluded_profile_ids: list[uuid.UUID] | list[str] | None = None,
+    job_type: str = "image",
 ) -> Profile | None:
     """Customer cannot use their own profile — always pick from admin pool.
 
@@ -58,6 +59,15 @@ async def _resolve_profile_for_job(
             raise InvalidPayload(f"Profile provider mismatch: profile={profile.provider}, requested={provider}")
         if profile.status not in {"logged_in", "running_job"}:
             raise InvalidPayload(f"Profile not ready (status={profile.status}). Ask admin to refresh.")
+        # Image-only guard for explicit picks: refuse video on a profile
+        # that admin has flagged as image-only. We do this BEFORE the
+        # tenant visibility check so the user gets a clear "video not
+        # allowed" message instead of a generic permission error when
+        # both fail simultaneously.
+        if job_type == "video" and not profile.allows_video:
+            raise InvalidPayload(
+                "Profile này chỉ tạo ảnh (image-only) — chọn profile khác cho job video.",
+            )
         # Tenant visibility check — same rule as auto-pick, via project assignments.
         if requester_domain_id is not None and owner.domain_id != requester_domain_id:
             visible = (
@@ -86,6 +96,10 @@ async def _resolve_profile_for_job(
         Profile.provider == provider,
         Profile.status.in_(["logged_in", "running_job"]),
     ]
+    # Image-only profiles drop out of the pool for video jobs. Image jobs
+    # still see them (that's their whole purpose).
+    if job_type == "video":
+        where_clauses.append(Profile.allows_video.is_(True))
     if assigned_to_domain is not None:
         where_clauses.append(
             (User.domain_id == requester_domain_id)
@@ -100,12 +114,21 @@ async def _resolve_profile_for_job(
             for p in excluded_profile_ids
         ]
         where_clauses.append(Profile.id.not_in(excluded_uuids))
+    # For video jobs, order by active_video_jobs ASC so the pool spreads
+    # video load evenly across profiles (each video tab eats ~600MB-1.2GB
+    # Chromium RAM, so getting one video on profile A and the next on
+    # profile B is way better than stacking both on the same Chromium).
+    # For image jobs, active_jobs (DOM-only count after the slot refactor)
+    # still picks the freshest profile.
+    load_column = (
+        Profile.active_video_jobs if job_type == "video" else Profile.active_jobs
+    )
     stmt = (
         select(Profile)
         .join(User, User.id == Profile.user_id)
         .where(*where_clauses)
         .order_by(
-            Profile.active_jobs.asc(),
+            load_column.asc(),
             func.coalesce(Profile.last_used_at, Profile.created_at).asc(),
         )
         .limit(1)
@@ -151,6 +174,11 @@ async def pick_alternate_profile(
             provider=job.provider,
             requester_domain_id=requester_domain_id,
             excluded_profile_ids=banned,
+            # Critical: forward job_type so video-job rotation skips
+            # image-only profiles + uses the video load-balancing column.
+            # Without this, a video job rotated mid-flight could land on
+            # an image-only profile and fail again immediately.
+            job_type=job.job_type,
         )
     except InvalidPayload:
         # Pool exhausted (all profiles either down or already banned for
@@ -167,6 +195,7 @@ async def create_job(
     prompt: str,
     profile_id: uuid.UUID | None,
     options: dict[str, Any] | None,
+    project_id: uuid.UUID | None = None,
     api_key_id: uuid.UUID | None = None,
 ) -> Job:
     # Look up requester's domain — used to filter the pool down to profiles
@@ -181,17 +210,30 @@ async def create_job(
     )
     profile = await _resolve_profile_for_job(
         db, requested_id=profile_id, user_id=user_id, provider=provider,
-        requester_domain_id=requester_domain_id,
+        requester_domain_id=requester_domain_id, job_type=job_type,
     )
 
     # Pick the specific GrokProject the worker should use. Priority:
+    #   0) explicit `project_id` from the request — admin / Playground form
+    #      picked a project manually; honor it verbatim (must belong to the
+    #      resolved profile, otherwise 400)
     #   1) per-user pin (project_user_assignments) — tenant user gets
     #      THEIR project even when sharing the profile with others
     #   2) domain-wide assignment — every user in this tenant uses it
     #   3) super_admin bootstrap: first project on the profile
     # Profile has no projects yet → leave NULL → worker falls back to
     # grok.com/imagine root URL (legacy behaviour).
-    picked_project = None
+    picked_project: GrokProject | None = None
+    # 0) explicit override
+    if project_id is not None:
+        explicit = await db.get(GrokProject, project_id)
+        if explicit is None:
+            raise InvalidPayload(f"GrokProject {project_id} không tồn tại")
+        if explicit.profile_id != profile.id:
+            raise InvalidPayload(
+                "project_id không thuộc profile được chọn — pick lại project hoặc bỏ profile_id để auto-resolve.",
+            )
+        picked_project = explicit
     # 1) per-user pin
     user_pin_q = (
         select(GrokProject)
@@ -203,7 +245,8 @@ async def create_job(
         .order_by(GrokProject.created_at.asc())
         .limit(1)
     )
-    picked_project = (await db.execute(user_pin_q)).scalar_one_or_none()
+    if picked_project is None:
+        picked_project = (await db.execute(user_pin_q)).scalar_one_or_none()
 
     # 2) domain-wide fallback (tenant path)
     if picked_project is None and requester_domain_id is not None:

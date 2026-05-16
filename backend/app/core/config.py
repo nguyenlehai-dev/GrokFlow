@@ -40,7 +40,8 @@ class Settings(BaseSettings):
     JOB_RATE_LIMIT_BACKOFF: str = "60,300,900"
     # Error codes the worker should NEVER retry (terminal — fail fast).
     JOB_TERMINAL_ERROR_CODES: str = (
-        "cookie_expired,captcha_required,provider_blocked,unsupported_job_type"
+        "cookie_expired,captcha_required,provider_blocked,"
+        "unsupported_job_type,content_moderated"
     )
 
     CORS_ORIGINS: str = "http://localhost:5173"

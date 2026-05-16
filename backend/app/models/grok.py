@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, DateTime, ForeignKey, Integer, String, Text, func,
+    BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +43,12 @@ class Profile(Base, TimestampMixin):
     # counter so the slot-acquire UPDATE can enforce both caps atomically
     # without re-querying running jobs.
     active_video_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Image-only toggle. When False, the resolver skips this profile for
+    # video jobs entirely (regardless of `max_concurrent_video`). Useful
+    # for Free-tier Grok accounts that have no video quota, or for
+    # dedicating a profile to image-only throughput. Default True keeps
+    # pre-0027 behavior — every profile accepts both job types.
+    allows_video: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     user: Mapped["User"] = relationship(back_populates="profiles")  # noqa: F821
     jobs: Mapped[list["Job"]] = relationship(back_populates="profile")
