@@ -469,15 +469,23 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
     # No-op when the host vhost dir isn't mounted (dev / tests).
     refresh_vnc_map()
 
-    base = settings.cors_origin_list[0] if settings.cors_origin_list else ""
     # Per-profile noVNC route. Nginx proxies /vnc/<short-id>/ → <container>:6901
     # `path` param tells noVNC to open WS at /vnc/<short>/websockify (its default
     # 'websockify' resolves to root, breaking the routing).
     short = str(profile.id).replace("-", "")[:12]
+    # Return RELATIVE URL — the browser resolves it against the page's
+    # current origin. This matters in multi-tenant deploys where a user
+    # may be browsing tenant A (e.g. nexoratech.com.vn) while the API
+    # CORS origin is tenant B (flowgrok.vpspanel.io.vn). Returning an
+    # absolute URL with B's host makes the iframe cross-origin, which
+    # triggers Cloudflare 530 + X-Frame-Options: sameorigin + CORS
+    # preflight failures all at once. Relative is portable across tenants.
+    # Every tenant vhost already routes /vnc/<short>/* to the kasmweb
+    # container via the shared _vnc_map.conf.
     # resize=scale → noVNC scales the remote framebuffer to fit the iframe,
     # so the desktop is fully visible regardless of the iframe size.
     iframe_url = (
-        f"{base}/vnc/{short}/vnc.html"
+        f"/vnc/{short}/vnc.html"
         f"?autoconnect=1&resize=scale&path=vnc/{short}/websockify"
     )
     return VncSessionOut(
