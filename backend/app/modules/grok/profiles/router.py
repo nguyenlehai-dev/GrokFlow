@@ -28,6 +28,28 @@ from app.models import Domain, GrokProject, Profile, ProjectDomainAssignment, Us
 from app.modules.admin.audit import service as audit
 
 
+async def _assert_action_allowed(db, admin: User, action_key: str) -> None:
+    """Per-domain RBAC over profile-row actions.
+
+    Super_admin can always do anything. For everyone else, the action
+    key must appear in their domain's `allowed_profile_actions` list
+    (the column added in 0029). The frontend grays out the buttons but
+    we re-check here so a hand-rolled API call can't bypass the UI.
+    """
+    if admin.role == "super_admin":
+        return
+    if not admin.domain_id:
+        # Defensive: a non-super_admin without a domain shouldn't exist,
+        # but if it does, deny by default rather than allow.
+        raise PermissionDenied(f"Action '{action_key}' chưa được cấp quyền cho user này")
+    domain = await db.get(Domain, admin.domain_id)
+    allowed = (domain.allowed_profile_actions if domain else []) or []
+    if action_key not in allowed:
+        raise PermissionDenied(
+            f"Quyền '{action_key}' đã bị super_admin tắt cho domain của bạn",
+        )
+
+
 async def _assert_profile_accessible(
     db, admin: User, profile: Profile,
 ) -> None:
@@ -267,6 +289,7 @@ async def delete_profile(profile_id: uuid.UUID, admin: AdminUser, db: DbSession)
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "delete")
     profile_manager.remove_profile_dir(profile.profile_path)
     await audit.log_action(db, user_id=admin.id, action="delete_profile",
                            target_type="profile", target_id=profile.id,
@@ -286,6 +309,7 @@ async def upload_cookies(
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "upload_cookies")
     if profile.status == "running_job":
         raise InvalidPayload("Profile is busy running a job")
 
@@ -450,6 +474,7 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "auto_login")
     if profile.status == "running_job":
         raise InvalidPayload("Profile is busy running a job")
 
@@ -557,6 +582,7 @@ async def stop_vnc(profile_id: uuid.UUID, admin: AdminUser, db: DbSession) -> Pr
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "stop_vnc")
     try:
         vnc_manager.stop_for_profile(str(profile.id))
     except Exception:  # noqa: BLE001
@@ -578,11 +604,12 @@ async def vnc_session_status(_admin: AdminUser) -> VncStatusOut:
 
 
 @router.post("/{profile_id}/disable", response_model=ProfileOut)
-async def disable_profile(profile_id: uuid.UUID, _admin: AdminUser, db: DbSession) -> Profile:
+async def disable_profile(profile_id: uuid.UUID, admin: AdminUser, db: DbSession) -> Profile:
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "disable")
     profile.status = "disabled"
     await db.commit()
     await db.refresh(profile)

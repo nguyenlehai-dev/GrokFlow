@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/core/auth/store";
+import { useDomainStore } from "@/core/domain/store";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { UploadCookiesModal } from "../components/UploadCookiesModal";
 import { AutoLoginModal } from "../components/AutoLoginModal";
@@ -15,6 +16,12 @@ export function ProfilesPage() {
   const me = useAuthStore((s) => s.user);
   const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
   const isSuper = me?.role === "super_admin";
+  // Super_admin always sees every action; tenant admins respect the
+  // per-domain allowlist set by super_admin in the Domain editor.
+  const domainConfig = useDomainStore((s) => s.config);
+  const allowedActions = domainConfig?.allowed_profile_actions
+    ?? ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"];
+  const can = (key: string) => isSuper || allowedActions.includes(key);
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["profiles"],
@@ -206,11 +213,23 @@ export function ProfilesPage() {
                     </td>
                     {isAdmin && (
                       <td className="px-4 py-2 space-x-2 whitespace-nowrap">
-                        <button className="btn-primary" onClick={() => setAutoLoginFor(p.id)}>{t("grok.profiles_action_auto_login")}</button>
+                        <button
+                          className="btn-primary"
+                          onClick={() => setAutoLoginFor(p.id)}
+                          disabled={!can("auto_login")}
+                          title={!can("auto_login") ? t("grok.profiles_action_blocked_title") : undefined}
+                        >
+                          {t("grok.profiles_action_auto_login")}
+                        </button>
                         <button
                           className="btn-ghost"
                           onClick={() => setCookiesFor(p.id)}
-                          title={t("grok.profiles_action_upload_cookies_title")}
+                          disabled={!can("upload_cookies")}
+                          title={
+                            !can("upload_cookies")
+                              ? t("grok.profiles_action_blocked_title")
+                              : t("grok.profiles_action_upload_cookies_title")
+                          }
                         >
                           {t("grok.profiles_action_upload_cookies")}
                         </button>
@@ -223,9 +242,34 @@ export function ProfilesPage() {
                             {t("grok.profiles_action_projects")}
                           </button>
                         )}
-                        <button className="btn-ghost" onClick={() => stopVnc.mutate(p.id)} title={t("grok.profiles_action_stop_title")}>{t("grok.profiles_action_stop")}</button>
-                        <button className="btn-ghost" onClick={() => disable.mutate(p.id)}>{t("grok.profiles_action_disable")}</button>
-                        <button className="btn-ghost text-rose-600" onClick={() => remove.mutate(p.id)}>{t("grok.profiles_action_delete")}</button>
+                        <button
+                          className="btn-ghost"
+                          onClick={() => stopVnc.mutate(p.id)}
+                          disabled={!can("stop_vnc")}
+                          title={
+                            !can("stop_vnc")
+                              ? t("grok.profiles_action_blocked_title")
+                              : t("grok.profiles_action_stop_title")
+                          }
+                        >
+                          {t("grok.profiles_action_stop")}
+                        </button>
+                        <button
+                          className="btn-ghost"
+                          onClick={() => disable.mutate(p.id)}
+                          disabled={!can("disable")}
+                          title={!can("disable") ? t("grok.profiles_action_blocked_title") : undefined}
+                        >
+                          {t("grok.profiles_action_disable")}
+                        </button>
+                        <button
+                          className="btn-ghost text-rose-600"
+                          onClick={() => remove.mutate(p.id)}
+                          disabled={!can("delete")}
+                          title={!can("delete") ? t("grok.profiles_action_blocked_title") : undefined}
+                        >
+                          {t("grok.profiles_action_delete")}
+                        </button>
                       </td>
                     )}
                   </tr>

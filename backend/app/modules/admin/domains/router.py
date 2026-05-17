@@ -27,6 +27,13 @@ from app.services import nginx_sync
 # invalidation is the source of truth, the TTL is just a safety net.
 DOMAIN_CONFIG_TTL = 300
 
+# Per-domain controllable actions on a Profile row. Keep in sync with
+# the migration default + the frontend (ProfilesPage action buttons).
+# When a tenant admin's domain doesn't include a key here, the backend
+# 403s the corresponding mutate endpoint and the frontend grays out the
+# button. Super_admin is exempt — full set always.
+PROFILE_ACTIONS = ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"]
+
 router = APIRouter(tags=["domains"])
 
 
@@ -49,6 +56,7 @@ class DomainIn(BaseModel):
     maintenance_starts_at: datetime | None = None
     maintenance_announcement: str | None = Field(default=None, max_length=2000)
     login_template: str = Field(default="default", pattern="^(default|admin)$")
+    allowed_profile_actions: list[str] = Field(default_factory=lambda: list(PROFILE_ACTIONS))
 
 
 class DomainUpdate(BaseModel):
@@ -67,6 +75,7 @@ class DomainUpdate(BaseModel):
     maintenance_starts_at: datetime | None = None
     maintenance_announcement: str | None = Field(default=None, max_length=2000)
     login_template: str | None = Field(default=None, pattern="^(default|admin)$")
+    allowed_profile_actions: list[str] | None = None
 
 
 class DomainOut(BaseModel):
@@ -87,6 +96,7 @@ class DomainOut(BaseModel):
     maintenance_starts_at: datetime | None = None
     maintenance_announcement: str | None = None
     login_template: str = "default"
+    allowed_profile_actions: list[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -112,6 +122,7 @@ class DomainConfig(BaseModel):
     maintenance_starts_at: datetime | None = None
     maintenance_announcement: str | None = None
     login_template: str = "default"
+    allowed_profile_actions: list[str] = Field(default_factory=list)
 
 
 # ---------------- Admin CRUD ----------------
@@ -127,6 +138,10 @@ async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession)
     hostname = payload.hostname.strip().lower()
     if (await db.execute(select(Domain).where(Domain.hostname == hostname))).scalar_one_or_none():
         raise InvalidPayload(f"Domain '{hostname}' đã tồn tại")
+    # Sanitize allowed_profile_actions: keep only keys we recognize.
+    # Defensive — frontend can only send the known set, but a hand-rolled
+    # API call could try to inject arbitrary strings.
+    safe_actions = [a for a in payload.allowed_profile_actions if a in PROFILE_ACTIONS]
     d = Domain(
         hostname=hostname,
         label=payload.label,
@@ -144,6 +159,7 @@ async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession)
         maintenance_starts_at=payload.maintenance_starts_at,
         maintenance_announcement=payload.maintenance_announcement,
         login_template=payload.login_template,
+        allowed_profile_actions=safe_actions,
     )
     db.add(d)
     await db.flush()
@@ -188,6 +204,15 @@ async def update_domain(
                 changes[field] = v.isoformat()
             else:
                 changes[field] = v
+    # allowed_profile_actions is sanitized + tracked separately so we can
+    # diff which actions were added/removed in the audit log.
+    if payload.allowed_profile_actions is not None:
+        safe_actions = [a for a in payload.allowed_profile_actions if a in PROFILE_ACTIONS]
+        if set(safe_actions) != set(d.allowed_profile_actions or []):
+            removed = sorted(set(d.allowed_profile_actions or []) - set(safe_actions))
+            added = sorted(set(safe_actions) - set(d.allowed_profile_actions or []))
+            d.allowed_profile_actions = safe_actions
+            changes["allowed_profile_actions"] = {"added": added, "removed": removed}
 
     # `maintenance_starts_at` is special: admin needs to be able to
     # CLEAR it (set to null) when the patch is done. Always honor the
@@ -265,6 +290,7 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
             maintenance_starts_at=d.maintenance_starts_at,
             maintenance_announcement=d.maintenance_announcement,
             login_template=d.login_template,
+            allowed_profile_actions=list(d.allowed_profile_actions or []),
         )
     # Fail-open default
     return DomainConfig(
@@ -275,4 +301,5 @@ async def get_domain_config(host: str, db: DbSession) -> DomainConfig:
         maintenance_mode=False, maintenance_message=None,
         maintenance_starts_at=None, maintenance_announcement=None,
         login_template="default",
+        allowed_profile_actions=list(PROFILE_ACTIONS),
     )

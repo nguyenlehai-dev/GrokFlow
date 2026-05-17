@@ -67,6 +67,15 @@ class Domain(Base, TimestampMixin):
     login_template: Mapped[str] = mapped_column(
         String(50), nullable=False, default="default", server_default="default"
     )
+    # Allowlist of profile-row actions that this domain's tenant admins
+    # can use (auto_login, upload_cookies, stop_vnc, disable, delete).
+    # Super_admin bypasses this — they can always do everything. The
+    # default value backfilled in 0029 contains the full set so existing
+    # domains stay fully functional post-migration.
+    allowed_profile_actions: Mapped[list] = mapped_column(
+        JSONType, nullable=False,
+        default=lambda: ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"],
+    )
 
 
 class Role(Base, TimestampMixin):

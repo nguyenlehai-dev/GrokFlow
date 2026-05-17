@@ -36,6 +36,15 @@ export function AdminDomainEditorModal({
   const [loginTemplate, setLoginTemplate] = useState<"default" | "admin">(
     domain?.login_template ?? "default"
   );
+  const ALL_PROFILE_ACTIONS = ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"] as const;
+  const [allowedProfileActions, setAllowedProfileActions] = useState<string[]>(
+    domain?.allowed_profile_actions ?? [...ALL_PROFILE_ACTIONS],
+  );
+  const toggleAction = (key: string) => {
+    setAllowedProfileActions((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
 
   const togglePage = (path: string) => {
     setAllowedPages((prev) =>
@@ -61,6 +70,7 @@ export function AdminDomainEditorModal({
         })(),
         maintenance_announcement: maintenanceAnnouncement || null,
         login_template: loginTemplate,
+        allowed_profile_actions: allowedProfileActions,
       };
       if (isCreate) payload.hostname = hostname;
       return isCreate
@@ -244,6 +254,48 @@ export function AdminDomainEditorModal({
                 </p>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="border-t pt-3 space-y-2">
+          <h3 className="text-sm font-semibold">{t("admin.de_profile_actions_title")}</h3>
+          <p className="text-xs text-slate-500">{t("admin.de_profile_actions_hint")}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-sm">
+            <Checkbox
+              checked={allowedProfileActions.includes("auto_login")}
+              onChange={() => toggleAction("auto_login")}
+            >
+              <strong>{t("admin.de_pa_auto_login")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_auto_login_hint")}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allowedProfileActions.includes("upload_cookies")}
+              onChange={() => toggleAction("upload_cookies")}
+            >
+              <strong>{t("admin.de_pa_upload_cookies")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_upload_cookies_hint")}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allowedProfileActions.includes("stop_vnc")}
+              onChange={() => toggleAction("stop_vnc")}
+            >
+              <strong>{t("admin.de_pa_stop_vnc")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_stop_vnc_hint")}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allowedProfileActions.includes("disable")}
+              onChange={() => toggleAction("disable")}
+            >
+              <strong>{t("admin.de_pa_disable")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_disable_hint")}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allowedProfileActions.includes("delete")}
+              onChange={() => toggleAction("delete")}
+            >
+              <strong>{t("admin.de_pa_delete")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_delete_hint")}</span>
+            </Checkbox>
           </div>
         </section>
 
