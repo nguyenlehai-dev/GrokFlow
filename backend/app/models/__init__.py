@@ -46,7 +46,7 @@ from .grok import (
     ProjectToolInstallAssignment,
     ProjectUserAssignment,
 )
-from .servers import Server
+from .servers import Server, ServerAlert, ServerMetricHistory
 from .tool import ChatSession, PromptTemplate
 from .tool_distribution import Tool, ToolAsset
 from .tool_install import ToolInstall, ToolInstallQuotaPeriod
@@ -67,8 +67,8 @@ __all__ = [
     # Grok
     "File", "GrokProject", "Job", "JobLog", "Profile",
     "ProjectDomainAssignment", "ProjectToolInstallAssignment", "ProjectUserAssignment",
-    # Servers
-    "Server",
+    # Servers + monitoring
+    "Server", "ServerAlert", "ServerMetricHistory",
     # Tool module
     "ChatSession", "PromptTemplate",
     # Tool distribution (admin-uploaded installer files + docs)

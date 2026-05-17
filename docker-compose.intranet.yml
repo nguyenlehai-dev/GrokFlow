@@ -209,6 +209,29 @@ services:
         limits: { memory: 192M, cpus: "0.25" }
     logging: *default-logging
 
+  # Long-running server health-check loop. Probes every monitor_enabled
+  # Server row over SSH every ~60s, appends to server_metrics_history,
+  # raises/clears alerts when thresholds trip. Tiny — paramiko + asyncio,
+  # 64M RAM is plenty for ~50 servers.
+  server-monitor:
+    image: grokflow/backend:${TAG:-latest}
+    restart: unless-stopped
+    env_file: ./.env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-grokflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-grokflow}
+      SERVER_MONITOR_INTERVAL: ${SERVER_MONITOR_INTERVAL:-60}
+      SERVER_METRICS_RETENTION_DAYS: ${SERVER_METRICS_RETENTION_DAYS:-7}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "app.workers.server_monitor"]
+    healthcheck:
+      test: ["NONE"]
+    deploy:
+      resources:
+        limits: { memory: 192M, cpus: "0.25" }
+    logging: *default-logging
+
   frontend:
     build:
       context: ./frontend
