@@ -67,6 +67,8 @@ exec /usr/lib/chromium/chromium \
     --no-first-run \
     --no-default-browser-check \
     --disable-blink-features=AutomationControlled \
+    --force-device-scale-factor=1 \
+    --high-dpi-support=0 \
     --remote-debugging-port=9222 \
     --remote-debugging-address=0.0.0.0 \
     --remote-allow-origins=* \
