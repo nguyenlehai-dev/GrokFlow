@@ -26,6 +26,16 @@ export const projectsService = {
   setDomains: (id: string, domain_ids: string[], disabled_domain_ids: string[] = []) =>
     api.put(`/api/grok-projects/${id}/domains`, { domain_ids, disabled_domain_ids }),
 
+  getToolInstalls: (id: string) =>
+    api
+      .get<{ project_id: string; tool_install_ids: string[]; disabled_tool_install_ids?: string[] }>(
+        `/api/grok-projects/${id}/tool-installs`,
+      )
+      .then((r) => r.data),
+
+  setToolInstalls: (id: string, tool_install_ids: string[], disabled_tool_install_ids: string[] = []) =>
+    api.put(`/api/grok-projects/${id}/tool-installs`, { tool_install_ids, disabled_tool_install_ids }),
+
   getUsers: (id: string) =>
     api
       .get<{ project_id: string; user_ids: string[]; disabled_user_ids?: string[] }>(

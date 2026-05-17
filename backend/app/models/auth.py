@@ -31,6 +31,13 @@ class User(Base, TimestampMixin):
     domain_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("domains.id", ondelete="SET NULL"), index=True,
     )
+    # Tool install scope — mirror of domain_id but for desktop kiosk users.
+    # A user has EITHER domain_id OR tool_install_id, never both (enforced
+    # at login time, not at DB level). Domain-scoped users can only log in
+    # from the web; tool-scoped users only from that specific desktop install.
+    tool_install_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("tool_installs.id", ondelete="SET NULL"), index=True,
+    )
     webhook_url: Mapped[str | None] = mapped_column(Text)
     webhook_secret: Mapped[str | None] = mapped_column(String(128))
     # Plan + per-user entitlement overrides. plan_id NULL → fall back to default plan.

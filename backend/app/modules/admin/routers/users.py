@@ -8,7 +8,9 @@ from sqlalchemy import select
 from app.core.deps import AdminUser, DbSession
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
 from app.core.security import hash_password
-from app.models import Plan, User
+from datetime import datetime, timezone
+
+from app.models import Plan, Subscription, User
 from app.modules.admin.audit import service as audit
 from app.modules.admin.schemas import (
     AdminUserCreate,
@@ -106,11 +108,59 @@ async def update_user(user_id: uuid.UUID, payload: AdminUserUpdate, admin: Admin
         if str(payload.plan_id) == NULL_FK_SENTINEL:
             user.plan_id = None
             changes["plan_id"] = None
+            # Clearing plan = cancel any active manual subs.
+            await db.execute(
+                Subscription.__table__.update()
+                .where(
+                    Subscription.user_id == user.id,
+                    Subscription.status == "active",
+                )
+                .values(status="cancelled", cancelled_at=datetime.now(timezone.utc))
+            )
         else:
-            if not await db.get(Plan, payload.plan_id):
+            new_plan = await db.get(Plan, payload.plan_id)
+            if not new_plan:
                 raise InvalidPayload("Plan không tồn tại")
             user.plan_id = payload.plan_id
             changes["plan_id"] = str(payload.plan_id)
+            # Admin upgrade flow: the entitlement resolver requires an
+            # active Subscription row to honor a paid plan (so payment
+            # failures auto-downgrade). When admin grants a plan manually
+            # (no billing), we still need that row → upsert one with
+            # provider="manual" so resolve_user_plan_with_status picks it
+            # up immediately. Cancel any non-matching active subs first.
+            await db.execute(
+                Subscription.__table__.update()
+                .where(
+                    Subscription.user_id == user.id,
+                    Subscription.status == "active",
+                    Subscription.plan_id != payload.plan_id,
+                )
+                .values(status="cancelled", cancelled_at=datetime.now(timezone.utc))
+            )
+            existing = (await db.execute(
+                select(Subscription)
+                .where(
+                    Subscription.user_id == user.id,
+                    Subscription.plan_id == payload.plan_id,
+                )
+                .order_by(Subscription.created_at.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if existing:
+                existing.status = "active"
+                existing.cancelled_at = None
+                existing.cancel_at_period_end = False
+            else:
+                db.add(Subscription(
+                    user_id=user.id,
+                    plan_id=payload.plan_id,
+                    status="active",
+                    billing_cycle="monthly",
+                    provider="manual",
+                    amount=0,
+                    currency="VND",
+                ))
     if payload.entitlement_overrides is not None:
         user.entitlement_overrides = payload.entitlement_overrides or None
         changes["entitlement_overrides"] = "set" if payload.entitlement_overrides else "cleared"

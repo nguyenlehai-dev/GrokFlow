@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   X, Plus, Pencil, Trash2, Layers, Globe, ExternalLink, Wand2,
-  DownloadCloud, Loader2, Check,
+  DownloadCloud, Loader2, Check, Monitor,
 } from "lucide-react";
 
 import { toast } from "@/components/ui/Toast";
@@ -13,6 +13,7 @@ import { projectsService, type DiscoveredProject } from "../services/projects.se
 import { ProjectEditorModal } from "./ProjectEditorModal";
 import { ProjectAutoProvisionModal } from "./ProjectAutoProvisionModal";
 import { AssignDomainsModal } from "./AssignDomainsModal";
+import { AssignToolInstallsModal } from "./AssignToolInstallsModal";
 
 /** Super_admin manages the Grok projects inside a single profile.
  *
@@ -45,6 +46,7 @@ export function ProjectsModal({
   const [autoProvision, setAutoProvision] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
   const [assigning, setAssigning] = useState<Project | null>(null);
+  const [assigningTool, setAssigningTool] = useState<Project | null>(null);
 
   const remove = useMutation({
     mutationFn: (id: string) => projectsService.remove(id),
@@ -110,6 +112,7 @@ export function ProjectsModal({
                   p={p}
                   onEdit={() => setEditing(p)}
                   onAssign={() => setAssigning(p)}
+                  onAssignTool={() => setAssigningTool(p)}
                   onDelete={() => {
                     if (confirm(t("grok.projects_delete_confirm", { name: p.name }))) {
                       remove.mutate(p.id);
@@ -161,6 +164,12 @@ export function ProjectsModal({
           onClose={() => setAssigning(null)}
         />
       )}
+      {assigningTool && (
+        <AssignToolInstallsModal
+          project={assigningTool}
+          onClose={() => setAssigningTool(null)}
+        />
+      )}
     </div>
   );
 }
@@ -168,11 +177,12 @@ export function ProjectsModal({
 // ─── Project row ──────────────────────────────────────────────────────────
 
 function ProjectRow({
-  p, onEdit, onAssign, onDelete,
+  p, onEdit, onAssign, onAssignTool, onDelete,
 }: {
   p: Project;
   onEdit: () => void;
   onAssign: () => void;
+  onAssignTool: () => void;
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
@@ -197,12 +207,19 @@ function ProjectRow({
         {p.description && (
           <p className="text-xs text-slate-500 mt-1 line-clamp-2">{p.description}</p>
         )}
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
           <button
             onClick={onAssign}
             className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 hover:text-violet-900"
           >
             <Globe size={11} /> {t("grok.projects_domains_assigned", { value: p.domain_count })}
+          </button>
+          <button
+            onClick={onAssignTool}
+            className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
+            title="Phân quyền cho các máy desktop (Tool Installs)"
+          >
+            <Monitor size={11} /> {p.tool_install_count} tool install(s)
           </button>
         </div>
       </div>
