@@ -164,13 +164,28 @@ async def upload_input(
         else:
             client, _pid, _tag = session
             print(f"[upload-probe] session ready, calling Grok upload-file…", flush=True)
+            # Hard timeout on the probe — large files + a busy probe
+            # profile can stall this call for tens of seconds while the
+            # user sits staring at a spinner; many users assume the page
+            # is broken and reload (we see this as nginx 499 in the
+            # access log). 15s is generous enough for a 20 MB upload
+            # over the WARP socks proxy but short enough that the user
+            # doesn't give up. On timeout we skip the moderation check
+            # and save the file as-is — the actual job will still get
+            # a moderation verdict from Grok at submit time.
+            import asyncio as _asyncio
             try:
-                meta = await client.upload_file(
-                    content=raw,
-                    filename=file.filename or "input.png",
-                    mime=file.content_type,
+                meta = await _asyncio.wait_for(
+                    client.upload_file(
+                        content=raw,
+                        filename=file.filename or "input.png",
+                        mime=file.content_type,
+                    ),
+                    timeout=15.0,
                 )
                 print(f"[upload-probe] Grok accepted: fileMetadataId={meta.get('fileMetadataId', '?')[:12]}…", flush=True)
+            except _asyncio.TimeoutError:
+                print("[upload-probe] timeout (>15s) — skipping moderation check, saving as-is", flush=True)
             except GrokAPIError as exc:
                 print(f"[upload-probe] Grok REJECTED: code={exc.code} msg={exc.message}", flush=True)
                 if exc.code == "content_moderated":

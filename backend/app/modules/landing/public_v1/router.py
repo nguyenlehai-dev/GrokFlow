@@ -178,12 +178,21 @@ async def upload_input_v1(
             session = None
         if session is not None:
             client, _pid, _tag = session
+            # Same 15s hard timeout as /api/jobs/upload-input — without
+            # it a stalled probe leaves API clients hanging until their
+            # own request timeout, often interpreted as "service down".
+            import asyncio as _asyncio
             try:
-                await client.upload_file(
-                    content=raw,
-                    filename=file.filename or "input.png",
-                    mime=file.content_type,
+                await _asyncio.wait_for(
+                    client.upload_file(
+                        content=raw,
+                        filename=file.filename or "input.png",
+                        mime=file.content_type,
+                    ),
+                    timeout=15.0,
                 )
+            except _asyncio.TimeoutError:
+                pass  # save without moderation check
             except GrokAPIError as exc:
                 if exc.code == "content_moderated":
                     raise InvalidPayload(
