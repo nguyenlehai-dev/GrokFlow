@@ -10,10 +10,26 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev curl gosu \
+    gnupg lsb-release ca-certificates iproute2 \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
     libgbm1 libpango-1.0-0 libcairo2 libasound2 libnspr4 \
     fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cloudflare WARP — runs as a SOCKS5 proxy at 127.0.0.1:40000 inside this
+# container. The backend + worker make httpx calls to grok.com; without
+# WARP the VPS IP gets gradually flagged by Cloudflare and image-API
+# requests start returning 403 (provider_blocked), forcing the slow
+# Playwright DOM fallback. WARP makes the requests look like they're
+# coming from inside Cloudflare's own network, which their bot wall
+# trusts. iproute2 (above) is needed by warp-svc's tunnel init.
+RUN curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+        | gpg --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ bookworm main" \
+        > /etc/apt/sources.list.d/cloudflare-client.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends cloudflare-warp \
     && rm -rf /var/lib/apt/lists/*
 
 # ffmpeg in its own RUN layer so the big graphics-stack layer above stays

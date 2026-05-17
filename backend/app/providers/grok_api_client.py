@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import uuid
 from typing import Any, Callable
 
@@ -37,6 +38,20 @@ GROK_BASE = "https://grok.com"
 ASSETS_BASE = "https://assets.grok.com"
 ENDPOINT_NEW_CONVERSATION = "/rest/app-chat/conversations/new"
 ENDPOINT_UPLOAD_FILE = "/rest/app-chat/upload-file"
+
+
+def _httpx_proxy_kwargs() -> dict:
+    """Build the proxy kwargs for an httpx client from GROK_HTTP_PROXY.
+
+    When the env var is set (typically by the backend container's
+    warp-bootstrap.sh after WARP binds 127.0.0.1:40000), all outbound
+    grok.com traffic goes through Cloudflare's WARP network →
+    Cloudflare's bot wall sees the request as coming from its own
+    infrastructure and skips the harder challenges that the bare VPS
+    IP attracts. Empty env = direct connection (legacy behavior).
+    """
+    proxy = os.environ.get("GROK_HTTP_PROXY")
+    return {"proxy": proxy} if proxy else {}
 
 # Pinned body fields for IMAGE jobs, from a verified working request.
 _IMAGE_BODY: dict[str, Any] = {
@@ -249,7 +264,8 @@ class GrokAPIClient:
 
         results: list[dict[str, Any]] = []
         async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True
+            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
+            **_httpx_proxy_kwargs(),
         ) as client:
             for url in urls:
                 full = f"{ASSETS_BASE}/{url.lstrip('/')}"
@@ -317,7 +333,8 @@ class GrokAPIClient:
             "content": encoded,
         }
         async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True
+            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
+            **_httpx_proxy_kwargs(),
         ) as client:
             try:
                 resp = await client.post(
@@ -490,7 +507,8 @@ class GrokAPIClient:
         soft_stopped = False
 
         async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True
+            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
+            **_httpx_proxy_kwargs(),
         ) as client:
             try:
                 async with client.stream(
@@ -581,7 +599,8 @@ class GrokAPIClient:
         soft_stopped = False
 
         async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True
+            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
+            **_httpx_proxy_kwargs(),
         ) as client:
             try:
                 async with client.stream(

@@ -116,6 +116,14 @@ services:
     # Allow container to reach host's SSH (deploy/git operations from /admin).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Cloudflare WARP daemon (started by entrypoint.sh) needs these to set
+    # up its tunnel. Without them, WARP self-skips and the backend's
+    # httpx fall back to direct connections — Cloudflare gradually flags
+    # the VPS IP, image API starts 403-ing, jobs drop to slow DOM path.
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 15s
@@ -155,6 +163,12 @@ services:
       - ./browser_profiles:/app/browser_profiles
       - /var/run/docker.sock:/var/run/docker.sock
     command: ["python", "-m", "app.workers.run"]
+    # Worker makes the actual provider httpx calls (backend just queues
+    # jobs to DB). It MUST be on WARP — same reason as backend above.
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     # Disable the inherited HEALTHCHECK from Dockerfile.prod (curl /health
     # on port 8000 — fine for the API, but worker only runs the queue
     # consumer, no HTTP server). Process-presence checks need procps which
