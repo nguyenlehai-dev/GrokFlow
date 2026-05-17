@@ -34,7 +34,19 @@ URL="${STARTUP_URL:-https://grok.com/}"
 # Explicit unset of any flag inheritance.
 unset CHROMIUM_FLAGS
 
+# Optional outbound proxy (typically Cloudflare WARP, set up via
+# deploy/install_warp_proxy.sh). When set, chromium routes ALL its
+# traffic through the proxy — Cloudflare WARP makes the requests look
+# like they're coming from inside Cloudflare's own network so Turnstile
+# challenges relax significantly. Empty = direct connection.
+PROXY_ARG=""
+if [[ -n "${GROK_HTTP_PROXY:-}" ]]; then
+    PROXY_ARG="--proxy-server=${GROK_HTTP_PROXY}"
+    echo "[launch] chromium will route via proxy: ${GROK_HTTP_PROXY}" >&2
+fi
+
 exec /usr/lib/chromium/chromium \
+    ${PROXY_ARG} \
     --no-sandbox \
     --disable-dev-shm-usage \
     --no-first-run \

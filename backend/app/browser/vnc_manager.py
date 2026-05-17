@@ -165,6 +165,15 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         environment={
             "STARTUP_URL": provider_url,
             "TZ": "Asia/Ho_Chi_Minh",
+            # Propagate the host's GROK_HTTP_PROXY (typically a Cloudflare
+            # WARP SOCKS endpoint set up by deploy/install_warp_proxy.sh)
+            # so chromium inside the VNC container routes its traffic
+            # through it. Empty/unset = direct connection.
+            **(
+                {"GROK_HTTP_PROXY": os.environ["GROK_HTTP_PROXY"]}
+                if os.environ.get("GROK_HTTP_PROXY")
+                else {}
+            ),
         },
         volumes={
             host_profile_path: {"bind": "/config", "mode": "rw"},

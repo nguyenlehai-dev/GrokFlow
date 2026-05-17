@@ -1246,6 +1246,8 @@ export const en: Translations = {
     profiles_edit_max_image_title: "Edit max (image)",
     profiles_edit_max_video_title: "Video runs through Playwright — don't set higher than 4-6 per profile to avoid Chromium crashes",
     profiles_action_auto_login: "Auto login",
+    profiles_action_upload_cookies: "Upload cookies",
+    profiles_action_upload_cookies_title: "Upload cookies JSON exported by Cookie-Editor in your local browser — bypasses Cloudflare on server",
     profiles_action_projects: "Projects",
     profiles_action_projects_title: "Manage projects + per-project domain permissions",
     profiles_action_stop: "Stop",

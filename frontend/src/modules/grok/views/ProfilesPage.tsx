@@ -207,6 +207,13 @@ export function ProfilesPage() {
                     {isAdmin && (
                       <td className="px-4 py-2 space-x-2 whitespace-nowrap">
                         <button className="btn-primary" onClick={() => setAutoLoginFor(p.id)}>{t("grok.profiles_action_auto_login")}</button>
+                        <button
+                          className="btn-ghost"
+                          onClick={() => setCookiesFor(p.id)}
+                          title={t("grok.profiles_action_upload_cookies_title")}
+                        >
+                          {t("grok.profiles_action_upload_cookies")}
+                        </button>
                         {isSuper && (
                           <button
                             className="btn-ghost"

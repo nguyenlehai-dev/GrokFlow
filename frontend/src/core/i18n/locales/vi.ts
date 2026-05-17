@@ -1259,6 +1259,8 @@ export const vi: Translations = {
     profiles_edit_max_image_title: "Sửa max (image)",
     profiles_edit_max_video_title: "Video chạy qua Playwright — đừng đặt quá 4-6 mỗi profile để tránh crash Chromium",
     profiles_action_auto_login: "Auto login",
+    profiles_action_upload_cookies: "Upload cookies",
+    profiles_action_upload_cookies_title: "Upload file cookies JSON xuất từ Cookie-Editor (browser local) — bypass Cloudflare cho server",
     profiles_action_projects: "Projects",
     profiles_action_projects_title: "Quản lý projects + phân quyền domain per-project",
     profiles_action_stop: "Stop",
