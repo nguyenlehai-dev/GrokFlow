@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  Play, RotateCw, Square, Power, Monitor,
+  Play, RotateCw, Square, Power, Monitor, Calendar, Database,
   Server as ServerIcon, ArchiveRestore, ClipboardList, BarChart3, FileText,
   ChevronLeft,
 } from "lucide-react";
@@ -15,6 +15,8 @@ import type { ServerAction } from "../models/types";
 import { ServerActionTile } from "../components/ServerActionTile";
 import { ServerMeter } from "../components/ServerMeter";
 import { BackupHistoryCard } from "../components/BackupHistoryCard";
+import { RebootScheduleModal } from "../components/RebootScheduleModal";
+import { BackupConfigModal } from "../components/BackupConfigModal";
 
 export function ServerDetailPage() {
   return (
@@ -28,6 +30,8 @@ function Inner() {
   const { t } = useTranslation();
   const { id = "" } = useParams<{ id: string }>();
   const qc = useQueryClient();
+  const [showRebootSchedule, setShowRebootSchedule] = useState(false);
+  const [showBackupConfig, setShowBackupConfig] = useState(false);
 
   const { data: server, isLoading } = useQuery({
     queryKey: ["server", id],
@@ -166,12 +170,12 @@ function Inner() {
                 }}
               />
               <ServerActionTile
-                icon={ClipboardList} label={t("admin.servers_action_backups")} tone="info"
-                onClick={() => toast("Backups: TODO", "info")}
+                icon={Database} label="Backup config" tone="info"
+                onClick={() => setShowBackupConfig(true)}
               />
               <ServerActionTile
-                icon={ClipboardList} label={t("admin.servers_action_backup_jobs")} tone="info"
-                onClick={() => toast("Backup Jobs: TODO", "info")}
+                icon={Calendar} label="Lịch reboot" tone="info"
+                onClick={() => setShowRebootSchedule(true)}
               />
               <ServerActionTile
                 icon={BarChart3} label={t("admin.servers_action_graphs")} tone="success"
@@ -230,9 +234,16 @@ function Inner() {
           onDelete={(bid) => {
             if (confirm(t("admin.servers_confirm_delete_backup"))) deleteMut.mutate(bid);
           }}
-          onCreate={() => toast("Backup: TODO", "info")}
+          onCreate={() => setShowBackupConfig(true)}
         />
       </div>
+
+      {showRebootSchedule && (
+        <RebootScheduleModal serverId={id} onClose={() => setShowRebootSchedule(false)} />
+      )}
+      {showBackupConfig && (
+        <BackupConfigModal serverId={id} onClose={() => setShowBackupConfig(false)} />
+      )}
     </div>
   );
 }
