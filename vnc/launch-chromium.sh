@@ -9,6 +9,18 @@
 #   --disable-features=...         — kill background work that wastes RAM
 #   --aggressive-cache-discard     — drop unused caches sooner
 #   --renderer-process-limit=8     — cap renderer count (one per tab)
+#
+# IMPORTANT — we call the chromium BINARY directly (/usr/lib/chromium/chromium),
+# not the /usr/bin/chromium wrapper. The wrapper sources /etc/chromium.d/*
+# which on Debian/Ubuntu injects extra flags including:
+#
+#   --load-extension=`ls -dm /usr/share/chromium/extensions/*`
+#
+# When that directory is empty (our case), `ls` returns nothing and we end
+# up with `--load-extension=` (empty value). Chromium then treats the
+# NEXT positional arg ($URL) as the extension path. Result: no startup URL
+# AND a Cloudflare-detectable automation fingerprint. Bypassing the wrapper
+# gives us deterministic flags.
 
 set -euo pipefail
 
@@ -19,7 +31,10 @@ done
 
 URL="${STARTUP_URL:-https://grok.com/}"
 
-exec /usr/bin/chromium \
+# Explicit unset of any flag inheritance.
+unset CHROMIUM_FLAGS
+
+exec /usr/lib/chromium/chromium \
     --no-sandbox \
     --disable-dev-shm-usage \
     --no-first-run \
