@@ -32,8 +32,10 @@ from sqlalchemy import delete, select
 
 from app.core.database import SessionLocal
 from app.models import (
-    Notification, Server, ServerAlert, ServerMetricHistory, ServerRebootHistory,
+    Notification, Server, ServerAlert, ServerBackupHistory,
+    ServerMetricHistory, ServerRebootHistory,
 )
+from app.modules.servers.services.backup_runner import run_backup
 from app.modules.servers.services.metrics import probe
 from app.modules.servers.services.ssh import SshConnectError, run_sudo
 
@@ -413,6 +415,72 @@ async def _maybe_fire_reboot(server: Server) -> None:
         await db.commit()
 
 
+# ─── Backup scheduler ──────────────────────────────────────────────────
+
+
+async def _maybe_fire_backup(server: Server) -> None:
+    """For one server, decide whether to run the daily backup now.
+
+    Same shape as the reboot scheduler — cron-match check, then de-dupe
+    via recent history check, then SSH-execute. Difference: backups can
+    take minutes, so we run them in a thread and don't block the loop."""
+    if not server.backup_schedule_cron:
+        return
+    now = datetime.now(timezone.utc)
+    if not _cron_should_fire(server.backup_schedule_cron, now):
+        return
+    if not (server.backup_paths or server.backup_db_name):
+        return  # No-op: nothing to backup
+
+    async with SessionLocal() as db:
+        recent = (await db.execute(
+            select(ServerBackupHistory).where(
+                ServerBackupHistory.server_id == server.id,
+                ServerBackupHistory.started_at >= now - timedelta(minutes=5),
+            )
+        )).scalars().first()
+        if recent is not None:
+            return  # Already started this minute window
+        row = ServerBackupHistory(
+            id=uuid.uuid4(), server_id=server.id,
+            trigger="scheduled", status="running",
+        )
+        db.add(row)
+        await db.commit()
+        row_id = row.id
+
+    log.info("auto-backup firing for %s (cron=%s)",
+             server.label, server.backup_schedule_cron)
+    result = await asyncio.to_thread(run_backup, server)
+
+    async with SessionLocal() as db:
+        fresh = await db.get(ServerBackupHistory, row_id)
+        if fresh is not None:
+            fresh.status = "success" if result.success else "failed"
+            fresh.output_path = result.output_path
+            fresh.size_bytes = result.size_bytes
+            fresh.error_message = None if result.success else result.message[:500]
+            fresh.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+
+        from app.models import User
+        sup_ids = [
+            u.id for u in (await db.execute(
+                select(User).where(User.role == "super_admin")
+            )).scalars().all()
+        ]
+        icon = "💾" if result.success else "❌"
+        for uid in sup_ids:
+            db.add(Notification(
+                user_id=uid, kind="server_backup",
+                title=f"{icon} {server.label}: backup",
+                body=result.message[:500] or ("Backup OK" if result.success else "Backup failed"),
+                target_url=f"/servers/{server.id}",
+                severity="info" if result.success else "warning",
+            ))
+        await db.commit()
+
+
 async def _housekeep() -> None:
     """Prune metrics older than `HISTORY_RETENTION_DAYS`."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=HISTORY_RETENTION_DAYS)
@@ -450,6 +518,14 @@ async def _loop_once() -> None:
     # query. Each call is a no-op when the cron doesn't fire this minute.
     await asyncio.gather(
         *[_maybe_fire_reboot(s) for s in servers],
+        return_exceptions=True,
+    )
+
+    # Backup scheduler — runs the daily tar + pg_dump when cron matches.
+    # Backups can take minutes; each call wraps the SSH in to_thread so
+    # the loop doesn't stall even if multiple servers backup concurrently.
+    await asyncio.gather(
+        *[_maybe_fire_backup(s) for s in servers],
         return_exceptions=True,
     )
 

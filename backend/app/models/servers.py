@@ -69,6 +69,57 @@ class Server(Base, TimestampMixin):
     reboot_min_uptime_hours: Mapped[int] = mapped_column(
         Integer, nullable=False, default=24, server_default="24",
     )
+    # ─── Backup config ─────────────────────────────────────────────────
+    # 5-field UTC cron string. NULL = backup disabled. Typical value:
+    # "0 2 * * *" = every day 02:00 UTC.
+    backup_schedule_cron: Mapped[str | None] = mapped_column(String(100))
+    # Destination directory ON THE SERVER. Worker creates this dir if
+    # missing and writes `<server-label>-YYYYMMDD-HHMMSS.tar.gz` into it.
+    backup_target_path: Mapped[str] = mapped_column(
+        String(500), nullable=False, default="/opt/backups",
+        server_default="/opt/backups",
+    )
+    # List of host paths to include in the tar (e.g.
+    # ["/home/vpsroot/grokflow"]). Empty list = skip filesystem tar
+    # (only DB dump if backup_db_name set).
+    backup_paths: Mapped[list] = mapped_column(
+        JSONType, nullable=False, default=list,
+    )
+    # Postgres DB name to pg_dump (using server's local pg). NULL = skip
+    # DB backup. Worker SSH-runs `pg_dump -U postgres <db>` on the server.
+    backup_db_name: Mapped[str | None] = mapped_column(String(100))
+    # Prune backups older than this many days. Default 7.
+    backup_retain_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=7, server_default="7",
+    )
+
+
+class ServerBackupHistory(Base):
+    """Audit row per backup attempt — scheduled or manual.
+
+    Populated by the worker (`app.workers.server_monitor._maybe_fire_backup`)
+    when the cron matches the current minute, and by the manual
+    POST /api/admin/servers/{id}/backup-now endpoint."""
+    __tablename__ = "server_backup_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("servers.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    trigger: Mapped[str] = mapped_column(String(20), nullable=False)  # scheduled | manual
+    triggered_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", server_default="queued")
+    # Full path on the remote box of the tar/sql file written.
+    output_path: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ServerRebootHistory(Base):
