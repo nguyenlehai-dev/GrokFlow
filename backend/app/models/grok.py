@@ -49,6 +49,13 @@ class Profile(Base, TimestampMixin):
     # dedicating a profile to image-only throughput. Default True keeps
     # pre-0027 behavior — every profile accepts both job types.
     allows_video: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    # Account tier label — free-text VARCHAR so adding 'pro' / 'enterprise'
+    # later doesn't need a migration. Common values: "free", "heavy" (=
+    # SuperGrok Premium with ~500/day quota), "pro". Used by the admin UI
+    # for filtering + badges; does NOT change worker routing.
+    tier: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="free", server_default="free",
+    )
 
     user: Mapped["User"] = relationship(back_populates="profiles")  # noqa: F821
     jobs: Mapped[list["Job"]] = relationship(back_populates="profile")
@@ -135,6 +142,32 @@ class ProjectDomainAssignment(Base):
     # Soft-disable. When False the resolver and visibility queries treat
     # this row as if it doesn't exist. Used by super_admin to temporarily
     # revoke a tenant's access without losing the assignment config.
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+
+class ProjectToolInstallAssignment(Base):
+    """Many-to-many: which GrokProject each tool install can pull from.
+
+    Sibling of ProjectDomainAssignment, but keyed by tool_install_id. Used
+    when a job request comes in via the desktop client (X-Tool-Install-Id
+    header). Resolver tries this table first for an exact install match;
+    falls back to ProjectDomainAssignment if no row exists.
+
+    Only `super_admin` edits these.
+    """
+    __tablename__ = "project_tool_install_assignments"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("grok_projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tool_install_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("tool_installs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,

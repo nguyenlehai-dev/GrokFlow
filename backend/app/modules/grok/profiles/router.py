@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Header, UploadFile, File as FastapiFile, status
 from pydantic import BaseModel
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.browser import profile_manager, vnc_manager
 from app.core.config import settings
@@ -24,7 +24,7 @@ from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
 from app.core.deps import SuperAdminUser
 from app.services.nginx_sync import refresh_vnc_map
-from app.models import Domain, GrokProject, Profile, ProjectDomainAssignment, User
+from app.models import Domain, GrokProject, Job, Profile, ProjectDomainAssignment, User
 from app.modules.admin.audit import service as audit
 
 
@@ -214,6 +214,7 @@ async def create_profile(payload: ProfileCreate, admin: AdminUser, db: DbSession
         max_concurrent_jobs=payload.max_concurrent_jobs,
         max_concurrent_video=payload.max_concurrent_video,
         allows_video=payload.allows_video,
+        tier=payload.tier,
     )
     db.add(profile)
     await audit.log_action(db, user_id=admin.id, action="create_profile",
@@ -273,6 +274,9 @@ async def update_profile(
     if payload.allows_video is not None:
         profile.allows_video = payload.allows_video
         changes["allows_video"] = payload.allows_video
+    if payload.tier is not None:
+        profile.tier = payload.tier
+        changes["tier"] = payload.tier
     # Audit so changes to status (esp. "deleted" / "logged_in") are traceable.
     await audit.log_action(
         db, user_id=admin.id, action="update_profile",
@@ -611,6 +615,52 @@ async def disable_profile(profile_id: uuid.UUID, admin: AdminUser, db: DbSession
     await _assert_profile_accessible(db, admin, profile)
     await _assert_action_allowed(db, admin, "disable")
     profile.status = "disabled"
+    await db.commit()
+    await db.refresh(profile)
+    return profile
+
+
+_RUNNING_JOB_STATES = ("running", "processing_provider", "uploading_result")
+
+
+@router.post("/{profile_id}/reset-stuck", response_model=ProfileOut)
+async def reset_stuck_profile(
+    profile_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> Profile:
+    """Force-unstick a profile stuck on `running_job`.
+
+    Use case: worker died mid-job or the slot-release path failed silently,
+    leaving the profile's status=running_job and active_jobs>0 forever.
+    The background `idle_cleanup` heal also fixes this, but on a slow
+    cadence (default 1h); this endpoint lets admins recover instantly.
+
+    Safety: if real jobs are still in a running state for this profile,
+    we sync the counters but DO NOT flip status to logged_in — that would
+    let new jobs grab a slot while old ones are mid-flight."""
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
+
+    live = (await db.execute(
+        select(func.count()).select_from(Job).where(
+            Job.profile_id == profile_id,
+            Job.status.in_(_RUNNING_JOB_STATES),
+        )
+    )).scalar_one() or 0
+    live_video = (await db.execute(
+        select(func.count()).select_from(Job).where(
+            Job.profile_id == profile_id,
+            Job.status.in_(_RUNNING_JOB_STATES),
+            Job.job_type == "video",
+        )
+    )).scalar_one() or 0
+
+    profile.active_jobs = int(live)
+    profile.active_video_jobs = int(live_video)
+    if live == 0 and profile.status == "running_job":
+        profile.status = "logged_in"
+        profile.error_message = None
     await db.commit()
     await db.refresh(profile)
     return profile

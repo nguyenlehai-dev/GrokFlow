@@ -36,6 +36,16 @@ export function AdminDomainEditorModal({
   const [loginTemplate, setLoginTemplate] = useState<"default" | "admin">(
     domain?.login_template ?? "default"
   );
+  // Daily job quota — empty string in the UI = unlimited (NULL on the wire).
+  // Stored as string in state so admin can clear the field; converted to
+  // number-or-null when serializing the payload.
+  const [jobsQuotaPerDay, setJobsQuotaPerDay] = useState<string>(
+    domain?.jobs_quota_per_day != null ? String(domain.jobs_quota_per_day) : "",
+  );
+  // Quota reset hour (UTC 0-23). Default 0 = midnight UTC. 17 = midnight VN.
+  const [quotaResetHourUtc, setQuotaResetHourUtc] = useState<string>(
+    String(domain?.quota_reset_hour_utc ?? 0),
+  );
   const ALL_PROFILE_ACTIONS = ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"] as const;
   const [allowedProfileActions, setAllowedProfileActions] = useState<string[]>(
     domain?.allowed_profile_actions ?? [...ALL_PROFILE_ACTIONS],
@@ -71,6 +81,10 @@ export function AdminDomainEditorModal({
         maintenance_announcement: maintenanceAnnouncement || null,
         login_template: loginTemplate,
         allowed_profile_actions: allowedProfileActions,
+        jobs_quota_per_day: jobsQuotaPerDay.trim() === ""
+          ? null
+          : Math.max(0, Math.floor(Number(jobsQuotaPerDay))),
+        quota_reset_hour_utc: Math.min(23, Math.max(0, Math.floor(Number(quotaResetHourUtc) || 0))),
       };
       if (isCreate) payload.hostname = hostname;
       return isCreate
@@ -174,6 +188,55 @@ export function AdminDomainEditorModal({
               {t("admin.de_playground_require_hint")}
             </span>
           </Checkbox>
+        </section>
+
+        <section className="border-t pt-3 space-y-2">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            ⚡ Quota Grok / ngày
+            {jobsQuotaPerDay.trim() !== "" && (
+              <span className="badge-cyan text-[10px]">{jobsQuotaPerDay}/ngày</span>
+            )}
+            <span className="badge-slate text-[10px]">Reset {quotaResetHourUtc.padStart(2, "0")}:00 UTC</span>
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-slate-700">
+                Số job Grok tối đa / ngày
+              </label>
+              <input
+                className="input mt-1"
+                type="number"
+                min={0}
+                step={50}
+                value={jobsQuotaPerDay}
+                onChange={(e) => setJobsQuotaPerDay(e.target.value)}
+                placeholder="Để trống = không giới hạn"
+              />
+              <p className="text-[10px] text-slate-500 mt-1">
+                Khi tenant của domain này submit job vượt số này, backend trả 429.
+                Áp dụng cho POST <code className="font-mono">/api/jobs</code> (cả batch +
+                playground), không gồm gateway. Để trống = unlimited.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-700">
+                Giờ reset hằng ngày (UTC, 0-23)
+              </label>
+              <input
+                className="input mt-1"
+                type="number"
+                min={0}
+                max={23}
+                value={quotaResetHourUtc}
+                onChange={(e) => setQuotaResetHourUtc(e.target.value)}
+              />
+              <p className="text-[10px] text-slate-500 mt-1">
+                💡 <strong>0 = 00:00 UTC</strong> (= 07:00 sáng VN). Muốn reset đúng
+                <strong> 00:00 giờ Việt Nam</strong> → đặt <strong>17</strong>.
+                Period rollover: từ giờ này hôm nay đến giờ này ngày mai.
+              </p>
+            </div>
+          </div>
         </section>
 
         <section className="border-t pt-3 space-y-2">

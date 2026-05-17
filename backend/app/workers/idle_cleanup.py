@@ -16,17 +16,78 @@ from datetime import datetime, timedelta, timezone
 
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.browser import vnc_manager
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models import File as FileModel, Job, JobLog, Profile
 
+# Same set as workers.run.RUNNING_JOB_STATES — duplicated here to avoid an
+# import cycle (run.py imports from this module's siblings).
+_RUNNING_JOB_STATES = ("running", "processing_provider", "uploading_result")
+
+
+async def heal_stuck_profiles() -> int:
+    """Find profiles stuck in `running_job` with no real running jobs and
+    repair them in-place (no worker restart needed).
+
+    A profile gets stuck if the slot-release path failed silently
+    (transaction rollback, exception in finally, worker SIGKILL'd
+    mid-release). The startup-recovery in workers.run only runs on
+    worker boot, so a stuck profile can stay Running forever between
+    restarts. This periodic heal closes that gap.
+
+    Strategy: for each profile in `running_job`, count its jobs that are
+    actually in a running state. If 0 → reset counters and status to
+    `logged_in`. Also covers the case where active_jobs is non-zero but
+    no real running jobs exist (counter drift)."""
+    fixed = 0
+    async with SessionLocal() as db:
+        stuck = (await db.execute(
+            select(Profile).where(Profile.status == "running_job")
+        )).scalars().all()
+        for p in stuck:
+            live = (await db.execute(
+                select(func.count()).select_from(Job).where(
+                    Job.profile_id == p.id,
+                    Job.status.in_(_RUNNING_JOB_STATES),
+                )
+            )).scalar_one() or 0
+            live_video = (await db.execute(
+                select(func.count()).select_from(Job).where(
+                    Job.profile_id == p.id,
+                    Job.status.in_(_RUNNING_JOB_STATES),
+                    Job.job_type == "video",
+                )
+            )).scalar_one() or 0
+            if live == 0:
+                p.active_jobs = 0
+                p.active_video_jobs = 0
+                p.status = "logged_in"
+                fixed += 1
+                print(f"[idle-cleanup] healed stuck profile {p.name} ({p.id}) — counters reset", flush=True)
+            else:
+                # Real jobs still in-flight — just sync the counters in case they drifted.
+                if p.active_jobs != live:
+                    p.active_jobs = int(live)
+                if p.active_video_jobs != live_video:
+                    p.active_video_jobs = int(live_video)
+        if fixed or stuck:
+            await db.commit()
+    return fixed
+
 
 async def cleanup(idle_hours: float) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(hours=idle_hours)
     stopped = 0
+    # Heal stuck profiles first so the rest of cleanup sees accurate state.
+    try:
+        healed = await heal_stuck_profiles()
+        if healed:
+            print(f"[idle-cleanup] healed {healed} stuck profile(s)", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[idle-cleanup] heal_stuck_profiles failed: {exc}", flush=True)
     async with SessionLocal() as db:
         # Reap orphan VNC containers (profile deleted but container still running).
         all_pids = {str(p.id) for p in (

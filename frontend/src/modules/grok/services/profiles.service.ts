@@ -15,6 +15,10 @@ export const profilesService = {
   remove: (id: string) => api.delete(`/api/profiles/${id}`),
 
   disable: (id: string) => api.post(`/api/profiles/${id}/disable`),
+  /** Force-clear a profile stuck on `running_job` — counters reset to
+   *  match real running-job count and status flips back to `logged_in`
+   *  when no live jobs remain. See backend reset_stuck_profile route. */
+  resetStuck: (id: string) => api.post<Profile>(`/api/profiles/${id}/reset-stuck`).then((r) => r.data),
   stopVnc: (id: string) => api.post(`/api/profiles/${id}/stop-vnc`),
 
   startVncSession: (id: string) =>

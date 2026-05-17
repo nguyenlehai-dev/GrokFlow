@@ -33,9 +33,16 @@ export function ProfilesPage() {
   const [autoLoginFor, setAutoLoginFor] = useState<string | null>(null);
   // Per-row state for the domain assignment modal — super_admin only.
   const [projectsFor, setProjectsFor] = useState<{ id: string; name: string } | null>(null);
+  // Client-side filter by tier. "all" shows everything; specific tiers
+  // narrow the table to that bucket so admin can scan "heavy only".
+  const [tierFilter, setTierFilter] = useState<"all" | "free" | "heavy" | "pro">("all");
 
   const disable = useMutation({
     mutationFn: (id: string) => profilesService.disable(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  const resetStuck = useMutation({
+    mutationFn: (id: string) => profilesService.resetStuck(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
   });
   const stopVnc = useMutation({
@@ -62,6 +69,12 @@ export function ProfilesPage() {
   const updateAllowsVideo = useMutation({
     mutationFn: ({ id, value }: { id: string; value: boolean }) =>
       profilesService.update(id, { allows_video: value }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  // Tier change — cosmetic only, drives the row badge + filter.
+  const updateTier = useMutation({
+    mutationFn: ({ id, tier }: { id: string; tier: string }) =>
+      profilesService.update(id, { tier }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
   });
 
@@ -112,6 +125,36 @@ export function ProfilesPage() {
         </div>
       )}
 
+      {/* Tier filter chips. Counts re-derived from the live data so the UI
+          stays accurate after admin edits a tier. */}
+      {data && data.length > 0 && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">Tier:</span>
+          {(["all", "free", "heavy", "pro"] as const).map((tierKey) => {
+            const count = tierKey === "all"
+              ? data.length
+              : data.filter((p) => ((p as { tier?: string }).tier ?? "free") === tierKey).length;
+            const active = tierFilter === tierKey;
+            return (
+              <button
+                key={tierKey}
+                onClick={() => setTierFilter(tierKey)}
+                className={`px-2.5 py-1 rounded-full ring-1 transition-colors ${
+                  active
+                    ? "bg-slate-900 text-white ring-slate-900"
+                    : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <span className="uppercase font-semibold">{tierKey}</span>
+                <span className={`ml-1 ${active ? "text-slate-300" : "text-slate-400"}`}>
+                  ({count})
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-slate-500">{t("grok.profiles_loading")}</p>
       ) : (
@@ -130,7 +173,10 @@ export function ProfilesPage() {
               </tr>
             </thead>
             <tbody>
-              {data?.map((p) => {
+              {data?.filter((p) => {
+                if (tierFilter === "all") return true;
+                return ((p as { tier?: string }).tier ?? "free") === tierFilter;
+              }).map((p) => {
                 const usage = p.max_concurrent_jobs > 0 ? p.active_jobs / p.max_concurrent_jobs : 0;
                 const slotColor = usage >= 1 ? "text-rose-600" : usage >= 0.7 ? "text-amber-600" : "text-emerald-600";
                 const allowsVideo = p.allows_video !== false; // default true for old rows
@@ -144,10 +190,35 @@ export function ProfilesPage() {
                   : videoUsage >= 0.7
                   ? "text-amber-600"
                   : "text-emerald-600";
+                const tier = (p as { tier?: string }).tier ?? "free";
+                const tierBadge =
+                  tier === "heavy"
+                    ? "bg-amber-100 text-amber-800 ring-amber-200"
+                    : tier === "pro"
+                    ? "bg-violet-100 text-violet-800 ring-violet-200"
+                    : "bg-slate-100 text-slate-600 ring-slate-200";
                 return (
                   <tr key={p.id} className="border-t">
                     <td className="px-4 py-2">
-                      <div className="font-medium">{p.name}</div>
+                      <div className="font-medium flex items-center gap-2">
+                        {p.name}
+                        {isAdmin ? (
+                          <select
+                            value={tier}
+                            onChange={(e) => updateTier.mutate({ id: p.id, tier: e.target.value })}
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 cursor-pointer ${tierBadge}`}
+                            title="Tier (chỉ để label / lọc — không ảnh hưởng routing)"
+                          >
+                            <option value="free">FREE</option>
+                            <option value="heavy">HEAVY</option>
+                            <option value="pro">PRO</option>
+                          </select>
+                        ) : (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${tierBadge} uppercase font-semibold`}>
+                            {tier}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-2">{p.provider}</td>
                     <td className="px-4 py-2"><StatusBadge status={p.status} /></td>
@@ -254,6 +325,16 @@ export function ProfilesPage() {
                         >
                           {t("grok.profiles_action_stop")}
                         </button>
+                        {p.status === "running_job" && (
+                          <button
+                            className="btn-ghost text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                            onClick={() => resetStuck.mutate(p.id)}
+                            disabled={resetStuck.isPending}
+                            title="Reset profile bị kẹt ở Running — đồng bộ lại counter và mở khoá slot"
+                          >
+                            {resetStuck.isPending && resetStuck.variables === p.id ? "Đang reset…" : "Reset kẹt"}
+                          </button>
+                        )}
                         <button
                           className="btn-ghost"
                           onClick={() => disable.mutate(p.id)}
@@ -346,19 +427,21 @@ interface CreateValues {
   provider: "grok" | "flow";
   max_concurrent_jobs: number;
   allows_video: boolean;
+  tier: string;
 }
 
 function CreateProfileModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<CreateValues>({
-    defaultValues: { provider: "grok", max_concurrent_jobs: 4, allows_video: true },
+    defaultValues: { provider: "grok", max_concurrent_jobs: 4, allows_video: true, tier: "free" },
   });
   const onSubmit = async (v: CreateValues) => {
     await profilesService.create({
       ...v,
       max_concurrent_jobs: Number(v.max_concurrent_jobs),
       allows_video: Boolean(v.allows_video),
+      tier: v.tier,
     });
     qc.invalidateQueries({ queryKey: ["profiles"] });
     onClose();
@@ -377,6 +460,18 @@ function CreateProfileModal({ onClose }: { onClose: () => void }) {
             <option value="grok">Grok</option>
             <option value="flow">Flow</option>
           </select>
+        </div>
+        <div>
+          <label className="text-sm font-medium">Tier (gói acc)</label>
+          <select className="input" {...register("tier")}>
+            <option value="free">Free — acc miễn phí (~5/day)</option>
+            <option value="heavy">Heavy — SuperGrok Premium (~500/day)</option>
+            <option value="pro">Pro — acc trả phí cao cấp</option>
+          </select>
+          <p className="text-xs text-slate-500 mt-1">
+            Chỉ là label phân loại để dễ quản lý — không ảnh hưởng routing.
+            Có thể đổi sau ở row profile.
+          </p>
         </div>
         <div>
           <label className="text-sm font-medium">{t("grok.profiles_modal_max_jobs")}</label>

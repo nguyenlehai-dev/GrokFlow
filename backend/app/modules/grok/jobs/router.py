@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, File as FastapiFile, Query, Response, UploadFile, status
+from fastapi import APIRouter, File as FastapiFile, Header, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -15,6 +15,7 @@ from app.modules.entitlements.service import (
     get_effective_entitlements,
 )
 from app.modules.grok.files import service as files_service
+from app.services.domain_quota import check_and_reserve as reserve_domain_quota
 
 from . import service
 from .schemas import JobCreate, JobLogOut, JobOut, JobUpdate
@@ -65,7 +66,10 @@ async def list_jobs(
 
 
 @router.post("", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def create_job(payload: JobCreate, user: CurrentUser, db: DbSession) -> Job:
+async def create_job(
+    payload: JobCreate, user: CurrentUser, db: DbSession,
+    x_tool_install_id: str | None = Header(default=None, alias="X-Tool-Install-Id"),
+) -> Job:
     options = dict(payload.options or {})
     if payload.size: options["size"] = payload.size
     if payload.model: options["model"] = payload.model
@@ -96,6 +100,13 @@ async def create_job(payload: JobCreate, user: CurrentUser, db: DbSession) -> Jo
     except EntitlementDenied as e:
         raise EntitlementBlocked(e.code, e.message)
 
+    # Daily-quota gate: tool install quota overrides domain quota when set,
+    # otherwise falls back to domain. Plan-level entitlements above govern
+    # WHAT the user can do; this gate caps THROUGHPUT (e.g. reseller bought
+    # 500/day, sub-resold 100/day to kiosk Khách 1). No-op for super_admin
+    # (domain_id+tool_install_id both NULL) or when no scope has a cap.
+    await reserve_domain_quota(db, user.domain_id, user.tool_install_id)
+
     return await service.create_job(
         db,
         user_id=user.id,
@@ -105,6 +116,7 @@ async def create_job(payload: JobCreate, user: CurrentUser, db: DbSession) -> Jo
         profile_id=payload.profile_id,
         project_id=payload.project_id,
         options=options or None,
+        tool_install_id_str=x_tool_install_id,
     )
 
 

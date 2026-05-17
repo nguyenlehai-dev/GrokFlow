@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Integer, String, Text, func,
+    Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -76,6 +76,41 @@ class Domain(Base, TimestampMixin):
         JSONType, nullable=False,
         default=lambda: ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"],
     )
+    # Daily job quota. NULL = unlimited (legacy/default). When set, the
+    # tenant can submit at most this many Grok jobs per quota period,
+    # summed across all its users. Counter lives in DomainQuotaPeriod
+    # below; period rollover is controlled by quota_reset_hour_utc.
+    jobs_quota_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Hour of day (UTC, 0-23) at which the daily quota counter rolls over.
+    # Default 0 = midnight UTC. Vietnam-based tenants who want "midnight
+    # local" rollover should set this to 17 (UTC = +7h behind Vietnam).
+    quota_reset_hour_utc: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+
+
+class DomainQuotaPeriod(Base):
+    """Per-(domain, date) counter for the daily jobs quota.
+
+    A row is materialised lazily on the first job submit for that day via
+    INSERT … ON CONFLICT DO UPDATE jobs_used = jobs_used + 1. Old rows
+    stay around indefinitely for analytics — `idle_cleanup` can prune
+    rows older than N days later if storage becomes a concern.
+    """
+    __tablename__ = "domain_quota_periods"
+
+    domain_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    period_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    jobs_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
 
 
 class Role(Base, TimestampMixin):
@@ -89,9 +124,17 @@ class Role(Base, TimestampMixin):
     __tablename__ = "roles"
 
     id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
-    domain_id: Mapped[uuid.UUID] = mapped_column(
+    # A role lives in EXACTLY ONE scope dimension — domain OR tool install.
+    # The login + /me code reads whichever is set; admin UI keeps the two
+    # role pools separate so a "kiosk_view" role doesn't accidentally
+    # leak onto web users (and vice versa).
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("domains.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        nullable=True, index=True,
+    )
+    tool_install_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("tool_installs.id", ondelete="CASCADE"),
+        nullable=True, index=True,
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)

@@ -6,7 +6,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
-from app.models import Job, JobLog, GrokProject, Profile, ProjectDomainAssignment, ProjectUserAssignment, User
+from app.models import (
+    Job, JobLog, GrokProject, Profile,
+    ProjectDomainAssignment, ProjectToolInstallAssignment, ProjectUserAssignment,
+    ToolInstall, User,
+)
 from app.modules.admin.audit import service as audit
 
 
@@ -17,6 +21,7 @@ async def _resolve_profile_for_job(
     user_id: uuid.UUID,
     provider: str,
     requester_domain_id: uuid.UUID | None = None,
+    requester_tool_install_id: uuid.UUID | None = None,
     excluded_profile_ids: list[uuid.UUID] | list[str] | None = None,
     job_type: str = "image",
 ) -> Profile | None:
@@ -48,6 +53,23 @@ async def _resolve_profile_for_job(
         )
         .scalar_subquery()
         if requester_domain_id is not None
+        else None
+    )
+    # Parallel for tool installs. When the request comes from a desktop
+    # client (X-Tool-Install-Id header), the profile pool is restricted to
+    # profiles whose GrokProjects are assigned to THIS install. Install
+    # scope is STRICTER than domain scope — there's no owner-in-domain
+    # fallback (installs don't own profiles), so a tool-scoped user with
+    # zero assignments sees zero profiles. Admin must explicitly grant.
+    assigned_to_install = (
+        select(GrokProject.profile_id)
+        .join(ProjectToolInstallAssignment, ProjectToolInstallAssignment.project_id == GrokProject.id)
+        .where(
+            ProjectToolInstallAssignment.tool_install_id == requester_tool_install_id,
+            ProjectToolInstallAssignment.enabled.is_(True),
+        )
+        .scalar_subquery()
+        if requester_tool_install_id is not None
         else None
     )
 
@@ -87,6 +109,21 @@ async def _resolve_profile_for_job(
             ).first()
             if not visible:
                 raise PermissionDenied("Profile not assigned to your domain")
+        # Tool-install visibility check — for desktop clients, profile must
+        # be reachable via a GrokProject assigned to THIS install.
+        if requester_tool_install_id is not None:
+            visible = (await db.execute(
+                select(GrokProject.id)
+                .join(ProjectToolInstallAssignment, ProjectToolInstallAssignment.project_id == GrokProject.id)
+                .where(
+                    GrokProject.profile_id == profile.id,
+                    ProjectToolInstallAssignment.tool_install_id == requester_tool_install_id,
+                    ProjectToolInstallAssignment.enabled.is_(True),
+                )
+                .limit(1)
+            )).first()
+            if not visible:
+                raise PermissionDenied("Profile chưa được gán cho máy desktop này")
         return profile
 
     # Auto-pick: any logged_in / running_job admin-pool profile for this provider.
@@ -104,7 +141,11 @@ async def _resolve_profile_for_job(
     # still see them (that's their whole purpose).
     if job_type == "video":
         where_clauses.append(Profile.allows_video.is_(True))
-    if assigned_to_domain is not None:
+    if assigned_to_install is not None:
+        # Strictest scope: install. No owner fallback — admin must
+        # explicitly assign a project to this install for it to show up.
+        where_clauses.append(Profile.id.in_(assigned_to_install))
+    elif assigned_to_domain is not None:
         where_clauses.append(
             (User.domain_id == requester_domain_id)
             | Profile.id.in_(assigned_to_domain)
@@ -201,6 +242,7 @@ async def create_job(
     options: dict[str, Any] | None,
     project_id: uuid.UUID | None = None,
     api_key_id: uuid.UUID | None = None,
+    tool_install_id_str: str | None = None,
 ) -> Job:
     # Look up requester's domain — used to filter the pool down to profiles
     # super_admin has loaned to this tenant + legacy same-domain profiles.
@@ -212,9 +254,22 @@ async def create_job(
         if requester and requester.role != "super_admin"
         else None
     )
+    # Resolve the desktop install (if the request came in via X-Tool-Install-Id
+    # header on the HTTP handler). super_admin still bypasses install scoping
+    # so ops can run jobs from the kiosk during debugging.
+    requester_tool_install_id: uuid.UUID | None = None
+    if tool_install_id_str and requester and requester.role != "super_admin":
+        install = (await db.execute(
+            select(ToolInstall).where(ToolInstall.tool_id == tool_install_id_str)
+        )).scalar_one_or_none()
+        if install and install.status == "active":
+            requester_tool_install_id = install.id
+
     profile = await _resolve_profile_for_job(
         db, requested_id=profile_id, user_id=user_id, provider=provider,
-        requester_domain_id=requester_domain_id, job_type=job_type,
+        requester_domain_id=requester_domain_id,
+        requester_tool_install_id=requester_tool_install_id,
+        job_type=job_type,
     )
 
     # Pick the specific GrokProject the worker should use. Priority:
@@ -253,7 +308,25 @@ async def create_job(
     if picked_project is None:
         picked_project = (await db.execute(user_pin_q)).scalar_one_or_none()
 
-    # 2) domain-wide fallback (tenant path)
+    # 2a) tool-install-wide fallback (desktop kiosk path). When a request
+    # comes from a registered desktop install we prefer the install's
+    # assignments over the domain's, since installs are the more specific
+    # scope. Falls through to (2b) domain if no install assignment exists.
+    if picked_project is None and requester_tool_install_id is not None:
+        install_q = (
+            select(GrokProject)
+            .join(ProjectToolInstallAssignment, ProjectToolInstallAssignment.project_id == GrokProject.id)
+            .where(
+                GrokProject.profile_id == profile.id,
+                ProjectToolInstallAssignment.tool_install_id == requester_tool_install_id,
+                ProjectToolInstallAssignment.enabled.is_(True),
+            )
+            .order_by(GrokProject.created_at.asc())
+            .limit(1)
+        )
+        picked_project = (await db.execute(install_q)).scalar_one_or_none()
+
+    # 2b) domain-wide fallback (tenant web path)
     if picked_project is None and requester_domain_id is not None:
         domain_q = (
             select(GrokProject)
