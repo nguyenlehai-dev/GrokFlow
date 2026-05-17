@@ -3,6 +3,7 @@ import {
   LayoutDashboard, Key, CreditCard, ScrollText, Shield, Settings,
   UserCog, Globe, Wrench, Rocket, Images, Film, MessageSquare,
   Wallet, BadgeDollarSign, LogIn, Sparkles, Workflow, Music,
+  MonitorSmartphone,
 } from "lucide-react";
 
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
@@ -46,6 +47,7 @@ export const moduleManifest: FrontendModule = {
     { path: "admin/plans",     element: lazyPage(() => import("../views/AdminPlansPage"), "AdminPlansPage") },
     { path: "admin/billing",   element: lazyPage(() => import("../views/AdminBillingPage"), "AdminBillingPage") },
     { path: "admin/domains",   element: lazyPage(() => import("../views/AdminDomainsPage"), "AdminDomainsPage") },
+    { path: "admin/tool-installs", element: lazyPage(() => import("../views/AdminToolInstallsPage"), "AdminToolInstallsPage") },
     { path: "admin/login-templates", element: lazyPage(() => import("../views/AdminLoginTemplatesPage"), "AdminLoginTemplatesPage") },
     { path: "admin/git",       element: lazyPage(() => import("../views/AdminGitPage"), "AdminGitPage") },
     { path: "admin/legacy",    element: lazyPage(() => import("../views/AdminPage"), "AdminPage") },
@@ -115,6 +117,7 @@ export const moduleManifest: FrontendModule = {
         { type: "link", to: "/admin/users", label: "Admin", icon: UserCog },
         { type: "link", to: "/admin/roles", label: "Roles", icon: Shield },
         { type: "link", to: "/admin/domains", label: "Domains", icon: Globe, superOnly: true },
+        { type: "link", to: "/admin/tool-installs", label: "Tool Installs", icon: MonitorSmartphone, superOnly: true },
         { type: "link", to: "/admin/login-templates", label: "Login Templates", icon: LogIn, superOnly: true },
       ],
     },

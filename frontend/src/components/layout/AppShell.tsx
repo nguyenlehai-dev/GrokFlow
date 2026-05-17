@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, LogOut, Menu, X } from "lucide-react";
 
 import { useAuthStore, userCanSeePath } from "@/core/auth/store";
@@ -35,6 +35,11 @@ const NAV_KEY_I18N: Record<string, string> = {
 export function AppShell() {
   useDocumentTitle();
   const { user, clear } = useAuthStore();
+  // Tool-user redirect lives in ProtectedRoute (wraps this component).
+  // Don't duplicate the guard here — two Navigate-returning paths in the
+  // same render tree race and trigger React's "Maximum update depth
+  // exceeded" loop. ProtectedRoute is the single source of truth.
+
   const NAV: NavEntry[] = useMemo(() => getAuthedNav(user?.role), [user?.role]);
 
   // Sync i18next with the user's saved locale once /me has populated.

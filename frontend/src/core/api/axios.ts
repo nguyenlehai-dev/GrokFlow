@@ -49,7 +49,20 @@ api.interceptors.response.use(
   (err) => {
     const status = err.response?.status;
     const detail = err.response?.data?.detail;
-    if (status === 401 && !location.pathname.startsWith("/login")) {
+    const code = detail?.code;
+    const url: string = err.config?.url ?? "";
+    // 401 = token gone bad. 403 with a scope-mismatch code on /me means
+    // the user's tool/domain scope is incompatible with where they're
+    // calling from (e.g. tool user in browser, or web user in desktop).
+    // Both end the same way: clear local auth + bounce to /login so
+    // they re-authenticate from a valid surface.
+    const scopeMismatch =
+      status === 403 && url.includes("/api/auth/me") && (
+        code === "wrong_scope_tool_user"
+        || code === "wrong_scope_domain_user"
+        || code === "wrong_tool_install"
+      );
+    if ((status === 401 || scopeMismatch) && !location.pathname.startsWith("/login")) {
       useAuthStore.getState().clear();
       location.href = "/login";
     } else if (status && status >= 400 && detail?.message) {

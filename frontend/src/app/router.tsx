@@ -9,6 +9,7 @@ import { LoginPage } from "@/modules/auth/views/LoginPage";
 import { RegisterPage } from "@/modules/auth/views/RegisterPage";
 import { LandingPage } from "@/modules/landing/views/LandingPage";
 import { TryImagePage } from "@/modules/landing/views/TryImagePage";
+import { lazyPage } from "./lazyPage";
 
 import { getAuthedRoutes } from "./moduleRegistry";
 
@@ -55,6 +56,19 @@ export const router = createBrowserRouter(
   {
     path: "/try/image",
     element: <TryImagePage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  // Branded full-screen workspace for desktop kiosk users. Lives OUTSIDE
+  // the AppShell so the admin sidebar + header never render — the page
+  // owns the entire viewport. Still authed (ProtectedRoute) but unscoped
+  // by allowed_pages since it's the kiosk's primary surface.
+  {
+    path: "/create-video-pro",
+    element: (
+      <ProtectedRoute>
+        {lazyPage(() => import("@/modules/grok/views/CreateVideoProPage"), "CreateVideoProPage")}
+      </ProtectedRoute>
+    ),
     errorElement: <RouteErrorBoundary />,
   },
   {

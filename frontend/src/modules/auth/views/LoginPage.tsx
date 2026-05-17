@@ -28,7 +28,13 @@ export function LoginPage({ forceTemplate }: { forceTemplate?: "default" | "admi
   const domainTemplate = useDomainStore((s) => s.config?.login_template) ?? "default";
   const firstAllowedPath = useDomainStore((s) => s.firstAllowedPath);
 
-  if (token) return <Navigate to={firstAllowedPath()} replace />;
+  // Already-logged-in user hitting /login: send them where they belong.
+  // Tool kiosk → creator workspace; everyone else → their normal landing.
+  const me = useAuthStore.getState().user;
+  if (token) {
+    const dest = me?.tool_install_id ? "/create-video-pro" : firstAllowedPath();
+    return <Navigate to={dest} replace />;
+  }
 
   const onSubmit = handleSubmit(async (values: LoginFormValues) => {
     setError(null);
@@ -36,7 +42,15 @@ export function LoginPage({ forceTemplate }: { forceTemplate?: "default" | "admi
       const data = await authService.login(values);
       const me = await authService.meWithToken(data.access_token);
       setAuth(data.access_token, me);
-      const target = (me?.role === "admin" || me?.role === "super_admin") ? "/dashboard" : firstAllowedPath();
+      // Tool-scoped users (desktop kiosk) land directly on the branded
+      // creator workspace, bypassing the admin sidebar/dashboard. Web
+      // admins keep their existing flow.
+      const target =
+        me?.tool_install_id
+          ? "/create-video-pro"
+          : (me?.role === "admin" || me?.role === "super_admin")
+            ? "/dashboard"
+            : firstAllowedPath();
       navigate(target);
     } catch (e: any) {
       setError(e?.response?.data?.detail?.message ?? t("auth.login_failed", "Login failed"));
