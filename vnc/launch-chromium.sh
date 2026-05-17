@@ -34,15 +34,30 @@ URL="${STARTUP_URL:-https://grok.com/}"
 # Explicit unset of any flag inheritance.
 unset CHROMIUM_FLAGS
 
-# Optional outbound proxy (typically Cloudflare WARP, set up via
-# deploy/install_warp_proxy.sh). When set, chromium routes ALL its
-# traffic through the proxy — Cloudflare WARP makes the requests look
-# like they're coming from inside Cloudflare's own network so Turnstile
-# challenges relax significantly. Empty = direct connection.
+# Outbound proxy. Three sources, in priority order:
+#   1. $GROK_HTTP_PROXY env var explicitly set by caller
+#   2. Sibling Cloudflare WARP daemon (warp-init.sh in this container)
+#      listening on 127.0.0.1:40000 — wait up to 20s for it to bind
+#   3. None — direct connection
+# WARP makes outbound look like it's coming from Cloudflare's own
+# network so Turnstile / bot-walls relax dramatically.
 PROXY_ARG=""
 if [[ -n "${GROK_HTTP_PROXY:-}" ]]; then
     PROXY_ARG="--proxy-server=${GROK_HTTP_PROXY}"
-    echo "[launch] chromium will route via proxy: ${GROK_HTTP_PROXY}" >&2
+    echo "[launch] chromium will route via env proxy: ${GROK_HTTP_PROXY}" >&2
+else
+    # Wait briefly for the sibling WARP supervisord program — chromium
+    # starts at priority 400 while warp at 50, but warp's connect step
+    # can lag the priority gate. 20s is the same budget warp-init uses.
+    for _ in $(seq 1 20); do
+        if ss -tln 2>/dev/null | grep -q "127.0.0.1:40000"; then
+            PROXY_ARG="--proxy-server=socks5://127.0.0.1:40000"
+            echo "[launch] using local WARP proxy 127.0.0.1:40000" >&2
+            break
+        fi
+        sleep 1
+    done
+    [[ -z "$PROXY_ARG" ]] && echo "[launch] no WARP proxy reachable — direct connection" >&2
 fi
 
 exec /usr/lib/chromium/chromium \
