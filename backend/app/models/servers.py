@@ -59,6 +59,44 @@ class Server(Base, TimestampMixin):
     monitor_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true",
     )
+    # 5-field cron string ("min hour day month weekday") in UTC. NULL =
+    # auto-reboot disabled. Worker checks every minute; when current UTC
+    # matches the cron and uptime >= reboot_min_uptime_hours, fires a
+    # graceful `shutdown -r +1` over SSH.
+    reboot_schedule_cron: Mapped[str | None] = mapped_column(String(100))
+    # Refuse to auto-reboot if the server has been up less than this many
+    # hours. Prevents reboot loops if monitoring flaps. Default 24h.
+    reboot_min_uptime_hours: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=24, server_default="24",
+    )
+
+
+class ServerRebootHistory(Base):
+    """Audit trail of every reboot (scheduled or manual) — populated by
+    both the scheduler worker and the manual /actions/reboot endpoint.
+
+    Status lifecycle:
+      queued → running → success | failed
+    The worker uses the most recent row's started_at to enforce the
+    "don't double-fire same schedule" guard (when cron matches twice
+    within a minute due to clock drift)."""
+    __tablename__ = "server_reboot_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("servers.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    trigger: Mapped[str] = mapped_column(String(20), nullable=False)  # scheduled | manual
+    triggered_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", server_default="queued")
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ServerMetricHistory(Base):

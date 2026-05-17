@@ -7,13 +7,14 @@ specific commands).
 """
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, status as http_status
 from sqlalchemy import select  # noqa: F401  — kept for future filters
 
 from app.core.deps import DbSession, SuperAdminUser
 from app.core.exceptions import InvalidPayload, NotFound
-from app.models import Server
+from app.models import Server, ServerRebootHistory
 from app.modules.admin.audit import service as audit
 from app.modules.servers.schemas import (
     ServerAction,
@@ -62,10 +63,25 @@ async def run_action(
     if verb == "reinstall":
         raise InvalidPayload("Reinstall chưa được tích hợp — cần PXE/IPMI hook.")
 
+    # Reboot gets a history row regardless of how the SSH call resolves
+    # — so the audit trail captures the attempt + outcome together.
+    reboot_row: ServerRebootHistory | None = None
+    if verb == "reboot":
+        reboot_row = ServerRebootHistory(
+            server_id=s.id, trigger="manual", triggered_by=admin.id,
+            status="running",
+        )
+        db.add(reboot_row)
+        await db.flush()
+
     try:
         res = run_sudo(s, cmd, timeout=15.0)
     except SshConnectError as e:
         s.status = "unreachable"
+        if reboot_row is not None:
+            reboot_row.status = "failed"
+            reboot_row.error_message = str(e)
+            reboot_row.finished_at = datetime.now(timezone.utc)
         await db.commit()
         return ServerActionResponse(ok=False, message=str(e), status="unreachable")
 
@@ -73,6 +89,10 @@ async def run_action(
     # treat rc==0 OR rc==255 (SSH channel killed by reboot) as success.
     ok = res.rc in (0, 255)
     s.status = new_status if ok else s.status
+    if reboot_row is not None:
+        reboot_row.status = "success" if ok else "failed"
+        reboot_row.error_message = None if ok else (res.stderr or "")[:500]
+        reboot_row.finished_at = datetime.now(timezone.utc)
     await audit.log_action(
         db, user_id=admin.id, action=f"server_{verb}",
         target_type="server", target_id=s.id,

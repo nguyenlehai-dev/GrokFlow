@@ -27,12 +27,15 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
+from croniter import CroniterBadCronError, croniter
 from sqlalchemy import delete, select
 
 from app.core.database import SessionLocal
-from app.models import Notification, Server, ServerAlert, ServerMetricHistory
+from app.models import (
+    Notification, Server, ServerAlert, ServerMetricHistory, ServerRebootHistory,
+)
 from app.modules.servers.services.metrics import probe
-from app.modules.servers.services.ssh import SshConnectError
+from app.modules.servers.services.ssh import SshConnectError, run_sudo
 
 
 log = logging.getLogger("server-monitor")
@@ -297,6 +300,119 @@ async def _process_server(server: Server) -> None:
         await db.commit()
 
 
+# ─── Reboot scheduler ───────────────────────────────────────────────────
+
+
+def _cron_should_fire(cron_str: str, now: datetime) -> bool:
+    """True when `now` falls within the minute that the cron expression
+    matches. We give a ±30s tolerance so a slightly-late loop pass still
+    catches the right minute."""
+    try:
+        it = croniter(cron_str, now - timedelta(seconds=30))
+        next_fire = it.get_next(datetime)
+        # next_fire is naive UTC from croniter — make it tz-aware.
+        if next_fire.tzinfo is None:
+            next_fire = next_fire.replace(tzinfo=timezone.utc)
+        return abs((next_fire - now).total_seconds()) <= 30
+    except (CroniterBadCronError, ValueError):
+        return False
+
+
+def _ssh_reboot(server: Server) -> tuple[bool, str]:
+    """Issue `sudo shutdown -r +1` over SSH. Returns (ok, message)."""
+    try:
+        res = run_sudo(server, "shutdown -r +1", timeout=15.0)
+        ok = res.rc in (0, 255)  # 255 = SSH chan killed by reboot — success
+        msg = (res.stderr or res.stdout or "").strip()[:300]
+        return ok, msg
+    except Exception as exc:  # noqa: BLE001
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+async def _maybe_fire_reboot(server: Server) -> None:
+    """For one server, decide whether to auto-reboot now.
+
+    Guards:
+      • cron must match the current minute (±30s)
+      • server uptime (from last_seen_at gap) ≥ reboot_min_uptime_hours
+        — we use cached `last_seen_at` instead of probing again
+      • no other reboot started in the last 5 minutes (avoid double-fire
+        across two loop passes that span a minute boundary)"""
+    if not server.reboot_schedule_cron:
+        return
+    now = datetime.now(timezone.utc)
+    if not _cron_should_fire(server.reboot_schedule_cron, now):
+        return
+
+    async with SessionLocal() as db:
+        # Re-check ServerRebootHistory inside a single transaction to
+        # prevent two scheduler passes racing on the same fire.
+        recent = (await db.execute(
+            select(ServerRebootHistory).where(
+                ServerRebootHistory.server_id == server.id,
+                ServerRebootHistory.started_at >= now - timedelta(minutes=5),
+            )
+        )).scalars().first()
+        if recent is not None:
+            log.info("skip reboot %s: another reboot started at %s",
+                     server.label, recent.started_at)
+            return
+
+        # Uptime gate — refuse to reboot a box that just came up.
+        if server.last_seen_at:
+            last_seen = server.last_seen_at
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            hours_up = (now - last_seen).total_seconds() / 3600
+            # `last_seen_at` is "last successful probe", not "last boot",
+            # so it's a lower bound on real uptime. Good enough for the
+            # safety guard — we'd rather be conservative.
+            if hours_up < server.reboot_min_uptime_hours:
+                log.info("skip reboot %s: uptime %.1fh < min %dh",
+                         server.label, hours_up, server.reboot_min_uptime_hours)
+                return
+
+        # Insert the history row BEFORE firing so a crash mid-SSH is still
+        # visible in the audit.
+        row = ServerRebootHistory(
+            id=uuid.uuid4(), server_id=server.id,
+            trigger="scheduled", status="running",
+        )
+        db.add(row)
+        await db.commit()
+
+    log.info("auto-reboot firing for %s (cron=%s)",
+             server.label, server.reboot_schedule_cron)
+    ok, msg = await asyncio.to_thread(_ssh_reboot, server)
+
+    async with SessionLocal() as db:
+        # Re-fetch the history row we just inserted to finalize.
+        fresh = await db.get(ServerRebootHistory, row.id)
+        if fresh is not None:
+            fresh.status = "success" if ok else "failed"
+            fresh.error_message = None if ok else msg
+            fresh.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+        # Also emit a Notification so super_admin sees the scheduled
+        # reboot in the bell.
+        from app.models import User
+        sup_ids = [
+            u.id for u in (await db.execute(
+                select(User).where(User.role == "super_admin")
+            )).scalars().all()
+        ]
+        for uid in sup_ids:
+            icon = "🔄" if ok else "❌"
+            db.add(Notification(
+                user_id=uid, kind="server_reboot",
+                title=f"{icon} {server.label}: auto-reboot",
+                body=msg or ("Reboot fired" if ok else "Reboot failed"),
+                target_url=f"/servers/{server.id}",
+                severity="info" if ok else "warning",
+            ))
+        await db.commit()
+
+
 async def _housekeep() -> None:
     """Prune metrics older than `HISTORY_RETENTION_DAYS`."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=HISTORY_RETENTION_DAYS)
@@ -327,6 +443,13 @@ async def _loop_once() -> None:
     # I/O is fanned out across the default executor pool.
     await asyncio.gather(
         *[_process_server(s) for s in servers],
+        return_exceptions=True,
+    )
+
+    # Reboot scheduler runs in the same pass — same servers list, no extra
+    # query. Each call is a no-op when the cron doesn't fire this minute.
+    await asyncio.gather(
+        *[_maybe_fire_reboot(s) for s in servers],
         return_exceptions=True,
     )
 
