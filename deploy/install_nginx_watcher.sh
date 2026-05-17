@@ -44,11 +44,19 @@ EOF
 
 cat > "$PATH_UNIT_PATH" <<EOF
 [Unit]
-Description=Watch GrokFlow VNC map for changes
+Description=Watch GrokFlow nginx vhost directory for changes
 After=nginx.service
 
 [Path]
-PathModified=$MAP_FILE
+# PathChanged on the directory fires when any *.conf inside it is
+# modified, created, or removed — covers both _vnc_map.conf (the
+# auto-generated short_id → container IP map) AND the per-domain
+# vhost files written by services/nginx_sync.write_vhost(). Without
+# the directory-level watch, adding a domain in the admin UI created
+# the vhost file but never reloaded nginx, so the new hostname stayed
+# dark until something else (Auto-login spawning a VNC) happened to
+# touch _vnc_map.conf.
+PathChanged=$(dirname "$MAP_FILE")
 Unit=grokflow-nginx-reload.service
 
 [Install]
