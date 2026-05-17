@@ -16,19 +16,27 @@ import { projectsService } from "../services/projects.service";
  *  here but the job resolver treats them as if they didn't exist.
  */
 export function ProjectDomainAssignRow({
-  domain, checked, disabled, onToggle, onToggleDisabled,
+  domain, checked, disabled = false, onToggle, onToggleDisabled,
   selectedUserIds, disabledUserIds, onToggleUser, onToggleUserDisabled,
 }: {
   domain: Domain;
   checked: boolean;
-  disabled: boolean;
+  // Disabled state + handlers are optional so consumers that don't
+  // care about per-row suspension (e.g. ProjectAutoProvisionModal,
+  // which creates fresh assignments) can omit them.
+  disabled?: boolean;
   onToggle: () => void;
-  onToggleDisabled: () => void;
+  onToggleDisabled?: () => void;
   selectedUserIds: Set<string>;
-  disabledUserIds: Set<string>;
+  disabledUserIds?: Set<string>;
   onToggleUser: (id: string) => void;
-  onToggleUserDisabled: (id: string) => void;
+  onToggleUserDisabled?: (id: string) => void;
 }) {
+  // Defaults for the optional props so the rest of the body can treat
+  // them uniformly.
+  const _disabledUserIds = disabledUserIds ?? new Set<string>();
+  const _onToggleDisabled = onToggleDisabled ?? (() => {});
+  const _onToggleUserDisabled = onToggleUserDisabled ?? (() => {});
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Lazy-load users only when the row is expanded the first time, so
@@ -79,7 +87,7 @@ export function ProjectDomainAssignRow({
         {checked && (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleDisabled(); }}
+            onClick={(e) => { e.stopPropagation(); _onToggleDisabled(); }}
             className={`p-1 rounded transition ${
               disabled
                 ? "text-amber-600 hover:bg-amber-50"
@@ -114,7 +122,7 @@ export function ProjectDomainAssignRow({
             <ul className="space-y-1">
               {users!.map((u) => {
                 const pinned = selectedUserIds.has(u.id);
-                const userDisabled = disabledUserIds.has(u.id);
+                const userDisabled = _disabledUserIds.has(u.id);
                 return (
                   <li key={u.id}>
                     <div
@@ -142,7 +150,7 @@ export function ProjectDomainAssignRow({
                       {pinned && (
                         <button
                           type="button"
-                          onClick={() => onToggleUserDisabled(u.id)}
+                          onClick={() => _onToggleUserDisabled(u.id)}
                           className={`p-0.5 rounded ${
                             userDisabled
                               ? "text-amber-600 hover:bg-amber-50"
