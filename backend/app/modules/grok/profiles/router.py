@@ -468,6 +468,22 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
     # Tell nginx where this new container lives so the iframe URL routes.
     # No-op when the host vhost dir isn't mounted (dev / tests).
     refresh_vnc_map()
+    # Schedule a second refresh ~4s later to catch any race where the
+    # container's NetworkSettings.Networks wasn't populated yet at the
+    # moment of the first refresh — most common when the user clicks
+    # Auto-login on multiple profiles in quick succession and Docker's
+    # IPAM is briefly behind. asyncio.create_task is fire-and-forget;
+    # the second refresh is best-effort and never blocks the response.
+    import asyncio as _asyncio
+
+    async def _delayed_refresh() -> None:
+        await _asyncio.sleep(4)
+        try:
+            refresh_vnc_map()
+        except Exception:  # noqa: BLE001 — never crash on the followup
+            pass
+
+    _asyncio.create_task(_delayed_refresh())
 
     # Per-profile noVNC route. Nginx proxies /vnc/<short-id>/ → <container>:6901
     # `path` param tells noVNC to open WS at /vnc/<short>/websockify (its default
