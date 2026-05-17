@@ -482,11 +482,17 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
     # preflight failures all at once. Relative is portable across tenants.
     # Every tenant vhost already routes /vnc/<short>/* to the kasmweb
     # container via the shared _vnc_map.conf.
-    # resize=scale → noVNC scales the remote framebuffer to fit the iframe,
-    # so the desktop is fully visible regardless of the iframe size.
+    # resize=remote → tell the VNC server to resize its framebuffer to
+    # match the iframe's pixel dimensions. We prefer this over `scale`
+    # (CSS-scaling the canvas) because the latter has well-known
+    # coordinate-translation bugs: when the user clicks on a small UI
+    # element (e.g. a Cloudflare Turnstile checkbox), the mouse position
+    # noVNC reports back to x11vnc can be off by several pixels and the
+    # click misses. `remote` requires ExtDesktopSize support which kasmweb
+    # / our chrome-vnc image both ship with.
     iframe_url = (
         f"/vnc/{short}/vnc.html"
-        f"?autoconnect=1&resize=scale&path=vnc/{short}/websockify"
+        f"?autoconnect=1&resize=remote&path=vnc/{short}/websockify"
     )
     return VncSessionOut(
         profile_id=profile.id,

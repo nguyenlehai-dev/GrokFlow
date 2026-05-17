@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor nginx-light \
     fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
     ca-certificates curl wget procps \
+    xdotool \
+    python3 python3-websocket \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 -s /bin/bash vncuser \
     && mkdir -p /config /var/log/supervisor /run/nginx /var/lib/nginx/body \
@@ -28,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY supervisord.conf /etc/supervisor/conf.d/grokflow.conf
 COPY entrypoint.sh /entrypoint.sh
 COPY launch-chromium.sh /launch-chromium.sh
+COPY stealth_injector.py /usr/local/bin/stealth_injector.py
 COPY cdp-proxy.conf /etc/nginx/cdp-proxy.conf
 # Debian noVNC strips package.json (which ui.js fetches for version display).
 # Add a stub so the browser console doesn't spam 404s + "Couldn't fetch
