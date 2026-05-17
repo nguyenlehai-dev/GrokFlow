@@ -146,6 +146,15 @@ def _send(ws, msg_id: int, method: str, params: dict | None = None) -> dict:
 
 
 def _inject_into_target(target: dict) -> bool:
+    """Register the stealth script + force a reload.
+
+    `Page.addScriptToEvaluateOnNewDocument` only takes effect on the NEXT
+    navigation — chromium's initial load of grok.com already ran CF's JS
+    before our patches landed, so the current page never sees them. We
+    issue `Page.reload(ignoreCache=true)` immediately after registering
+    so the script applies on the second load (the cf_clearance challenge
+    will be re-issued, but with stealth applied this time).
+    """
     ws_url = target.get("webSocketDebuggerUrl")
     if not ws_url:
         return False
@@ -156,6 +165,11 @@ def _inject_into_target(target: dict) -> bool:
     try:
         _send(ws, 1, "Page.enable")
         _send(ws, 2, "Page.addScriptToEvaluateOnNewDocument", {"source": STEALTH_JS})
+        # Only reload if the page is already loaded — otherwise we race
+        # the initial navigation and may interrupt user-triggered loads.
+        url = (target.get("url") or "").lower()
+        if url.startswith("http"):
+            _send(ws, 3, "Page.reload", {"ignoreCache": True})
         return True
     finally:
         try:
