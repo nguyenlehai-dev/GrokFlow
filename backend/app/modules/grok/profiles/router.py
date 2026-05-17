@@ -58,6 +58,7 @@ async def _assert_profile_accessible(
         .where(
             GrokProject.profile_id == profile.id,
             ProjectDomainAssignment.domain_id == admin.domain_id,
+            ProjectDomainAssignment.enabled.is_(True),
         )
         .limit(1)
     )).first()
@@ -167,7 +168,10 @@ def _profile_ids_assigned_to_domain(domain_id):
     return (
         select(GrokProject.profile_id)
         .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
-        .where(ProjectDomainAssignment.domain_id == domain_id)
+        .where(
+            ProjectDomainAssignment.domain_id == domain_id,
+            ProjectDomainAssignment.enabled.is_(True),
+        )
         .scalar_subquery()
     )
 

@@ -100,6 +100,10 @@ class ProjectUserAssignment(Base):
         UUIDType, ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    # Soft-disable. When False the resolver skips this assignment as if
+    # the row didn't exist — lets super_admin suspend a user without
+    # destroying the assignment row (and its created_at audit trail).
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )
@@ -128,6 +132,10 @@ class ProjectDomainAssignment(Base):
         UUIDType, ForeignKey("domains.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    # Soft-disable. When False the resolver and visibility queries treat
+    # this row as if it doesn't exist. Used by super_admin to temporarily
+    # revoke a tenant's access without losing the assignment config.
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )

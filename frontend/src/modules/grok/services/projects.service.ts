@@ -18,23 +18,23 @@ export const projectsService = {
 
   getDomains: (id: string) =>
     api
-      .get<{ project_id: string; domain_ids: string[] }>(
+      .get<{ project_id: string; domain_ids: string[]; disabled_domain_ids?: string[] }>(
         `/api/grok-projects/${id}/domains`,
       )
       .then((r) => r.data),
 
-  setDomains: (id: string, domain_ids: string[]) =>
-    api.put(`/api/grok-projects/${id}/domains`, { domain_ids }),
+  setDomains: (id: string, domain_ids: string[], disabled_domain_ids: string[] = []) =>
+    api.put(`/api/grok-projects/${id}/domains`, { domain_ids, disabled_domain_ids }),
 
   getUsers: (id: string) =>
     api
-      .get<{ project_id: string; user_ids: string[] }>(
+      .get<{ project_id: string; user_ids: string[]; disabled_user_ids?: string[] }>(
         `/api/grok-projects/${id}/users`,
       )
       .then((r) => r.data),
 
-  setUsers: (id: string, user_ids: string[]) =>
-    api.put(`/api/grok-projects/${id}/users`, { user_ids }),
+  setUsers: (id: string, user_ids: string[], disabled_user_ids: string[] = []) =>
+    api.put(`/api/grok-projects/${id}/users`, { user_ids, disabled_user_ids }),
 
   usersByDomain: (domainId: string) =>
     api

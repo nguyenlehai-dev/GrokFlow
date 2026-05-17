@@ -42,7 +42,10 @@ async def _resolve_profile_for_job(
     assigned_to_domain = (
         select(GrokProject.profile_id)
         .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
-        .where(ProjectDomainAssignment.domain_id == requester_domain_id)
+        .where(
+            ProjectDomainAssignment.domain_id == requester_domain_id,
+            ProjectDomainAssignment.enabled.is_(True),
+        )
         .scalar_subquery()
         if requester_domain_id is not None
         else None
@@ -77,6 +80,7 @@ async def _resolve_profile_for_job(
                     .where(
                         GrokProject.profile_id == profile.id,
                         ProjectDomainAssignment.domain_id == requester_domain_id,
+                        ProjectDomainAssignment.enabled.is_(True),
                     )
                     .limit(1)
                 )
@@ -241,6 +245,7 @@ async def create_job(
         .where(
             GrokProject.profile_id == profile.id,
             ProjectUserAssignment.user_id == user_id,
+            ProjectUserAssignment.enabled.is_(True),
         )
         .order_by(GrokProject.created_at.asc())
         .limit(1)
@@ -256,6 +261,7 @@ async def create_job(
             .where(
                 GrokProject.profile_id == profile.id,
                 ProjectDomainAssignment.domain_id == requester_domain_id,
+                ProjectDomainAssignment.enabled.is_(True),
             )
             .order_by(GrokProject.created_at.asc())
             .limit(1)

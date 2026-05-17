@@ -86,11 +86,21 @@ class ProjectOut(BaseModel):
 
 class ProjectDomainsOut(BaseModel):
     project_id: uuid.UUID
+    # All currently-assigned domains (enabled + disabled together).
+    # FE treats this as the "is assigned" checkbox state.
     domain_ids: list[uuid.UUID]
+    # Subset of `domain_ids` whose `enabled` flag is FALSE. Resolver
+    # ignores these as if they weren't assigned. FE shows them as a
+    # disabled toggle on the same row.
+    disabled_domain_ids: list[uuid.UUID] = []
 
 
 class ProjectDomainsUpdate(BaseModel):
     domain_ids: list[uuid.UUID]
+    # Optional subset that should be persisted with enabled=FALSE. Must
+    # be a subset of domain_ids; entries outside `domain_ids` are
+    # ignored. Missing → all assignments enabled (legacy behavior).
+    disabled_domain_ids: list[uuid.UUID] = []
 
 
 class UserInDomainOut(BaseModel):
@@ -103,10 +113,12 @@ class UserInDomainOut(BaseModel):
 class ProjectUsersOut(BaseModel):
     project_id: uuid.UUID
     user_ids: list[uuid.UUID]
+    disabled_user_ids: list[uuid.UUID] = []
 
 
 class ProjectUsersUpdate(BaseModel):
     user_ids: list[uuid.UUID]
+    disabled_user_ids: list[uuid.UUID] = []
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -270,11 +282,20 @@ async def get_project_domains(
         raise PermissionDenied()
     rows = (
         await db.execute(
-            select(ProjectDomainAssignment.domain_id)
+            select(
+                ProjectDomainAssignment.domain_id,
+                ProjectDomainAssignment.enabled,
+            )
             .where(ProjectDomainAssignment.project_id == project_id)
         )
-    ).scalars().all()
-    return ProjectDomainsOut(project_id=project_id, domain_ids=list(rows))
+    ).all()
+    all_ids = [did for did, _ in rows]
+    disabled_ids = [did for did, ena in rows if not ena]
+    return ProjectDomainsOut(
+        project_id=project_id,
+        domain_ids=all_ids,
+        disabled_domain_ids=disabled_ids,
+    )
 
 
 @router.put("/{project_id}/domains", response_model=ProjectDomainsOut)
@@ -309,8 +330,13 @@ async def set_project_domains(
         ProjectDomainAssignment.__table__.delete()
         .where(ProjectDomainAssignment.project_id == project_id)
     )
+    disabled_set = {d for d in payload.disabled_domain_ids if d in set(payload.domain_ids)}
     for did in payload.domain_ids:
-        db.add(ProjectDomainAssignment(project_id=project_id, domain_id=did))
+        db.add(ProjectDomainAssignment(
+            project_id=project_id,
+            domain_id=did,
+            enabled=did not in disabled_set,
+        ))
 
     await audit.log_action(
         db, user_id=_super.id, action="grok_project_domains_set",
@@ -318,11 +344,14 @@ async def set_project_domains(
         metadata={
             "name": p.name,
             "domain_ids": [str(d) for d in payload.domain_ids],
+            "disabled_domain_ids": [str(d) for d in disabled_set],
         },
     )
     await db.commit()
     return ProjectDomainsOut(
-        project_id=project_id, domain_ids=list(payload.domain_ids),
+        project_id=project_id,
+        domain_ids=list(payload.domain_ids),
+        disabled_domain_ids=list(disabled_set),
     )
 
 
@@ -362,11 +391,20 @@ async def get_project_users(
         raise PermissionDenied()
     rows = (
         await db.execute(
-            select(ProjectUserAssignment.user_id)
+            select(
+                ProjectUserAssignment.user_id,
+                ProjectUserAssignment.enabled,
+            )
             .where(ProjectUserAssignment.project_id == project_id)
         )
-    ).scalars().all()
-    return ProjectUsersOut(project_id=project_id, user_ids=list(rows))
+    ).all()
+    all_ids = [uid for uid, _ in rows]
+    disabled_ids = [uid for uid, ena in rows if not ena]
+    return ProjectUsersOut(
+        project_id=project_id,
+        user_ids=all_ids,
+        disabled_user_ids=disabled_ids,
+    )
 
 
 class ProjectAutoProvisionIn(BaseModel):
@@ -894,8 +932,13 @@ async def set_project_users(
         ProjectUserAssignment.__table__.delete()
         .where(ProjectUserAssignment.project_id == project_id)
     )
+    disabled_set = {u for u in payload.disabled_user_ids if u in set(payload.user_ids)}
     for uid in payload.user_ids:
-        db.add(ProjectUserAssignment(project_id=project_id, user_id=uid))
+        db.add(ProjectUserAssignment(
+            project_id=project_id,
+            user_id=uid,
+            enabled=uid not in disabled_set,
+        ))
 
     await audit.log_action(
         db, user_id=_super.id, action="grok_project_users_set",
@@ -903,9 +946,12 @@ async def set_project_users(
         metadata={
             "name": p.name,
             "user_ids": [str(u) for u in payload.user_ids],
+            "disabled_user_ids": [str(u) for u in disabled_set],
         },
     )
     await db.commit()
     return ProjectUsersOut(
-        project_id=project_id, user_ids=list(payload.user_ids),
+        project_id=project_id,
+        user_ids=list(payload.user_ids),
+        disabled_user_ids=list(disabled_set),
     )
