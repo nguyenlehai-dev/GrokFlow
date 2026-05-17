@@ -24,6 +24,16 @@
 
 set -euo pipefail
 
+# Clear stale ProcessSingleton symlinks from a previous container.
+# These are symlinks like /config/SingletonLock -> <hostname>-<pid>;
+# after a `docker restart` the hostname/PID no longer exists but the
+# symlink stays. Chromium then refuses to start ("Failed to create a
+# ProcessSingleton for your profile directory") and supervisord
+# retry-loops into FATAL state. The symlink owner can be 10001 (vncuser)
+# while the underlying target doesn't exist — `rm -f` on the symlink
+# itself works.
+rm -f /config/SingletonLock /config/SingletonCookie /config/SingletonSocket 2>/dev/null || true
+
 for i in $(seq 1 20); do
     xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
     sleep 0.5
