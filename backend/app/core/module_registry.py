@@ -95,6 +95,7 @@ def _load_modules() -> list[ModuleManifest]:
     from app.modules.admin.notifications import manifest as notifications
     from app.modules.admin.roles import manifest as roles
     from app.modules.admin.settings import manifest as settings
+    from app.modules.admin.tools import manifest as admin_tools
     from app.modules.flow import manifest as flow
     from app.modules.gateway import manifest as gateway
     from app.modules.grok.files import manifest as grok_files
@@ -106,6 +107,8 @@ def _load_modules() -> list[ModuleManifest]:
     from app.modules.landing.public_try import manifest as public_try
     from app.modules.landing.public_v1 import manifest as public_v1
     from app.modules.servers import manifest as servers
+    from app.modules.tool import manifest as tool
+    from app.modules.tool_install import manifest as tool_install
 
     # Order is preserved to keep OpenAPI tag ordering stable across deploys.
     return [
@@ -126,12 +129,17 @@ def _load_modules() -> list[ModuleManifest]:
         domains,
         roles,
         settings,
+        admin_tools,
         git_admin,
         # Other products
         flow,
         gateway,
         # Server management (super_admin)
         servers,
+        # Tool — VIP super_admin dashboard
+        tool,
+        # Tool installs — desktop client registry under Auth admin
+        tool_install,
         # Public / landing
         billing,
         plans_public,
