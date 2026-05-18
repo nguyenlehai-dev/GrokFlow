@@ -37,8 +37,28 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 — startup must never block on this
         pass
 
+    # Subscribe to docker events so any grokflow-vnc-* container start /
+    # die / destroy triggers an immediate map refresh. This is the
+    # tightest defence-in-depth layer — without it, a docker-managed
+    # restart (eg. `restart: unless-stopped` recovering a crashed VNC)
+    # leaves the map stale for up to 15s until the periodic loop tick.
+    # Best-effort: failure here doesn't block startup.
+    import asyncio
+    vnc_events_task: asyncio.Task | None = None
+    try:
+        from app.services.vnc_event_listener import listen_forever
+        vnc_events_task = asyncio.create_task(listen_forever())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] vnc event listener failed to start: {exc}", flush=True)
+
     yield
-    # On shutdown: drain the shared httpx pool so workers exit cleanly.
+    # On shutdown: stop the listener + drain the shared httpx pool.
+    if vnc_events_task is not None:
+        vnc_events_task.cancel()
+        try:
+            await vnc_events_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
     await close_http()
 
 
