@@ -38,7 +38,9 @@ async def listen_forever() -> None:
         print("[vnc-events] docker SDK not installed — listener disabled", flush=True)
         return
 
-    from app.services.nginx_sync import refresh_vnc_map, _VNC_NETWORK
+    from app.services.nginx_sync import (
+        refresh_vnc_map, refresh_vnc_map_until_present, _VNC_NETWORK,
+    )
 
     # Tunable cooldown: when several events arrive in a burst (one start
     # often triggers a network attach event right after), debounce so we
@@ -83,15 +85,28 @@ async def listen_forever() -> None:
                 name = ev.get("Actor", {}).get("Attributes", {}).get("name", "")
                 action = ev.get("Action") or ev.get("status")
                 print(f"[vnc-events] {action} {name} — refreshing map", flush=True)
-                # Debounce: if we just refreshed, skip — the change is
-                # already captured. This handles "start + network attach"
-                # bursts that arrive within milliseconds of each other.
+                # Debounce.
                 now = time.monotonic()
                 if now - last_refresh < debounce_sec:
                     continue
                 last_refresh = now
+                # For start events: container often shows up in `docker
+                # ps` before its IP is set in NetworkSettings (~50-300ms
+                # gap). Calling refresh_vnc_map() at that exact moment
+                # writes a map MISSING the new entry — then we'd need
+                # the 15s loop to catch up. Use the until_present
+                # variant so we busy-poll until the new short_id has an
+                # IP (max 10s) before writing. For die/destroy we just
+                # want to drop the entry → regular refresh is fine.
+                short = name.removeprefix("grokflow-vnc-") if name else ""
                 try:
-                    await asyncio.to_thread(refresh_vnc_map)
+                    if action == "start" and short:
+                        await asyncio.to_thread(
+                            refresh_vnc_map_until_present, short,
+                            timeout_sec=10.0,
+                        )
+                    else:
+                        await asyncio.to_thread(refresh_vnc_map)
                 except Exception as exc:  # noqa: BLE001
                     print(f"[vnc-events] refresh failed: {exc}", flush=True)
             task.cancel()
