@@ -140,11 +140,51 @@ bash install_auto_deploy.sh --branch staging
 #   POSTGRES_PASSWORD       (different from prod)
 #   JWT_SECRET              (different from prod)
 #   ENCRYPTION_KEY          (different from prod)
-#   DOMAIN / API_DOMAIN     (e.g. staging.flowgrok.vpspanel.io.vn)
+#   DOMAIN / API_DOMAIN     (e.g. test.nexoratech.com.vn)
+#   PUBLIC_API_URL          (https://<domain>)
 #   CORS_ORIGINS            (match staging domain)
-# And bump the exposed ports in docker-compose.intranet.yml or use a
-# compose override to avoid clashing with prod's :5173/:8000.
+#   BACKEND_HOST_PORT=18000 # default-driven via compose, avoids :8000 clash
+#   FRONTEND_HOST_PORT=15173
 ```
+
+### Wiring staging to a public domain
+
+Once the staging stack is running on host ports `18000/15173`, expose it
+publicly so testers can reach it:
+
+1. **Add an nginx vhost** that proxies the staging domain to those ports.
+   Drop a file into `/etc/nginx/grokflow-vhosts/` — the inotify reloader
+   service picks it up automatically (`grokflow-nginx-reloader.service`).
+   The current staging file lives at
+   `/etc/nginx/grokflow-vhosts/grokflow-test_nexoratech_com_vn.conf` —
+   clone it for a different staging domain.
+
+2. **HTTP basic auth.** The staging vhost includes an `auth_basic` gate so
+   only people with the staging creds can reach the app. Manage the
+   credentials file at `/etc/nginx/grokflow-vhosts/.htpasswd-staging`:
+   ```bash
+   # Add a user
+   openssl passwd -apr1   # paste the password, append "USER:<hash>" to the file
+   ```
+   `/health` is exempt so external monitors still work.
+
+3. **Cloudflare Tunnel.** The tunnel running on the VPS is configured via
+   the dashboard (token-based — config isn't in any file on disk).
+   In **Cloudflare → Zero Trust → Networks → Tunnels → \<your tunnel\>
+   → Public Hostnames**, add:
+   - Subdomain: `test` (or whatever)
+   - Domain: `nexoratech.com.vn`
+   - Type: `HTTP`, URL: `localhost:80`
+
+4. **Seed the first admin** (alembic only creates schema, not rows):
+   ```bash
+   docker exec \
+     -e INITIAL_ADMIN_EMAIL=admin@staging.local \
+     -e INITIAL_ADMIN_PASSWORD='<strong>' \
+     -e INITIAL_DOMAIN_LABEL=Staging \
+     grokflow-staging-backend-1 python -m app.scripts.seed_first_run
+   ```
+   Idempotent — re-running is safe.
 
 Each install adds its own `auto_deploy.sh <branch>` cron line — prod and
 staging coexist without stepping on each other (separate lock files,
