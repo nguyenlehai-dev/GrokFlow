@@ -172,6 +172,19 @@ async def cleanup(idle_hours: float) -> int:
                 print(f"  stop failed: {exc}", flush=True)
         if stopped:
             await db.commit()
+
+    # Self-heal the nginx VNC map. Docker IPAM reassigns container IPs
+    # whenever sibling services are recreated by `docker compose up -d
+    # --build` (the deploy script does this for backend/worker), and the
+    # map written before that reshuffle then points at dead IPs → 502 on
+    # /vnc/*. Refreshing once per cleanup tick (≈60s) closes that gap
+    # without us having to predict every recreate event.
+    try:
+        from app.services.nginx_sync import refresh_vnc_map
+        refresh_vnc_map()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[idle-cleanup] vnc map refresh failed: {exc}", flush=True)
+
     return stopped
 
 
