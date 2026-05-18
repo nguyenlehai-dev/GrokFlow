@@ -10,7 +10,6 @@ import { useTranslation } from "react-i18next";
 import { getAuthedNav } from "@/app/moduleRegistry";
 import { useDocumentTitle } from "@/core/useDocumentTitle";
 import { NotificationBell } from "./NotificationBell";
-import { QuickCreateMenu } from "./QuickCreateMenu";
 import { MaintenanceBanner } from "@/components/ui/MaintenanceBanner";
 import { SubscriptionBanner } from "@/components/layout/SubscriptionBanner";
 
@@ -185,7 +184,6 @@ export function AppShell() {
             )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <QuickCreateMenu />
             <NotificationBell />
             <button onClick={onLogout} className="btn-ghost btn-sm" aria-label="Logout">
               <LogOut size={15} />
