@@ -202,6 +202,11 @@ services:
     volumes:
       - ./browser_profiles:/app/browser_profiles
       - /var/run/docker.sock:/var/run/docker.sock
+      # Same vhosts dir as backend — vnc_map_loop refreshes _vnc_map.conf
+      # every 15s. Without this mount the loop silently no-ops (the
+      # `_is_writable()` guard returns False) and the map drifts whenever
+      # docker IPAM re-assigns IPs after a deploy / container recreate.
+      - /etc/nginx/grokflow-vhosts:/host_nginx_vhosts
     command: ["python", "-m", "app.workers.idle_cleanup"]
     # Same reason as worker — disable inherited curl-based healthcheck.
     healthcheck:
