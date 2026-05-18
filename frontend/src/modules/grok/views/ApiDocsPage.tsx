@@ -353,6 +353,132 @@ const GROUPS: EndpointGroup[] = [
     ],
   },
   {
+    title: "Client API (Partner)",
+    endpoints: [
+      {
+        title: "Generate (Image / Video)",
+        method: "POST",
+        path: "/api/client/generate",
+        auth: "apikey",
+        summary: "Endpoint dành cho partner — payload đơn giản (target/prompt/ratio/count/…). Cả image và video gửi cùng URL, phân biệt bằng field `target`. Trả task_id rồi poll status.",
+        parameters: [
+          { name: "target", type: "\"image\" | \"video\"", required: true, description: "Loại task." },
+          { name: "prompt", type: "string", required: true, description: "Mô tả nội dung, 1-4000 ký tự." },
+          { name: "negative_prompt", type: "string | null", description: "Mô tả những thứ KHÔNG muốn xuất hiện. Có thể bỏ trống." },
+          { name: "count", type: "integer", description: "Số biến thể, 1-10. Mặc định 1." },
+          { name: "ratio", type: "string | null", description: "Tỉ lệ khung hình: \"1:1\", \"16:9\", \"9:16\", \"4:3\", \"3:4\"..." },
+          { name: "quality", type: "string | null", description: "\"standard\" | \"high\". Mặc định standard." },
+          { name: "reference_images", type: "string[] | null", description: "URL ảnh tham chiếu, tối đa 8. Có = I2I/I2V, không có = T2I/T2V." },
+          { name: "duration", type: "integer | null", description: "Chỉ video — độ dài giây (vd 5, 10)." },
+          { name: "profile_id", type: "uuid | null", description: "Pin profile cụ thể. Null = auto pick." },
+        ],
+        request: `# Tạo ảnh (T2I)
+{
+  "target": "image",
+  "prompt": "a futuristic city at sunset",
+  "negative_prompt": "blurry, watermark",
+  "count": 1,
+  "ratio": "1:1",
+  "quality": "standard"
+}
+
+# Tạo ảnh từ ảnh tham chiếu (I2I)
+{
+  "target": "image",
+  "prompt": "make it watercolor style",
+  "ratio": "1:1",
+  "reference_images": ["https://your.cdn/image.jpg"]
+}
+
+# Tạo video text-to-video (T2V)
+{
+  "target": "video",
+  "prompt": "a whale jumping out of water",
+  "ratio": "16:9",
+  "quality": "high",
+  "duration": 5
+}
+
+# Tạo video từ ảnh (I2V)
+{
+  "target": "video",
+  "prompt": "make it dance",
+  "ratio": "9:16",
+  "quality": "high",
+  "duration": 10,
+  "reference_images": ["https://your.cdn/image.jpg"]
+}`,
+        curl: `curl -X POST https://flowgrok.plxeditor.com/api/client/generate \\
+  -H "Authorization: Bearer uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "target": "image",
+    "prompt": "a cat in space",
+    "ratio": "1:1",
+    "count": 1
+  }'`,
+        response: `{
+  "task_id": "22d8dda7-f31b-4f03-9a16-b3cf04f6a554",
+  "status": "queued",
+  "target": "image"
+}`,
+        notes: "Auth: Authorization: Bearer <uxpm_live_*>. Status code 201 khi job được nhận, 401 nếu thiếu/sai key, 422 nếu pool không có Grok profile logged_in (admin cần Auto-login trước).",
+      },
+      {
+        title: "Poll Task Status",
+        method: "GET",
+        path: "/api/client/tasks/{task_id}/status",
+        auth: "apikey",
+        summary: "Poll trạng thái task. Khi status=success → đọc image_urls/video_urls. Khi status=failed → đọc error_message.",
+        parameters: [
+          { name: "task_id", type: "uuid", required: true, description: "task_id trả về từ /generate." },
+        ],
+        curl: `curl https://flowgrok.plxeditor.com/api/client/tasks/<task_id>/status \\
+  -H "Authorization: Bearer uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: `# Đang chạy
+{
+  "task_id": "22d8dda7-f31b-4f03-9a16-b3cf04f6a554",
+  "status": "processing_provider",
+  "target": "image",
+  "image_urls": [],
+  "video_urls": [],
+  "result": null,
+  "error_message": null,
+  "created_at": "2026-05-18T16:52:31.846044Z",
+  "completed_at": null
+}
+
+# Thành công
+{
+  "task_id": "...",
+  "status": "success",
+  "target": "video",
+  "image_urls": [],
+  "video_urls": ["https://flowgrok.plxeditor.com/api/files/<id>/download"],
+  "result": {
+    "image_urls": [],
+    "video_urls": ["https://flowgrok.plxeditor.com/api/files/<id>/download"]
+  },
+  "error_message": null,
+  "created_at": "...",
+  "completed_at": "..."
+}
+
+# Thất bại
+{
+  "task_id": "...",
+  "status": "failed",
+  "target": "image",
+  "image_urls": [], "video_urls": [],
+  "result": null,
+  "error_message": "Profile cookies expired — admin cần Auto-login lại.",
+  "completed_at": "..."
+}`,
+        notes: "Status values: queued | running | processing_provider | uploading_result | success | failed | cancelled. Poll mỗi 2-5s. Video có thể mất 2-5 phút. URL kết quả có thể là tuyệt đối (https://...) hoặc tương đối (/api/files/<id>/download — gắn base URL trước khi tải).",
+      },
+    ],
+  },
+  {
     title: "Files",
     endpoints: [
       {
