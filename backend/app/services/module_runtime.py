@@ -337,6 +337,47 @@ def stop_containers(slug: str) -> None:
         _remove_if_exists(f"grokflow-mod-{slug}-{kind}")
 
 
+def get_logs(slug: str, kind: str = "be", tail: int = 200) -> str:
+    """Return the last `tail` log lines from a module container.
+
+    `kind` is one of 'fe' / 'be' — UI defaults to 'be' since that's where
+    most crashes show up. Returns an empty string if the container isn't
+    running (uninstalled, never spawned, etc.) instead of raising — the
+    admin UI handles the empty state gracefully.
+    """
+    name = f"grokflow-mod-{slug}-{kind}"
+    try:
+        container = _docker().containers.get(name)
+    except Exception:
+        return ""
+    try:
+        raw = container.logs(tail=tail, timestamps=False)
+        return raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+    except Exception as exc:  # noqa: BLE001
+        return f"[error reading logs: {exc}]"
+
+
+def get_status(slug: str) -> dict[str, Any]:
+    """Inspect both containers + return a compact runtime snapshot for the
+    admin UI: state, started_at, restart count, last health probe."""
+    out: dict[str, Any] = {}
+    for kind in ("fe", "be"):
+        name = f"grokflow-mod-{slug}-{kind}"
+        try:
+            c = _docker().containers.get(name)
+            c.reload()
+            state = c.attrs.get("State", {}) or {}
+            out[kind] = {
+                "status": state.get("Status"),
+                "started_at": state.get("StartedAt"),
+                "restart_count": c.attrs.get("RestartCount"),
+                "health": (state.get("Health") or {}).get("Status"),
+            }
+        except Exception:
+            out[kind] = None
+    return out
+
+
 # ─── Health probe ──────────────────────────────────────────────────────
 
 

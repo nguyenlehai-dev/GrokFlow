@@ -242,10 +242,33 @@ class AdminModule(Base, TimestampMixin):
     # Lifecycle
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="installing")
     last_error: Mapped[str | None] = mapped_column(Text)
+    # Per-module settings blob (matches manifest.settings_schema if any).
+    settings: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     # Audit
     installed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )
     installed_by: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("users.id", ondelete="SET NULL"),
+    )
+
+
+class TenantModule(Base):
+    """Many-to-many: which tenants (domains) have a module enabled.
+
+    Phase 3 multi-tenant scoping. Without a row in this table for a given
+    domain × module pair, the module's sidebar entry is hidden for users
+    on that domain — super_admin always sees everything regardless.
+    """
+    __tablename__ = "tenant_modules"
+
+    domain_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="CASCADE"), primary_key=True,
+    )
+    module_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("admin_modules.id", ondelete="CASCADE"), primary_key=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
     )

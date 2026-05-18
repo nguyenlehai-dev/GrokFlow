@@ -85,6 +85,25 @@ class ModuleOut(BaseModel):
     db_schema: str
     installed_at: datetime
     installed_by: UUID | None
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        from_attributes = True
+
+
+class ModuleSettingsUpdate(BaseModel):
+    settings: dict[str, Any]
+
+
+class TenantModuleToggle(BaseModel):
+    domain_id: UUID
+    enabled: bool
+
+
+class TenantModuleOut(BaseModel):
+    domain_id: UUID
+    module_id: UUID
+    enabled: bool
 
     class Config:
         from_attributes = True

@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from app.core.deps import DbSession
 from app.core.exceptions import InvalidCredentials, PermissionDenied
+from app.core.rate_limit import enforce_service_token_rate_limit
 from app.core.security import decode_access_token
 from app.models import AdminModule, User
 
@@ -43,6 +44,10 @@ async def get_caller_module(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid service token")
     if row.status != "running":
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"module {row.slug} is {row.status}")
+    # Throttle here so even the cheapest endpoints (auth/verify) are
+    # protected — a runaway module loop on a single request still hits
+    # the limit before saturating downstream code.
+    await enforce_service_token_rate_limit(row.slug)
     return row
 
 
@@ -137,3 +142,13 @@ async def tenants_current(
     multi-tenant object; Phase 1 just echoes the user's domain row (if any)."""
     # Phase 1: trivial passthrough. Wire to user.domain when MT lands.
     return TenantContextResponse(tenant_id=None, hostname=None, label=None)
+
+
+@router.get("/settings")
+async def get_module_settings(
+    module: Annotated[AdminModule, Depends(get_caller_module)],
+) -> dict:
+    """Module reads its own settings blob — admin manages these via
+    /api/admin/modules/<id>/settings. Schema not enforced here; module
+    is trusted to interpret its own settings JSON correctly."""
+    return module.settings or {}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Plus, RefreshCw, Trash2, Loader2, CircleCheck, CircleAlert, CirclePause } from "lucide-react";
+import { Boxes, Plus, RefreshCw, Trash2, Loader2, CircleCheck, CircleAlert, CirclePause, FileText, ArrowUpCircle, Settings, X } from "lucide-react";
 
 import { toast } from "@/components/ui/Toast";
 import { AdminGuard } from "../components/AdminGuard";
@@ -24,9 +24,9 @@ function Inner() {
   const { data: modules = [], isLoading } = useQuery({
     queryKey: ["admin-modules"],
     queryFn: () => adminModulesService.list(),
-    // Poll while any module is still installing so the UI reflects status.
+    // Poll while any module is still installing/updating so the UI reflects status.
     refetchInterval: (q) =>
-      (q.state.data ?? []).some((m: AdminModuleRow) => m.status === "installing") ? 3000 : false,
+      (q.state.data ?? []).some((m: AdminModuleRow) => m.status === "installing" || m.status === "updating") ? 3000 : false,
   });
 
   return (
@@ -89,10 +89,18 @@ function EmptyState({ onInstall }: { onInstall: () => void }) {
 
 
 function ModuleTable({ modules, onChanged }: { modules: AdminModuleRow[]; onChanged: () => void }) {
+  const [logsFor, setLogsFor] = useState<AdminModuleRow | null>(null);
+  const [settingsFor, setSettingsFor] = useState<AdminModuleRow | null>(null);
+
   const restart = useMutation({
     mutationFn: (id: string) => adminModulesService.restart(id),
     onSuccess: () => { toast("Module restarted", "success"); onChanged(); },
     onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Restart failed", "error"),
+  });
+  const updateMod = useMutation({
+    mutationFn: (id: string) => adminModulesService.update(id),
+    onSuccess: () => { toast("Module updating — đợi vài phút", "success"); onChanged(); },
+    onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Update failed", "error"),
   });
   const uninstall = useMutation({
     mutationFn: (id: string) => adminModulesService.uninstall(id),
@@ -127,7 +135,33 @@ function ModuleTable({ modules, onChanged }: { modules: AdminModuleRow[]; onChan
                 <span className="text-slate-400"> @ {m.git_ref}</span>
               </td>
               <td className="px-4 py-2 font-mono text-xs text-slate-600">{m.db_schema}</td>
-              <td className="px-4 py-2 text-right space-x-2">
+              <td className="px-4 py-2 text-right space-x-1.5">
+                <button
+                  className="btn-ghost btn-sm inline-flex items-center gap-1"
+                  onClick={() => setLogsFor(m)}
+                  title="View backend logs"
+                >
+                  <FileText size={13} /> Logs
+                </button>
+                <button
+                  className="btn-ghost btn-sm inline-flex items-center gap-1"
+                  onClick={() => setSettingsFor(m)}
+                  title="Module settings"
+                >
+                  <Settings size={13} /> Settings
+                </button>
+                <button
+                  className="btn-ghost btn-sm inline-flex items-center gap-1"
+                  onClick={() => {
+                    if (confirm(`Pull commit mới nhất từ ${m.git_ref}, rebuild, swap containers?`)) {
+                      updateMod.mutate(m.id);
+                    }
+                  }}
+                  disabled={updateMod.isPending || m.status === "installing" || m.status === "updating"}
+                  title="Pull + rebuild + swap"
+                >
+                  <ArrowUpCircle size={13} /> Update
+                </button>
                 <button
                   className="btn-ghost btn-sm inline-flex items-center gap-1"
                   onClick={() => restart.mutate(m.id)}
@@ -139,7 +173,7 @@ function ModuleTable({ modules, onChanged }: { modules: AdminModuleRow[]; onChan
                 <button
                   className="btn-ghost btn-sm text-rose-600 inline-flex items-center gap-1"
                   onClick={() => {
-                    if (confirm(`Uninstall ${m.slug}? Schema mod_${m.slug} sẽ bị xoá.`)) {
+                    if (confirm(`Uninstall ${m.slug}? Schema ${m.db_schema} sẽ bị xoá.`)) {
                       uninstall.mutate(m.id);
                     }
                   }}
@@ -152,21 +186,111 @@ function ModuleTable({ modules, onChanged }: { modules: AdminModuleRow[]; onChan
           ))}
         </tbody>
       </table>
+
+      {logsFor && <LogsModal module={logsFor} onClose={() => setLogsFor(null)} />}
+      {settingsFor && <SettingsModal module={settingsFor} onClose={() => setSettingsFor(null)} onSaved={() => { setSettingsFor(null); onChanged(); }} />}
+    </div>
+  );
+}
+
+
+function LogsModal({ module, onClose }: { module: AdminModuleRow; onClose: () => void }) {
+  const [kind, setKind] = useState<"fe" | "be">("be");
+  const { data: logs = "", isFetching, refetch } = useQuery({
+    queryKey: ["module-logs", module.id, kind],
+    queryFn: () => adminModulesService.logs(module.id, kind, 500),
+    refetchInterval: 5000,
+  });
+  return (
+    <div className="fixed inset-0 z-40 bg-slate-900/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-4xl bg-white rounded-xl shadow-xl flex flex-col" style={{ maxHeight: "85vh" }}>
+        <div className="flex items-center justify-between p-4 border-b">
+          <div className="font-semibold text-slate-800 inline-flex items-center gap-2">
+            <FileText size={16} /> Logs — {module.slug}
+            <select value={kind} onChange={(e) => setKind(e.target.value as "fe" | "be")} className="input ml-2 text-xs py-1">
+              <option value="be">Backend</option>
+              <option value="fe">Frontend (nginx)</option>
+            </select>
+            {isFetching && <Loader2 size={12} className="animate-spin text-slate-400" />}
+          </div>
+          <div className="space-x-2">
+            <button onClick={() => refetch()} className="btn-ghost btn-sm" title="Reload">
+              <RefreshCw size={13} />
+            </button>
+            <button onClick={onClose} className="btn-ghost btn-sm" title="Close">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+        <pre className="flex-1 overflow-auto p-4 text-xs font-mono bg-slate-950 text-slate-100 whitespace-pre-wrap">
+          {logs || "(no logs yet)"}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+
+function SettingsModal({ module, onClose, onSaved }: { module: AdminModuleRow; onClose: () => void; onSaved: () => void }) {
+  const [value, setValue] = useState(JSON.stringify(module.settings ?? {}, null, 2));
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => {
+      try {
+        const parsed = JSON.parse(value);
+        return adminModulesService.updateSettings(module.id, parsed);
+      } catch (e: any) {
+        throw new Error(`Invalid JSON: ${e?.message ?? e}`);
+      }
+    },
+    onSuccess: () => { toast("Settings saved", "success"); onSaved(); },
+    onError: (e: any) => setError(e?.message ?? e?.response?.data?.detail?.message ?? "Save failed"),
+  });
+
+  return (
+    <div className="fixed inset-0 z-40 bg-slate-900/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl bg-white rounded-xl shadow-xl p-6 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-800 inline-flex items-center gap-2">
+            <Settings size={16} /> Settings — {module.slug}
+          </h2>
+          <button onClick={onClose} className="btn-ghost btn-sm"><X size={14} /></button>
+        </div>
+        <p className="text-xs text-slate-500">
+          JSON blob. Module BE đọc qua <code>GET /api/sdk/settings</code> (đã verify service token).
+        </p>
+        <textarea
+          value={value}
+          onChange={(e) => { setValue(e.target.value); setError(null); }}
+          spellCheck={false}
+          className="input w-full font-mono text-xs h-64"
+        />
+        {error && <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1">{error}</div>}
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
+          <button onClick={() => save.mutate()} disabled={save.isPending} className="btn-primary text-sm inline-flex items-center gap-1.5">
+            {save.isPending ? <><Loader2 size={14} className="animate-spin"/> Saving…</> : "Save"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 
 function StatusBadge({ status }: { status: AdminModuleRow["status"] }) {
-  const map = {
+  const map: Record<AdminModuleRow["status"], { icon: JSX.Element; color: string; label: string }> = {
     installing: { icon: <Loader2 size={12} className="animate-spin" />, color: "bg-amber-50 text-amber-700 border-amber-200", label: "Installing" },
+    updating:   { icon: <Loader2 size={12} className="animate-spin" />, color: "bg-sky-50 text-sky-700 border-sky-200", label: "Updating" },
     running:    { icon: <CircleCheck size={12} />,                       color: "bg-emerald-50 text-emerald-700 border-emerald-200", label: "Running" },
     stopped:    { icon: <CirclePause size={12} />,                       color: "bg-slate-50 text-slate-600 border-slate-200", label: "Stopped" },
     error:      { icon: <CircleAlert size={12} />,                       color: "bg-rose-50 text-rose-700 border-rose-200", label: "Error" },
-  }[status];
+  };
+  const m = map[status] ?? map.error;
   return (
-    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border ${map.color}`}>
-      {map.icon} {map.label}
+    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border ${m.color}`}>
+      {m.icon} {m.label}
     </span>
   );
 }

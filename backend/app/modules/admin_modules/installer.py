@@ -141,6 +141,87 @@ def schedule_post_install(slug: str, raw_db_password: str) -> None:
     asyncio.create_task(_do_post_install(slug, raw_db_password))
 
 
+def schedule_update(slug: str) -> None:
+    """Update flow: git fetch + reset to origin/<ref> in the existing
+    work dir, rebuild images, swap containers. If health check fails,
+    keep the previous (still-running) containers."""
+    asyncio.create_task(_do_update(slug))
+
+
+async def _do_update(slug: str) -> None:
+    """Pull + rebuild + swap. On failure, leave the old containers up
+    and surface last_error to the UI."""
+    from app.core.encryption import decrypt
+    work_dir = _slug_path(slug)
+
+    async def _mark(status: str, last_error: str | None = None,
+                    fe_id: str | None = None, be_id: str | None = None,
+                    fe_tag: str | None = None, be_tag: str | None = None,
+                    version: str | None = None) -> None:
+        async with SessionLocal() as db:
+            values = {"status": status, "last_error": last_error}
+            if fe_id:   values["fe_container_id"] = fe_id
+            if be_id:   values["be_container_id"] = be_id
+            if fe_tag:  values["fe_image_tag"] = fe_tag
+            if be_tag:  values["be_image_tag"] = be_tag
+            if version: values["version"] = version
+            await db.execute(
+                update(AdminModule).where(AdminModule.slug == slug).values(**values)
+            )
+            await db.commit()
+
+    try:
+        async with SessionLocal() as db:
+            from sqlalchemy import select as _select
+            row = (await db.execute(
+                _select(AdminModule).where(AdminModule.slug == slug)
+            )).scalar_one()
+            pat = decrypt(row.git_token_enc) if row.git_token_enc else None
+            git_url = row.git_url
+            git_ref = row.git_ref
+            db_password = decrypt(row.db_password_enc)
+            db_user = row.db_user
+            db_schema = row.db_schema
+            service_token = row.service_token
+
+        # Re-clone (depth 1 + branch) into the same dir — simpler than git
+        # pull because we don't care about the local history.
+        _git_clone(ModuleInstallRequest(git_url=git_url, git_ref=git_ref, github_pat=pat), work_dir)
+        manifest = _parse_manifest(work_dir)
+        _validate_resource_limits(manifest)
+
+        # Build NEW images (use a fresh tag for atomicity).
+        print(f"[module-update] {slug}: building new images for v{manifest.version}", flush=True)
+        new_fe_tag, new_be_tag = await asyncio.to_thread(
+            rt.build_images, work_dir, manifest.model_dump(by_alias=True), slug,
+        )
+
+        # Stop old, spawn new.
+        rt.stop_containers(slug)
+        be_id = await asyncio.to_thread(
+            rt.spawn_backend, slug, manifest.model_dump(by_alias=True), new_be_tag,
+            db_user, db_password, db_schema, service_token,
+        )
+        fe_id = await asyncio.to_thread(
+            rt.spawn_frontend, slug, manifest.model_dump(by_alias=True), new_fe_tag,
+        )
+
+        # Health probe.
+        healthy = await rt.wait_healthy(slug, manifest.model_dump(by_alias=True), timeout_sec=90)
+        if not healthy:
+            raise RuntimeError("module backend never returned 200 on /health after update")
+
+        await _mark("running", fe_id=fe_id, be_id=be_id,
+                    fe_tag=new_fe_tag, be_tag=new_be_tag,
+                    version=manifest.version)
+        print(f"[module-update] {slug}: UPDATED to v{manifest.version}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        tb = traceback.format_exc()
+        print(f"[module-update] {slug}: FAILED — {exc}\n{tb}", flush=True)
+        # Leave old containers (or whatever's running) — just flag error.
+        await _mark("error", last_error=str(exc)[:1000])
+
+
 async def _do_post_install(slug: str, raw_db_password: str) -> None:
     """Provision DB → build images → spawn containers → wait health →
     write vhost. Marks the row 'running' on success, 'error' on any step.

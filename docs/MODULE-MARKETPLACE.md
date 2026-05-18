@@ -208,7 +208,21 @@ network: grokflow_default
 # KHÔNG mount host fs ngoài /tmp tmpfs
 ```
 
-## Roadmap
+## Roadmap — status update
+
+| Phase | Done | Notes |
+|---|---|---|
+| 1 — MVP scaffold | ✅ | Manifest schema, install endpoint, sidebar wiring |
+| 1.1 — Wire docker spawn + DB schema + iframe | ✅ | All in `app/services/module_runtime.py` |
+| 1.2 — Vite dev proxy for `/m/<slug>/*` | ✅ | iframe loads in local dev |
+| 2.1 — Module logs endpoint + UI | ✅ | `GET /api/admin/modules/:id/logs` + LogsModal |
+| 2.2 — Update flow (pull + rebuild + swap) | ✅ | Background task, keeps old on failure |
+| 2.3 — Service token rate limit | ✅ | 300 req/min/module via redis bucket |
+| 2.4 — Static scan (trivy / semgrep) | ⚠️ deferred | Needs binary on backend image |
+| 3.1 — `tenant_modules` table | ✅ | Per-tenant enable/disable |
+| 3.2 — Per-module settings | ✅ | jsonb on `admin_modules` + `/api/sdk/settings` |
+| 3.3 — Audit log on install/update/uninstall | ✅ | Uses existing audit module |
+| 3.4 — Docs hoàn chỉnh | ✅ | This file + `packages/grokflow-module-sdk/docs/` |
 
 ### Phase 1 — MVP (2 tuần)
 
