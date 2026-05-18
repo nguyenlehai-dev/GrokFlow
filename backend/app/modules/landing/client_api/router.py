@@ -41,7 +41,8 @@ class ClientGenerateIn(BaseModel):
     target: Literal["image", "video"]
     prompt: str = Field(min_length=1, max_length=4000)
     ratio: str | None = None
-    count: int = Field(default=1, ge=1, le=4)
+    count: int = Field(default=1, ge=1, le=10)
+    # Note: contract cap is 10; internal entitlement plan may cap lower per user.
     quality: str | None = None
     duration: int | None = None
     negative_prompt: str | None = None
