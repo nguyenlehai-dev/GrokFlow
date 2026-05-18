@@ -105,6 +105,7 @@ def _load_modules() -> list[ModuleManifest]:
     from app.modules.grok.profiles import manifest as grok_profiles
     from app.modules.grok.projects import manifest as grok_projects
     from app.modules.landing.billing import manifest as billing
+    from app.modules.landing.client_api import manifest as client_api
     from app.modules.landing.plans_public import manifest as plans_public
     from app.modules.landing.public_try import manifest as public_try
     from app.modules.landing.public_v1 import manifest as public_v1
@@ -148,6 +149,7 @@ def _load_modules() -> list[ModuleManifest]:
         billing,
         plans_public,
         public_v1,
+        client_api,
         public_try,
     ]
 
