@@ -162,6 +162,13 @@ async def do_execute(
     model = payload.model or pool.model or ""
 
     for key in candidates:
+        # Merge the pool key's admin-configured metadata (url, cookies,
+        # provider-specific options like firebase tokens) into the extra
+        # dict, with pool metadata taking precedence over caller payload
+        # so a client can't override infra config like upstream URL.
+        # Providers that don't need metadata (gemini/openai/anthropic)
+        # just ignore the extra keys; new providers (grok) read from it.
+        combined_extra = {**(payload.raw or {}), **(key.metadata or {})}
         try:
             normalized = await provider.execute(
                 model=model,
@@ -170,7 +177,7 @@ async def do_execute(
                 reference_video_urls=payload.reference_video_urls,
                 aspect_ratio=payload.aspect_ratio,
                 image_size=payload.image_size,
-                extra=payload.raw,
+                extra=combined_extra,
                 api_key=key.api_key,
                 project_id=key.project_id,
             )
