@@ -202,12 +202,28 @@ def refresh_vnc_map() -> bool:
     import time
     entries: list[tuple[str, str]] = []
     expected_count = -1
-    for attempt in range(6):  # 6 × 250ms = 1.5s total budget
+    # Wider budget (5s) — Docker IPAM can take a few seconds to attach
+    # network metadata when multiple containers spawn back-to-back, and
+    # the `entries == expected_count` break-condition needs to wait that
+    # long or we write an incomplete map (then nginx serves stale entries
+    # until the next refresh).
+    for attempt in range(20):  # 20 × 250ms = 5s total budget
         try:
             import docker as _d
             client = _d.from_env()
             running = client.containers.list(filters={"name": "grokflow-vnc-"})
-            expected_count = sum(1 for c in running if c.name.startswith("grokflow-vnc-"))
+            # Only count containers attached to THIS env's network — without
+            # this filter the count includes the other env's VNCs and never
+            # matches our entries list, so the loop wastes its whole budget
+            # and may write an empty map if our containers' IP isn't ready
+            # yet.
+            expected_count = 0
+            for c in running:
+                if not c.name.startswith("grokflow-vnc-"):
+                    continue
+                nets = (c.attrs.get("NetworkSettings", {}) or {}).get("Networks") or {}
+                if _VNC_NETWORK in nets:
+                    expected_count += 1
             entries = _collect_vnc_entries()
         except Exception:
             entries = []
