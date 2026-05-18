@@ -274,17 +274,28 @@ def stop() -> None:
 
 
 def reap_orphans(known_profile_ids: set[str]) -> list[str]:
-    """Stop/remove any grokflow-vnc-* container whose profile no longer exists.
+    """Stop/remove grokflow-vnc-* containers on THIS env's network whose
+    profile no longer exists in THIS env's DB.
+
+    Critical: only touches containers attached to `NETWORK_NAME` (the env's
+    VNC_NETWORK). Without this filter, the staging backend would see prod's
+    VNC containers and reap them as orphans (their profile_id isn't in
+    staging's DB) and vice-versa — every redeploy of either stack would
+    annihilate the other's live sessions.
 
     Returns the list of orphan container names that were reaped.
     """
     cli = _client()
     reaped: list[str] = []
     for c in cli.containers.list(all=True, filters={"name": "grokflow-vnc-"}):
+        nets = (c.attrs.get("NetworkSettings", {}) or {}).get("Networks") or {}
+        if NETWORK_NAME not in nets:
+            # Belongs to a different env (prod vs staging) — leave it alone.
+            continue
         label_pid = (c.labels or {}).get("grokflow.profile_id")
         if label_pid and label_pid in known_profile_ids:
             continue
-        # No profile_id label or profile_id not in DB → orphan.
+        # No profile_id label or profile_id not in DB → orphan for THIS env.
         try:
             c.stop(timeout=3)
         except APIError:
