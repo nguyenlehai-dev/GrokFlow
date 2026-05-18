@@ -23,7 +23,7 @@ from app.core.exceptions import InvalidCredentials, InvalidPayload, NotFound, Pe
 from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
 from app.core.deps import SuperAdminUser
-from app.services.nginx_sync import refresh_vnc_map
+from app.services.nginx_sync import refresh_vnc_map, refresh_vnc_map_until_present
 from app.models import Domain, GrokProject, Job, Profile, ProjectDomainAssignment, User
 from app.modules.admin.audit import service as audit
 
@@ -498,30 +498,20 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
                            metadata={"container": info["container_name"], "reused": info.get("reused")})
     await db.commit()
 
-    # Tell nginx where this new container lives so the iframe URL routes.
-    # No-op when the host vhost dir isn't mounted (dev / tests).
-    refresh_vnc_map()
-    # Schedule a second refresh ~4s later to catch any race where the
-    # container's NetworkSettings.Networks wasn't populated yet at the
-    # moment of the first refresh — most common when the user clicks
-    # Auto-login on multiple profiles in quick succession and Docker's
-    # IPAM is briefly behind. asyncio.create_task is fire-and-forget;
-    # the second refresh is best-effort and never blocks the response.
-    import asyncio as _asyncio
-
-    async def _delayed_refresh() -> None:
-        await _asyncio.sleep(4)
-        try:
-            refresh_vnc_map()
-        except Exception:  # noqa: BLE001 — never crash on the followup
-            pass
-
-    _asyncio.create_task(_delayed_refresh())
-
     # Per-profile noVNC route. Nginx proxies /vnc/<short-id>/ → <container>:6901
     # `path` param tells noVNC to open WS at /vnc/<short>/websockify (its default
     # 'websockify' resolves to root, breaking the routing).
     short = str(profile.id).replace("-", "")[:12]
+
+    # Block until nginx map contains this short_id (up to 10s). Without
+    # this wait, the user's iframe race with Docker IPAM and nginx sees
+    # `_none_` for ~1-3s after spawn → 502 Bad Gateway. Doing the sync
+    # poll here (rather than fire-and-forget) means the endpoint takes
+    # an extra ~1s on average but the user NEVER sees the 502 flash.
+    import asyncio as _asyncio
+    await _asyncio.to_thread(
+        refresh_vnc_map_until_present, short, timeout_sec=10.0
+    )
     # Return RELATIVE URL — the browser resolves it against the page's
     # current origin. This matters in multi-tenant deploys where a user
     # may be browsing tenant A (e.g. nexoratech.com.vn) while the API

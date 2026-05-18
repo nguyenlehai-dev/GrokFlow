@@ -188,16 +188,43 @@ async def cleanup(idle_hours: float) -> int:
     return stopped
 
 
-async def loop_forever(interval_seconds: int, idle_hours: float) -> None:
-    print(f"[idle-cleanup] loop started: every {interval_seconds}s, idle threshold {idle_hours}h", flush=True)
+async def vnc_map_loop(interval_seconds: int) -> None:
+    """Cheap, fast self-heal loop for the nginx VNC map.
+
+    Runs much more often than the full cleanup tick (default 15s vs 1h)
+    because the map needs to stay in sync with Docker IPAM reshuffles —
+    a stale entry means /vnc/<short>/ returns 502 for the user. Doesn't
+    touch the DB or any container state; just rewrites the map file."""
+    from app.services.nginx_sync import refresh_vnc_map
+    print(f"[idle-cleanup] vnc map loop: refresh every {interval_seconds}s", flush=True)
     while True:
         try:
-            n = await cleanup(idle_hours)
-            if n:
-                print(f"[idle-cleanup] stopped {n} idle container(s)", flush=True)
+            refresh_vnc_map()
         except Exception as exc:  # noqa: BLE001
-            print(f"[idle-cleanup] error: {exc}", flush=True)
+            print(f"[idle-cleanup] vnc map refresh failed: {exc}", flush=True)
         await asyncio.sleep(interval_seconds)
+
+
+async def loop_forever(interval_seconds: int, idle_hours: float,
+                       map_refresh_seconds: int = 15) -> None:
+    print(f"[idle-cleanup] loop started: every {interval_seconds}s, idle threshold {idle_hours}h", flush=True)
+
+    async def _cleanup_loop() -> None:
+        while True:
+            try:
+                n = await cleanup(idle_hours)
+                if n:
+                    print(f"[idle-cleanup] stopped {n} idle container(s)", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[idle-cleanup] error: {exc}", flush=True)
+            await asyncio.sleep(interval_seconds)
+
+    # Run both loops concurrently — the map loop is cheap and tight,
+    # the cleanup loop is heavy and slow.
+    await asyncio.gather(
+        _cleanup_loop(),
+        vnc_map_loop(map_refresh_seconds),
+    )
 
 
 def main() -> None:
@@ -207,12 +234,14 @@ def main() -> None:
     parser.add_argument("--once", action="store_true", help="Run one pass and exit (for cron)")
     parser.add_argument("--interval", type=int,
                         default=int(os.environ.get("IDLE_CLEANUP_INTERVAL", "3600")))
+    parser.add_argument("--map-refresh", type=int,
+                        default=int(os.environ.get("VNC_MAP_REFRESH_SEC", "15")))
     args = parser.parse_args()
     if args.once:
         n = asyncio.run(cleanup(args.idle_hours))
         print(f"stopped {n}")
     else:
-        asyncio.run(loop_forever(args.interval, args.idle_hours))
+        asyncio.run(loop_forever(args.interval, args.idle_hours, args.map_refresh))
 
 
 if __name__ == "__main__":

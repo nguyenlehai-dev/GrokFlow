@@ -175,6 +175,30 @@ def _collect_vnc_entries() -> list[tuple[str, str]]:
     return entries
 
 
+def refresh_vnc_map_until_present(short_id: str, *, timeout_sec: float = 10.0,
+                                  interval_sec: float = 0.5) -> bool:
+    """Refresh the nginx VNC map and **wait** until `short_id` appears in
+    the collected entries (or timeout). Use this from request handlers
+    that have just spawned a VNC container — guarantees the user's iframe
+    won't 502 because the map is one tick behind Docker IPAM.
+
+    Returns True when the entry is present, False if the timeout expires
+    (caller can log a warning but should still let the user retry — the
+    background idle_cleanup loop will pick it up shortly anyway).
+    """
+    import time
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        refresh_vnc_map()
+        entries = dict(_collect_vnc_entries())
+        if short_id in entries:
+            return True
+        time.sleep(interval_sec)
+    # Last-attempt refresh in case the container settled right at the deadline.
+    refresh_vnc_map()
+    return short_id in dict(_collect_vnc_entries())
+
+
 def refresh_vnc_map() -> bool:
     """Rebuild _vnc_map.conf from currently running VNC containers.
 
