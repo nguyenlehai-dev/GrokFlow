@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from app.core.deps import DbSession
 from app.core.exceptions import InvalidCredentials, PermissionDenied
-from app.core.security import decode_jwt
+from app.core.security import decode_access_token
 from app.models import AdminModule, User
 
 
@@ -62,11 +62,10 @@ async def get_acting_user(
 ) -> User:
     if not user_token:
         raise InvalidCredentials()
-    try:
-        payload = decode_jwt(user_token)
-        user_id = payload.get("sub")
-    except Exception as exc:  # noqa: BLE001
-        raise InvalidCredentials() from exc
+    payload = decode_access_token(user_token)
+    if not payload:
+        raise InvalidCredentials()
+    user_id = payload.get("sub")
     if not user_id:
         raise InvalidCredentials()
     user = await db.get(User, user_id)

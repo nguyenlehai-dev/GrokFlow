@@ -69,6 +69,9 @@ def upgrade() -> None:
                   server_default=sa.func.now()),
         sa.Column("installed_by", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        # TimestampMixin columns (model inherits them).
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.func.now()),
     )

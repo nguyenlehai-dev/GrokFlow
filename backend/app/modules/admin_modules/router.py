@@ -8,12 +8,14 @@ manifest.permissions (Phase 2).
 
 from __future__ import annotations
 
+import secrets
 from uuid import UUID
 
 from fastapi import APIRouter, status
 from sqlalchemy import select
 
 from app.core.deps import DbSession, SuperAdminUser
+from app.core.encryption import encrypt
 from app.core.exceptions import NotFound
 from app.models import AdminModule
 
@@ -41,20 +43,32 @@ async def install_module(
 ) -> AdminModule:
     """Clone + build + spawn a module from a git URL.
 
-    Synchronous up to manifest parse + DB row creation; container build
-    and DB schema provisioning happen asynchronously in the runtime
-    service (Phase 1.1). The returned row is in `status=installing` and
-    transitions to `running` (or `error`) as the background work
-    completes. Frontend polls /api/admin/modules until status changes.
+    The sync portion (clone repo + parse manifest + create DB row) runs
+    inline so we can fail fast with 422 if the manifest is bad. Anything
+    that touches docker/postgres is deferred to a background task so
+    this endpoint returns in < 3s. Frontend polls the list endpoint
+    until the row's status transitions out of `installing`.
     """
+    # Generate the module's DB password and service token here so we can
+    # both encrypt them into the row AND hand the raw values to the
+    # background task without round-tripping through the DB.
+    raw_password = secrets.token_urlsafe(32)
+
     row = await installer.install(req, installer_user_id=admin.id)
+    # Overwrite installer's randomly-generated password with the one we
+    # just made (the installer needs a placeholder to satisfy NOT NULL,
+    # but we want the canonical raw value here for the background task).
+    row.db_password_enc = encrypt(raw_password)
+
     db.add(row)
     await db.commit()
     await db.refresh(row)
+
+    installer.schedule_post_install(row.slug, raw_password)
     return row
 
 
-@router.delete("/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{module_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def uninstall_module(
     module_id: UUID,
     _admin: SuperAdminUser,

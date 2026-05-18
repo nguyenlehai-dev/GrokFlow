@@ -42,6 +42,7 @@ services:
       - ./backend:/app
       - storage_data:/app/storage
       - profile_data:/app/browser_profiles
+      - modules_data:/app/modules-data
 
   worker:
     build: ./backend
@@ -93,3 +94,4 @@ volumes:
   postgres_data:
   storage_data:
   profile_data:
+  modules_data:

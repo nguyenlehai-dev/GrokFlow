@@ -50,8 +50,9 @@ export const moduleManifest: FrontendModule = {
     { path: "admin/tool-installs", element: lazyPage(() => import("../views/AdminToolInstallsPage"), "AdminToolInstallsPage") },
     { path: "admin/login-templates", element: lazyPage(() => import("../views/AdminLoginTemplatesPage"), "AdminLoginTemplatesPage") },
     { path: "admin/git",       element: lazyPage(() => import("../views/AdminGitPage"), "AdminGitPage") },
-    { path: "admin/modules",   element: lazyPage(() => import("../views/AdminModulesPage"), "AdminModulesPage") },
-    { path: "admin/legacy",    element: lazyPage(() => import("../views/AdminPage"), "AdminPage") },
+    { path: "admin/modules",         element: lazyPage(() => import("../views/AdminModulesPage"), "AdminModulesPage") },
+    { path: "admin/modules/:slug",   element: lazyPage(() => import("../views/AdminModuleIframePage"), "AdminModuleIframePage") },
+    { path: "admin/legacy",          element: lazyPage(() => import("../views/AdminPage"), "AdminPage") },
   ],
   nav: [
     // Top-level entries (above the auth group)
