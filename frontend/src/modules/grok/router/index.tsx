@@ -26,6 +26,10 @@ export const moduleManifest: FrontendModule = {
     { path: "jobs",           element: <KeyGate>{lazyPage(() => import("../views/JobsPage"), "JobsPage")}</KeyGate> },
     { path: "grok/playground", element: lazyPage(() => import("../views/GrokPlaygroundPage"), "GrokPlaygroundPage") },
     { path: "api-docs",       element: lazyPage(() => import("../views/ApiDocsPage"), "ApiDocsPage") },
+    // /create-video-pro is mounted at the TOP level in app/router.tsx
+    // (outside AppShell) so it renders without the admin sidebar — the
+    // page is the full desktop-app workspace. Keep the nav entry below
+    // so super_admin can still preview it from the standard shell.
   ],
   nav: [
     {
@@ -41,6 +45,12 @@ export const moduleManifest: FrontendModule = {
         // Gateway Requests so the "REQ-style entrypoint" pattern is
         // consistent across modules.
         { type: "link", to: "/grok/playground", label: "Playground", icon: Activity },
+        // /create-video-pro is intentionally NOT in the admin sidebar — it's
+        // the desktop-kiosk workspace for tool-install users only. Tool
+        // installs see it because ProtectedRoute redirects them straight to
+        // /create-video-pro; admins access it via direct URL if needed.
+        // The route stays registered (page still loadable, allowlist still
+        // grantable in Tool Installs), only the nav entry is hidden.
         { type: "link", to: "/api-docs", label: "API Docs", icon: FileText, feature: FEATURE_KEYS.uiApiDocs },
       ],
     },

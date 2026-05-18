@@ -2,6 +2,10 @@ export interface CreateJobForm {
   provider: "grok" | "flow";
   job_type: "image" | "video";
   profile_id: string;
+  // Empty string = let backend auto-pick (per-user pin → domain → bootstrap).
+  // Set to a GrokProject UUID to force that specific project — service
+  // validates it belongs to `profile_id`.
+  project_id: string;
   prompt: string;
   size: string;
   model: string;

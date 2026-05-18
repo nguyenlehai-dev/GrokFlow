@@ -5,6 +5,7 @@ export interface Project {
   name: string;
   description: string | null;
   domain_count: number;
+  tool_install_count: number;
 }
 
 export interface UserRow {

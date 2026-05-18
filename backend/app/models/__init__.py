@@ -24,7 +24,7 @@ list is the only place that needs updating to expose it package-wide.
 
 from ._base import Base, JSONType, TimestampMixin, UUIDType, _uuid
 
-from .admin import AuditLog, Domain, GitRepo, Notification, Role
+from .admin import AuditLog, Domain, DomainQuotaPeriod, GitRepo, Notification, Role
 from .auth import ApiKey, User
 from .billing import Invoice, Payment, Plan, Subscription
 from .flow import FlowJob
@@ -43,15 +43,25 @@ from .grok import (
     JobLog,
     Profile,
     ProjectDomainAssignment,
+    ProjectToolInstallAssignment,
     ProjectUserAssignment,
 )
-from .servers import Server
+from .servers import (
+    Server,
+    ServerAlert,
+    ServerBackupHistory,
+    ServerMetricHistory,
+    ServerRebootHistory,
+)
+from .tool import ChatSession, PromptTemplate
+from .tool_distribution import Tool, ToolAsset
+from .tool_install import ToolInstall, ToolInstallQuotaPeriod
 
 __all__ = [
     # Infrastructure
     "Base", "JSONType", "TimestampMixin", "UUIDType", "_uuid",
     # Admin / tenancy
-    "AuditLog", "Domain", "GitRepo", "Notification", "Role",
+    "AuditLog", "Domain", "DomainQuotaPeriod", "GitRepo", "Notification", "Role",
     # Auth
     "ApiKey", "User",
     # Billing
@@ -62,7 +72,13 @@ __all__ = [
     "GwApiFunction", "GwGatewayKey", "GwPool", "GwPoolApiKey", "GwRequest", "GwVendor",
     # Grok
     "File", "GrokProject", "Job", "JobLog", "Profile",
-    "ProjectDomainAssignment", "ProjectUserAssignment",
-    # Servers
-    "Server",
+    "ProjectDomainAssignment", "ProjectToolInstallAssignment", "ProjectUserAssignment",
+    # Servers + monitoring
+    "Server", "ServerAlert", "ServerBackupHistory", "ServerMetricHistory", "ServerRebootHistory",
+    # Tool module
+    "ChatSession", "PromptTemplate",
+    # Tool distribution (admin-uploaded installer files + docs)
+    "Tool", "ToolAsset",
+    # Tool installs (desktop client registrations)
+    "ToolInstall", "ToolInstallQuotaPeriod",
 ]

@@ -51,6 +51,7 @@ class AdminUserOut(BaseModel):
     entitlement_overrides: dict | None = None
     domain_id: uuid.UUID | None = None
     role_id: uuid.UUID | None = None
+    tool_install_id: uuid.UUID | None = None
 
     class Config:
         from_attributes = True

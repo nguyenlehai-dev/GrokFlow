@@ -69,6 +69,23 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/landing" replace />;
   }
 
+  // Tool-scoped users (desktop kiosk) are locked to the branded creator
+  // workspace. The redirect runs BEFORE the userCanSeePath check below
+  // AND short-circuits past it once we're already on /create-video-pro —
+  // otherwise the install's allowed_pages list (which usually doesn't
+  // include /create-video-pro because that route is mounted at app top-
+  // level, outside the page catalog) would fail the userCanSeePath gate
+  // and the redirect loop would re-fire forever.
+  const isToolUser = !!user?.tool_install_id && user.role === "user";
+  if (isToolUser) {
+    if (location.pathname !== "/create-video-pro") {
+      return <Navigate to="/create-video-pro" replace />;
+    }
+    // Already on the right page → skip the userCanSeePath check;
+    // tool installs are governed by their own allow-list elsewhere.
+    return <>{children}</>;
+  }
+
   // userCanSeePath knows the tier rules:
   //   super_admin  → always true
   //   admin        → /admin/{users,roles} always; rest scoped to domain

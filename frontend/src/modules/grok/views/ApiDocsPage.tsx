@@ -79,12 +79,12 @@ const GROUPS: EndpointGroup[] = [
         method: "POST",
         path: "/api/jobs",
         auth: "jwt",
-        summary: "Tạo job mới — image hoặc video, có thể text-to-X hoặc image-to-X.",
+        summary: "Tạo job mới — image hoặc video, có thể text-to-X hoặc image-to-X. Job video chỉ chạy trên profile có allows_video=true (xem Update Profile).",
         parameters: [
           { name: "provider", type: "string", required: true, description: "\"grok\" hoặc \"flow\"." },
           { name: "job_type", type: "string", required: true, description: "\"image\" hoặc \"video\"." },
           { name: "prompt", type: "string", required: true, description: "Mô tả bằng tiếng Anh, tối đa 2000 ký tự." },
-          { name: "profile_id", type: "uuid | null", description: "Null = auto pick profile ít load nhất." },
+          { name: "profile_id", type: "uuid | null", description: "Null = auto pick profile ít load nhất. Nếu profile được chỉ định ở chế độ image-only (allows_video=false) mà job_type=video → 422." },
           { name: "model", type: "string", description: "Grok: aurora | grok-2-image | grok-3-image." },
           { name: "n", type: "integer", description: "Số variant trả về (1-4). Mặc định 1." },
           { name: "seed", type: "integer | null", description: "Seed cố định nếu cần deterministic." },
@@ -261,10 +261,14 @@ const GROUPS: EndpointGroup[] = [
     "status": "logged_in",
     "active_jobs": 0,
     "max_concurrent_jobs": 3,
+    "active_video_jobs": 0,
+    "max_concurrent_video": 4,
+    "allows_video": true,
     "last_used_at": "...",
     "created_at": "..."
   }
 ]`,
+        notes: "allows_video = false → profile chỉ nhận job_type=image. Video resolver tự bỏ qua profile này khi auto-pick.",
       },
       {
         title: "Create Profile",
@@ -276,11 +280,15 @@ const GROUPS: EndpointGroup[] = [
           { name: "name", type: "string", required: true, description: "Tên profile (unique)." },
           { name: "provider", type: "string", required: true, description: "\"grok\" | \"flow\" | \"other\"." },
           { name: "max_concurrent_jobs", type: "integer", description: "1-16. Mỗi tab ~150MB RAM." },
+          { name: "max_concurrent_video", type: "integer", description: "1-12. Cap riêng cho video tabs (Playwright). Mặc định 4." },
+          { name: "allows_video", type: "boolean", description: "True (mặc định) = nhận cả image + video. False = profile chỉ ảnh, resolver bỏ qua khi pick job video." },
         ],
         request: `{
   "name": "menu-types",
   "provider": "grok",
-  "max_concurrent_jobs": 3
+  "max_concurrent_jobs": 3,
+  "max_concurrent_video": 4,
+  "allows_video": true
 }`,
         response: "<ProfileOut>",
       },
@@ -289,9 +297,17 @@ const GROUPS: EndpointGroup[] = [
         method: "PATCH",
         path: "/api/profiles/{id}",
         auth: "admin",
-        summary: "Đổi name, status, hoặc max_concurrent_jobs.",
-        request: `{ "max_concurrent_jobs": 5 }`,
+        summary: "Đổi name, status, max_concurrent_jobs, max_concurrent_video, hoặc allows_video. Tất cả field optional — chỉ gửi field cần đổi.",
+        parameters: [
+          { name: "name", type: "string", description: "Đổi tên profile." },
+          { name: "status", type: "string", description: "logged_in | need_login | blocked | disabled..." },
+          { name: "max_concurrent_jobs", type: "integer", description: "1-16." },
+          { name: "max_concurrent_video", type: "integer", description: "1-12." },
+          { name: "allows_video", type: "boolean", description: "Toggle image-only mode. Đổi true → false sẽ làm các job video pending hết hàng đợi nếu profile này là profile cuối cùng cho phép video." },
+        ],
+        request: `{ "allows_video": false }`,
         response: "<ProfileOut>",
+        notes: "Flip allows_video=false sẽ KHÔNG cancel job video đang chạy — chỉ chặn job mới và lần retry tiếp theo.",
       },
       {
         title: "Upload Cookies (Netscape Format)",
@@ -401,21 +417,102 @@ const GROUPS: EndpointGroup[] = [
 }`,
       },
       {
+        title: "Upload Reference Image (Public)",
+        method: "POST",
+        path: "/v1/jobs/upload-input",
+        auth: "apikey",
+        summary: "Upload ảnh tham chiếu cho image-to-image / image-to-video. Probe Grok content moderation — ảnh vi phạm bị 400 ngay.",
+        parameters: [
+          { name: "file", type: "File (multipart)", required: true, description: "Binary image, ≤20MB, image/*." },
+        ],
+        request: `# multipart/form-data
+file: <binary>`,
+        response: `{
+  "file_id": "uuid",
+  "file_name": "...",
+  "mime_type": "image/png",
+  "file_size": 180612
+}`,
+        notes: "400 nếu ảnh vi phạm content policy của Grok — body chứa message. Sau khi nhận file_id, pass vào input_image_file_id của /v1/jobs/image hoặc /v1/jobs/video.",
+      },
+      {
         title: "Create Image Job (Public)",
         method: "POST",
         path: "/v1/jobs/image",
         auth: "apikey",
-        summary: "Public endpoint dùng API key. Tương đương POST /api/jobs với provider/job_type tự động.",
+        summary: "Public endpoint dùng API key. Hỗ trợ text-to-image (chỉ prompt) hoặc image-to-image (kèm input_image_file_id).",
         parameters: [
+          { name: "provider", type: "string", required: true, description: "\"grok\" hoặc \"flow\"." },
           { name: "prompt", type: "string", required: true, description: "Mô tả ảnh." },
+          { name: "profile_id", type: "uuid | null", description: "Null = auto pick. Image-only profiles vẫn nhận job_type=image bình thường." },
+          { name: "input_image_file_id", type: "uuid | null", description: "File_id từ /v1/jobs/upload-input để image-to-image. Bỏ trống = text-to-image." },
           { name: "options.aspect", type: "string", description: "16:9, 1:1, 9:16..." },
           { name: "options.quality", type: "string", description: "speed | quality." },
         ],
-        request: `{
+        request: `# Text-to-image
+{
+  "provider": "grok",
   "prompt": "A modern dashboard",
   "options": { "aspect": "16:9", "quality": "quality" }
+}
+
+# Image-to-image
+{
+  "provider": "grok",
+  "prompt": "make it cyberpunk style",
+  "input_image_file_id": "uuid-from-upload",
+  "options": { "aspect": "16:9", "quality": "speed" }
 }`,
-        response: `{ "id": "...", "status": "queued" }`,
+        response: `{ "job_id": "...", "status": "queued" }`,
+      },
+      {
+        title: "Create Video Job (Public)",
+        method: "POST",
+        path: "/v1/jobs/video",
+        auth: "apikey",
+        summary: "Public endpoint dùng API key. Hỗ trợ text-to-video hoặc image-to-video (kèm input_image_file_id). Backend chỉ chọn profile có allows_video=true.",
+        parameters: [
+          { name: "provider", type: "string", required: true, description: "\"grok\" hoặc \"flow\"." },
+          { name: "prompt", type: "string", required: true, description: "Mô tả video, tối đa 4000 ký tự." },
+          { name: "profile_id", type: "uuid | null", description: "Null = auto pick. Pass UUID của profile image-only → 422 \"Profile này chỉ tạo ảnh\"." },
+          { name: "input_image_file_id", type: "uuid | null", description: "File_id từ /v1/jobs/upload-input để image-to-video. Bỏ trống = text-to-video." },
+          { name: "options.aspect", type: "string", description: "16:9, 1:1, 9:16... Mặc định 1:1." },
+          { name: "options.resolution", type: "string", description: "480p | 720p (cần plan có quyền 720p)." },
+          { name: "options.duration", type: "integer", description: "6 | 10 giây (cần plan có quyền 10s)." },
+          { name: "options.mode", type: "string", description: "normal | fun | custom | spicy (Spicy = 18+, cần SuperGrok Heavy)." },
+        ],
+        request: `# Text-to-video
+{
+  "provider": "grok",
+  "prompt": "A whale jumping out of water in slow motion",
+  "options": { "aspect": "16:9", "resolution": "720p", "duration": 6, "mode": "normal" }
+}
+
+# Image-to-video (animate uploaded image)
+{
+  "provider": "grok",
+  "prompt": "make it move toward the camera",
+  "input_image_file_id": "uuid-from-upload",
+  "options": { "resolution": "720p", "duration": 6 }
+}`,
+        response: `{ "job_id": "...", "status": "queued" }`,
+        notes: "Nếu pool không còn profile nào allows_video=true → 422 \"Không có profile grok nào logged_in\". Set 1 profile allows_video=true ở /api/profiles trước khi gọi.",
+      },
+      {
+        title: "Bulk Delete Jobs (Public)",
+        method: "POST",
+        path: "/v1/jobs/bulk-delete",
+        auth: "apikey",
+        summary: "Xoá nhiều job 1 lần. Job đang chạy bị skip — cancel trước nếu muốn xoá.",
+        parameters: [
+          { name: "ids", type: "uuid[]", required: true, description: "1-500 job UUIDs." },
+        ],
+        request: `{ "ids": ["uuid-1", "uuid-2", "uuid-3"] }`,
+        response: `{
+  "deleted": 2,
+  "skipped_in_flight": 1,
+  "skipped_not_owned": 0
+}`,
       },
       {
         title: "Get Job Status (Public)",
@@ -672,6 +769,7 @@ export function ApiDocsPage() {
             <tr><td className="py-1.5 pr-4 font-mono">404</td><td className="font-mono">job_not_found</td><td>{t("grok.apidocs_err_job_not_found")}</td></tr>
             <tr><td className="py-1.5 pr-4 font-mono">409</td><td className="font-mono">profile_busy</td><td>{t("grok.apidocs_err_profile_busy")}</td></tr>
             <tr><td className="py-1.5 pr-4 font-mono">422</td><td className="font-mono">invalid_payload</td><td>{t("grok.apidocs_err_invalid_payload")}</td></tr>
+            <tr><td className="py-1.5 pr-4 font-mono">422</td><td className="font-mono">invalid_payload</td><td>Profile được pick chỉ tạo ảnh (allows_video=false) mà job_type=video. Đổi profile_id hoặc bật allows_video.</td></tr>
             <tr><td className="py-1.5 pr-4 font-mono">429</td><td className="font-mono">rate_limited</td><td>{t("grok.apidocs_err_rate_limited")}</td></tr>
           </tbody>
         </table>

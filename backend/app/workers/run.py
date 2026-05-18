@@ -207,7 +207,14 @@ async def process_one(db: AsyncSession, job: Job) -> None:
         await db.flush()
 
     slot_held: uuid.UUID | None = None
-    if job.profile_id:
+    # Image jobs may go through the pure-HTTP API path (no Chromium tab);
+    # we let the provider acquire a DOM slot itself if it actually falls
+    # back to Playwright. This lets dozens of /imagine API calls run in
+    # parallel through httpx without hitting the artificially-low
+    # `max_concurrent_jobs` cap that was sized for Chromium tabs.
+    # Video stays on pre-acquire because every video job needs DOM.
+    pre_acquire = job.job_type == "video"
+    if job.profile_id and pre_acquire:
         # First: try the originally-assigned profile (fast path — keeps
         # session warm cookies / project pinning intact).
         if await _try_acquire_slot(db, job.profile_id, job_type=job.job_type):
@@ -229,6 +236,7 @@ async def process_one(db: AsyncSession, job: Job) -> None:
                     user_id=job.user_id,
                     provider=job.provider,
                     excluded_profile_ids=try_skip,
+                    job_type=job.job_type,
                 )
             except Exception:  # noqa: BLE001 — pool empty or any other
                 alt = None
@@ -254,6 +262,10 @@ async def process_one(db: AsyncSession, job: Job) -> None:
     profile: Profile | None = None
     if slot_held:
         profile = await db.get(Profile, slot_held)
+    elif job.profile_id:
+        # Image path skipped pre-acquire — still load profile so provider
+        # has the cookies/CDP path available.
+        profile = await db.get(Profile, job.profile_id)
     await db.commit()
 
     profile_terminal_status: str | None = None
@@ -372,6 +384,11 @@ async def process_one(db: AsyncSession, job: Job) -> None:
             job.result_file_id = saved_ids[0]
             job.result_url = f"/api/files/{saved_ids[0]}/download"
             job.status = "success"
+            # Clear the error_message from any earlier retry attempt —
+            # a successful retry should not leave the previous failure's
+            # message lingering on the row (UI was showing the old
+            # `[rate_limited]` text on jobs that ultimately succeeded).
+            job.error_message = None
             job.completed_at = datetime.now(timezone.utc)
             db.add(JobLog(job_id=job.id, level="info",
                           message=f"Job success: {len(saved_ids)} file(s), {total_bytes} bytes"))
@@ -401,35 +418,74 @@ async def process_one(db: AsyncSession, job: Job) -> None:
             )
             if should_retry:
                 job.retry_count += 1
-                table = (RATE_LIMIT_BACKOFF_SECONDS if error_code == "rate_limited"
-                         else BACKOFF_SECONDS)
-                delay = table[min(job.retry_count - 1, len(table) - 1)]
-                job.next_attempt_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
-                job.status = "queued"
 
-                # Profile rotation: when the failure was a per-profile
-                # quota/rate-limit (or browser crash that suggests the
-                # Chromium itself is degraded), banish this profile from
-                # the job's retries. Worker re-resolves to a sibling on
-                # the next pickup. Without this the same exhausted
-                # profile keeps catching the retry and burns the budget.
-                ROTATE_CODES = {"rate_limited", "browser_crashed"}
-                if error_code in ROTATE_CODES and job.profile_id:
+                # Decide rotation first — we need to know whether the
+                # retry will reuse the same profile (apply backoff to let
+                # it cool down) or jump to a sibling (no backoff needed,
+                # the new profile has its own quota).
+                ROTATE_CODES = {"rate_limited", "browser_crashed", "timeout"}
+                rotate = (
+                    error_code in ROTATE_CODES
+                    or "TargetClosedError" in (job.error_message or "")
+                    or "Target page, context or browser has been closed" in (job.error_message or "")
+                )
+
+                if rotate and job.profile_id:
+                    # Check pool capacity BEFORE banishing the profile so
+                    # we don't end up with banned=[A,B,C] (everyone) and
+                    # an unrecoverable job. If we're about to ban the last
+                    # sibling, fall through to backoff-on-same-profile
+                    # instead.
                     payload = dict(job.input_payload or {})
                     banned = list(payload.get("_banned_profiles") or [])
                     pid_str = str(job.profile_id)
-                    if pid_str not in banned:
-                        banned.append(pid_str)
-                    payload["_banned_profiles"] = banned
-                    job.input_payload = payload
-                    db.add(JobLog(
-                        job_id=job.id, level="info",
-                        message=f"Rotating away from profile {pid_str[:8]} (code={error_code}), banned={len(banned)}",
-                    ))
-                    job.profile_id = None  # ← forces resolver on next pickup
-
-                db.add(JobLog(job_id=job.id, level="info",
-                              message=f"Retry after ~{delay}s ({job.retry_count}/{job.max_retry}, code={error_code})"))
+                    # Probe for an alternate profile right now (cheap query).
+                    try_skip = list(set(banned + [pid_str]))
+                    try:
+                        alt = await jobs_service._resolve_profile_for_job(
+                            db, requested_id=None, user_id=job.user_id,
+                            provider=job.provider,
+                            excluded_profile_ids=try_skip,
+                            job_type=job.job_type,
+                        )
+                    except Exception:  # noqa: BLE001
+                        alt = None
+                    if alt is not None:
+                        # Sibling available → rotate with NO backoff.
+                        # Worker picks up immediately on next loop tick.
+                        if pid_str not in banned:
+                            banned.append(pid_str)
+                        payload["_banned_profiles"] = banned
+                        job.input_payload = payload
+                        reason = error_code if error_code in ROTATE_CODES else "tab_crashed"
+                        db.add(JobLog(
+                            job_id=job.id, level="info",
+                            message=f"Rotating away from profile {pid_str[:8]} (reason={reason}), banned={len(banned)}",
+                        ))
+                        job.profile_id = None
+                        job.next_attempt_at = None  # immediate retry on sibling
+                        job.status = "queued"
+                        db.add(JobLog(job_id=job.id, level="info",
+                                      message=f"Retry immediately on sibling profile ({job.retry_count}/{job.max_retry}, code={error_code})"))
+                    else:
+                        # No sibling available → apply normal backoff
+                        # against the SAME profile (give Grok cooldown).
+                        table = (RATE_LIMIT_BACKOFF_SECONDS if error_code == "rate_limited"
+                                 else BACKOFF_SECONDS)
+                        delay = table[min(job.retry_count - 1, len(table) - 1)]
+                        job.next_attempt_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+                        job.status = "queued"
+                        db.add(JobLog(job_id=job.id, level="info",
+                                      message=f"No alt profile — retry on same after ~{delay}s ({job.retry_count}/{job.max_retry}, code={error_code})"))
+                else:
+                    # Non-rotatable error → backoff on same profile.
+                    table = (RATE_LIMIT_BACKOFF_SECONDS if error_code == "rate_limited"
+                             else BACKOFF_SECONDS)
+                    delay = table[min(job.retry_count - 1, len(table) - 1)]
+                    job.next_attempt_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+                    job.status = "queued"
+                    db.add(JobLog(job_id=job.id, level="info",
+                                  message=f"Retry after ~{delay}s ({job.retry_count}/{job.max_retry}, code={error_code})"))
             else:
                 job.status = "failed"
                 job.completed_at = datetime.now(timezone.utc)

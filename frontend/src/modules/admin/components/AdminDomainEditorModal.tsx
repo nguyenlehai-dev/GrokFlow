@@ -33,6 +33,28 @@ export function AdminDomainEditorModal({
   const [maintenanceAnnouncement, setMaintenanceAnnouncement] = useState(
     domain?.maintenance_announcement ?? ""
   );
+  const [loginTemplate, setLoginTemplate] = useState<"default" | "admin">(
+    domain?.login_template ?? "default"
+  );
+  // Daily job quota — empty string in the UI = unlimited (NULL on the wire).
+  // Stored as string in state so admin can clear the field; converted to
+  // number-or-null when serializing the payload.
+  const [jobsQuotaPerDay, setJobsQuotaPerDay] = useState<string>(
+    domain?.jobs_quota_per_day != null ? String(domain.jobs_quota_per_day) : "",
+  );
+  // Quota reset hour (UTC 0-23). Default 0 = midnight UTC. 17 = midnight VN.
+  const [quotaResetHourUtc, setQuotaResetHourUtc] = useState<string>(
+    String(domain?.quota_reset_hour_utc ?? 0),
+  );
+  const ALL_PROFILE_ACTIONS = ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"] as const;
+  const [allowedProfileActions, setAllowedProfileActions] = useState<string[]>(
+    domain?.allowed_profile_actions ?? [...ALL_PROFILE_ACTIONS],
+  );
+  const toggleAction = (key: string) => {
+    setAllowedProfileActions((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
 
   const togglePage = (path: string) => {
     setAllowedPages((prev) =>
@@ -57,6 +79,12 @@ export function AdminDomainEditorModal({
           return new Date(Date.now() + m * 60_000).toISOString();
         })(),
         maintenance_announcement: maintenanceAnnouncement || null,
+        login_template: loginTemplate,
+        allowed_profile_actions: allowedProfileActions,
+        jobs_quota_per_day: jobsQuotaPerDay.trim() === ""
+          ? null
+          : Math.max(0, Math.floor(Number(jobsQuotaPerDay))),
+        quota_reset_hour_utc: Math.min(23, Math.max(0, Math.floor(Number(quotaResetHourUtc) || 0))),
       };
       if (isCreate) payload.hostname = hostname;
       return isCreate
@@ -126,6 +154,33 @@ export function AdminDomainEditorModal({
         </div>
 
         <section className="border-t pt-3 space-y-2">
+          <h3 className="text-sm font-semibold">{t("admin.de_login_template_title", "Giao diện login")}</h3>
+          <div>
+            <label className="text-sm font-medium">
+              {t("admin.de_login_template_label", "Login template")}
+            </label>
+            <select
+              className="input"
+              value={loginTemplate}
+              onChange={(e) => setLoginTemplate(e.target.value as "default" | "admin")}
+            >
+              <option value="default">
+                {t("admin.de_login_template_default", "Default (branded)")}
+              </option>
+              <option value="admin">
+                {t("admin.de_login_template_admin", "Admin console (minimal)")}
+              </option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              {t(
+                "admin.de_login_template_hint",
+                "Khi user vào /login từ hostname này sẽ thấy template tương ứng. URL /admin/login luôn ép template 'admin'."
+              )}
+            </p>
+          </div>
+        </section>
+
+        <section className="border-t pt-3 space-y-2">
           <h3 className="text-sm font-semibold">{t("admin.de_playground_title")}</h3>
           <Checkbox checked={requirePlaygroundKey} onChange={setRequirePlaygroundKey}>
             <strong>{t("admin.de_playground_require")}</strong>
@@ -133,6 +188,55 @@ export function AdminDomainEditorModal({
               {t("admin.de_playground_require_hint")}
             </span>
           </Checkbox>
+        </section>
+
+        <section className="border-t pt-3 space-y-2">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            ⚡ Quota Grok / ngày
+            {jobsQuotaPerDay.trim() !== "" && (
+              <span className="badge-cyan text-[10px]">{jobsQuotaPerDay}/ngày</span>
+            )}
+            <span className="badge-slate text-[10px]">Reset {quotaResetHourUtc.padStart(2, "0")}:00 UTC</span>
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-slate-700">
+                Số job Grok tối đa / ngày
+              </label>
+              <input
+                className="input mt-1"
+                type="number"
+                min={0}
+                step={50}
+                value={jobsQuotaPerDay}
+                onChange={(e) => setJobsQuotaPerDay(e.target.value)}
+                placeholder="Để trống = không giới hạn"
+              />
+              <p className="text-[10px] text-slate-500 mt-1">
+                Khi tenant của domain này submit job vượt số này, backend trả 429.
+                Áp dụng cho POST <code className="font-mono">/api/jobs</code> (cả batch +
+                playground), không gồm gateway. Để trống = unlimited.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-700">
+                Giờ reset hằng ngày (UTC, 0-23)
+              </label>
+              <input
+                className="input mt-1"
+                type="number"
+                min={0}
+                max={23}
+                value={quotaResetHourUtc}
+                onChange={(e) => setQuotaResetHourUtc(e.target.value)}
+              />
+              <p className="text-[10px] text-slate-500 mt-1">
+                💡 <strong>0 = 00:00 UTC</strong> (= 07:00 sáng VN). Muốn reset đúng
+                <strong> 00:00 giờ Việt Nam</strong> → đặt <strong>17</strong>.
+                Period rollover: từ giờ này hôm nay đến giờ này ngày mai.
+              </p>
+            </div>
+          </div>
         </section>
 
         <section className="border-t pt-3 space-y-2">
@@ -213,6 +317,48 @@ export function AdminDomainEditorModal({
                 </p>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="border-t pt-3 space-y-2">
+          <h3 className="text-sm font-semibold">{t("admin.de_profile_actions_title")}</h3>
+          <p className="text-xs text-slate-500">{t("admin.de_profile_actions_hint")}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-sm">
+            <Checkbox
+              checked={allowedProfileActions.includes("auto_login")}
+              onChange={() => toggleAction("auto_login")}
+            >
+              <strong>{t("admin.de_pa_auto_login")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_auto_login_hint")}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allowedProfileActions.includes("upload_cookies")}
+              onChange={() => toggleAction("upload_cookies")}
+            >
+              <strong>{t("admin.de_pa_upload_cookies")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_upload_cookies_hint")}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allowedProfileActions.includes("stop_vnc")}
+              onChange={() => toggleAction("stop_vnc")}
+            >
+              <strong>{t("admin.de_pa_stop_vnc")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_stop_vnc_hint")}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allowedProfileActions.includes("disable")}
+              onChange={() => toggleAction("disable")}
+            >
+              <strong>{t("admin.de_pa_disable")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_disable_hint")}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allowedProfileActions.includes("delete")}
+              onChange={() => toggleAction("delete")}
+            >
+              <strong>{t("admin.de_pa_delete")}</strong>
+              <span className="block text-xs text-slate-500">{t("admin.de_pa_delete_hint")}</span>
+            </Checkbox>
           </div>
         </section>
 

@@ -3,10 +3,21 @@
 // UI can render group-level "Select all" toggles instead of a flat soup
 // of checkboxes. Keep in sync with router.tsx + AppShell.tsx.
 //
+// TWO catalogs live here — they have *different* scopes:
+//   • PAGE_GROUPS — admin web app: granted to roles / domains. Lists pages
+//     admins, support staff, and regular users see in the sidebar.
+//   • TOOL_PAGE_GROUPS — desktop kiosk: granted to Tool Installs. Lists
+//     pages a kiosk-machine user is allowed to open. Includes CVP (the
+//     kiosk workspace) and OMITS admin-only pages (/admin/*, /servers,
+//     gateway dev tools) since kiosks aren't admin terminals.
+//
 // Used by:
-//   - AdminRolesPage / AdminDomainsTab — render the page-allowlist UI.
+//   - AdminRolesPage / AdminDomainsTab — render the admin page-allowlist
+//     UI (PAGE_GROUPS).
+//   - AdminToolInstallsPage — render the tool-install allowlist UI
+//     (TOOL_PAGE_GROUPS).
 //   - useDocumentTitle — map a route prefix to its human-readable page
-//     name for the browser tab title.
+//     name for the browser tab title (ALL_PAGES, union of both).
 
 export interface PageDef {
   path: string;
@@ -35,10 +46,21 @@ export const PAGE_GROUPS: PageGroup[] = [
       { path: "/dashboard", label: "Dashboard" },
       { path: "/api-keys", label: "API Keys" },
       { path: "/billing", label: "Billing" },
-      { path: "/pricing", label: "Pricing" },
       { path: "/checkout", label: "Checkout" },
       { path: "/audit-logs", label: "Audit Log" },
       { path: "/settings", label: "Settings" },
+    ],
+  },
+  {
+    key: "gallery",
+    label: "Gallery",
+    items: [
+      { path: "/gallery", label: "Gallery · Toàn bộ (shortcut)" },
+      { path: "/gallery/images", label: "Gallery · Ảnh" },
+      { path: "/gallery/videos", label: "Gallery · Video" },
+      { path: "/gallery/prompts", label: "Gallery · Prompts" },
+      { path: "/gallery/flow", label: "Gallery · Flow" },
+      { path: "/gallery/gateway", label: "Gallery · Gateway" },
     ],
   },
   {
@@ -53,6 +75,8 @@ export const PAGE_GROUPS: PageGroup[] = [
       { path: "/admin/plans", label: "Admin · Plans", adminOnly: true },
       { path: "/admin/billing", label: "Admin · Billing", adminOnly: true },
       { path: "/admin/git", label: "Admin · Git / Deploy", adminOnly: true },
+      { path: "/admin/tool-installs", label: "Admin · Tool Installs", adminOnly: true },
+      { path: "/admin/login-templates", label: "Admin · Login Templates", adminOnly: true },
     ],
   },
   {
@@ -63,6 +87,8 @@ export const PAGE_GROUPS: PageGroup[] = [
       { path: "/jobs", label: "Grok · Jobs" },
       { path: "/grok/playground", label: "Grok · Playground" },
       { path: "/api-docs", label: "Grok · API Docs" },
+      // NOTE: /create-video-pro is intentionally absent — it's a kiosk
+      // workspace, not an admin page. See TOOL_PAGE_GROUPS below.
     ],
   },
   {
@@ -93,6 +119,17 @@ export const PAGE_GROUPS: PageGroup[] = [
     ],
   },
   {
+    key: "tool_dist",
+    label: "Tool Distribution",
+    superOnly: true,
+    items: [
+      { path: "/tools", label: "Tool · Toàn bộ (shortcut)", adminOnly: true },
+      { path: "/tools/win", label: "Tool · Windows installers", adminOnly: true },
+      { path: "/tools/mac", label: "Tool · macOS installers", adminOnly: true },
+      { path: "/tools/document", label: "Tool · Documents", adminOnly: true },
+    ],
+  },
+  {
     key: "gateway",
     label: "Gateway Management",
     items: [
@@ -114,8 +151,89 @@ export const PAGE_GROUPS: PageGroup[] = [
   },
 ];
 
-/** Flat list — convenient when you don't care about groups. */
-export const ALL_PAGES: PageDef[] = PAGE_GROUPS.flatMap((g) => g.items);
+// ─── Tool Install allowlist catalog ──────────────────────────────────────
+//
+// Scope: pages a desktop-kiosk machine is allowed to open. Different from
+// the admin catalog because kiosk users:
+//   • aren't admins → no /admin/*, no /servers
+//   • aren't devs → no gateway, no api-docs
+//   • DO use the Create Video Pro workspace as their main screen
+// Keep this curated, not auto-derived — fewer checkboxes = clearer install
+// configuration for the admin granting access to a customer's machine.
+export const TOOL_PAGE_GROUPS: PageGroup[] = [
+  {
+    key: "grok-tool-cvp",
+    label: "Create Video Pro — panels trong kiosk",
+    items: [
+      // Grant the parent to give ALL panels (prefix-match in isPageAllowed
+      // means /create-video-pro/* inherits). Grant specific child paths
+      // instead to restrict — only the granted panels show in sidebar.
+      { path: "/create-video-pro", label: "Toàn bộ panels (shortcut)" },
+      { path: "/create-video-pro/text-to-video",  label: "Text → Video Pro" },
+      { path: "/create-video-pro/image-to-video", label: "Image → Video" },
+      { path: "/create-video-pro/character-sync", label: "Đồng bộ nhân vật" },
+      { path: "/create-video-pro/image-sync",     label: "Tạo ảnh đồng bộ" },
+      { path: "/create-video-pro/image-direct",   label: "Tạo ảnh trực tiếp" },
+      { path: "/create-video-pro/auto-login",     label: "Grok Auto Login" },
+    ],
+  },
+  {
+    key: "grok-tool",
+    label: "Tool Grok (kiosk) — khác",
+    items: [
+      // Read-only views into Grok internals — useful for the customer to
+      // see their own job history and test prompts before batching.
+      { path: "/profiles", label: "Profiles (xem profile Grok)" },
+      { path: "/jobs", label: "Jobs (lịch sử job)" },
+      { path: "/grok/playground", label: "Playground (test prompt)" },
+    ],
+  },
+  {
+    key: "core",
+    label: "Tài khoản",
+    items: [
+      { path: "/dashboard", label: "Dashboard" },
+      { path: "/api-keys", label: "API Keys" },
+      { path: "/billing", label: "Billing (gói cước)" },
+      { path: "/checkout", label: "Checkout (nâng cấp)" },
+      { path: "/settings", label: "Settings (đổi mật khẩu)" },
+    ],
+  },
+  {
+    key: "gallery",
+    label: "Gallery (xem kết quả)",
+    items: [
+      { path: "/gallery", label: "Gallery · Toàn bộ (shortcut)" },
+      { path: "/gallery/images", label: "Gallery · Ảnh" },
+      { path: "/gallery/videos", label: "Gallery · Video" },
+    ],
+  },
+  {
+    key: "flow-tool",
+    label: "Flow (chỉnh video)",
+    items: [
+      { path: "/flow", label: "Flow · Toàn bộ (shortcut)" },
+      { path: "/flow/cut", label: "Flow · Cut Video" },
+      { path: "/flow/merge", label: "Flow · Merge Videos" },
+      { path: "/flow/extract-audio", label: "Flow · Extract Audio" },
+      { path: "/flow/add-audio", label: "Flow · Merge/Replace Audio" },
+      { path: "/flow/speed", label: "Flow · Change Speed" },
+      { path: "/flow/resize", label: "Flow · Resize" },
+      { path: "/flow/crop", label: "Flow · Crop Video" },
+      { path: "/flow/extract-frames", label: "Flow · Extract Frames" },
+    ],
+  },
+];
+
+/** Flat list across BOTH catalogs — used by useDocumentTitle/findPage to
+ *  resolve route → label regardless of which catalog the page lives in. */
+const _adminPages = PAGE_GROUPS.flatMap((g) => g.items);
+const _toolPages = TOOL_PAGE_GROUPS.flatMap((g) => g.items);
+export const ALL_PAGES: PageDef[] = [
+  ..._adminPages,
+  // De-dupe by path — many pages exist in both catalogs (Dashboard, etc.)
+  ..._toolPages.filter((tp) => !_adminPages.some((ap) => ap.path === tp.path)),
+];
 
 export function findPage(path: string): PageDef | undefined {
   return ALL_PAGES.find((p) => p.path === path);

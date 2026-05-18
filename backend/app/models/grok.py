@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, DateTime, ForeignKey, Integer, String, Text, func,
+    BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +43,19 @@ class Profile(Base, TimestampMixin):
     # counter so the slot-acquire UPDATE can enforce both caps atomically
     # without re-querying running jobs.
     active_video_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Image-only toggle. When False, the resolver skips this profile for
+    # video jobs entirely (regardless of `max_concurrent_video`). Useful
+    # for Free-tier Grok accounts that have no video quota, or for
+    # dedicating a profile to image-only throughput. Default True keeps
+    # pre-0027 behavior — every profile accepts both job types.
+    allows_video: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    # Account tier label — free-text VARCHAR so adding 'pro' / 'enterprise'
+    # later doesn't need a migration. Common values: "free", "heavy" (=
+    # SuperGrok Premium with ~500/day quota), "pro". Used by the admin UI
+    # for filtering + badges; does NOT change worker routing.
+    tier: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="free", server_default="free",
+    )
 
     user: Mapped["User"] = relationship(back_populates="profiles")  # noqa: F821
     jobs: Mapped[list["Job"]] = relationship(back_populates="profile")
@@ -94,6 +107,10 @@ class ProjectUserAssignment(Base):
         UUIDType, ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    # Soft-disable. When False the resolver skips this assignment as if
+    # the row didn't exist — lets super_admin suspend a user without
+    # destroying the assignment row (and its created_at audit trail).
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )
@@ -122,6 +139,36 @@ class ProjectDomainAssignment(Base):
         UUIDType, ForeignKey("domains.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    # Soft-disable. When False the resolver and visibility queries treat
+    # this row as if it doesn't exist. Used by super_admin to temporarily
+    # revoke a tenant's access without losing the assignment config.
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+
+class ProjectToolInstallAssignment(Base):
+    """Many-to-many: which GrokProject each tool install can pull from.
+
+    Sibling of ProjectDomainAssignment, but keyed by tool_install_id. Used
+    when a job request comes in via the desktop client (X-Tool-Install-Id
+    header). Resolver tries this table first for an exact install match;
+    falls back to ProjectDomainAssignment if no row exists.
+
+    Only `super_admin` edits these.
+    """
+    __tablename__ = "project_tool_install_assignments"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("grok_projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tool_install_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("tool_installs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )

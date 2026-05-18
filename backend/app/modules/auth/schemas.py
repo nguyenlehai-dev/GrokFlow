@@ -57,6 +57,10 @@ class MeResponse(BaseModel):
     created_at: datetime
     # Tenant membership. NULL = unscoped (super_admin or legacy).
     domain_id: uuid.UUID | None = None
+    # Tool install scope. Non-null = this user is a desktop kiosk user.
+    # FE uses this to skip the admin shell + auto-redirect to the
+    # branded /create-video-pro workspace on login.
+    tool_install_id: uuid.UUID | None = None
     # Per-domain role (Role row, not the role string above). When set the
     # user's menu is further narrowed to role.allowed_pages.
     role_id: uuid.UUID | None = None

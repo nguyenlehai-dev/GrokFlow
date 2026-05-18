@@ -6,7 +6,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
-from app.models import Job, JobLog, GrokProject, Profile, ProjectDomainAssignment, ProjectUserAssignment, User
+from app.models import (
+    Job, JobLog, GrokProject, Profile,
+    ProjectDomainAssignment, ProjectToolInstallAssignment, ProjectUserAssignment,
+    ToolInstall, User,
+)
 from app.modules.admin.audit import service as audit
 
 
@@ -17,7 +21,9 @@ async def _resolve_profile_for_job(
     user_id: uuid.UUID,
     provider: str,
     requester_domain_id: uuid.UUID | None = None,
+    requester_tool_install_id: uuid.UUID | None = None,
     excluded_profile_ids: list[uuid.UUID] | list[str] | None = None,
+    job_type: str = "image",
 ) -> Profile | None:
     """Customer cannot use their own profile — always pick from admin pool.
 
@@ -41,9 +47,29 @@ async def _resolve_profile_for_job(
     assigned_to_domain = (
         select(GrokProject.profile_id)
         .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
-        .where(ProjectDomainAssignment.domain_id == requester_domain_id)
+        .where(
+            ProjectDomainAssignment.domain_id == requester_domain_id,
+            ProjectDomainAssignment.enabled.is_(True),
+        )
         .scalar_subquery()
         if requester_domain_id is not None
+        else None
+    )
+    # Parallel for tool installs. When the request comes from a desktop
+    # client (X-Tool-Install-Id header), the profile pool is restricted to
+    # profiles whose GrokProjects are assigned to THIS install. Install
+    # scope is STRICTER than domain scope — there's no owner-in-domain
+    # fallback (installs don't own profiles), so a tool-scoped user with
+    # zero assignments sees zero profiles. Admin must explicitly grant.
+    assigned_to_install = (
+        select(GrokProject.profile_id)
+        .join(ProjectToolInstallAssignment, ProjectToolInstallAssignment.project_id == GrokProject.id)
+        .where(
+            ProjectToolInstallAssignment.tool_install_id == requester_tool_install_id,
+            ProjectToolInstallAssignment.enabled.is_(True),
+        )
+        .scalar_subquery()
+        if requester_tool_install_id is not None
         else None
     )
 
@@ -58,6 +84,15 @@ async def _resolve_profile_for_job(
             raise InvalidPayload(f"Profile provider mismatch: profile={profile.provider}, requested={provider}")
         if profile.status not in {"logged_in", "running_job"}:
             raise InvalidPayload(f"Profile not ready (status={profile.status}). Ask admin to refresh.")
+        # Image-only guard for explicit picks: refuse video on a profile
+        # that admin has flagged as image-only. We do this BEFORE the
+        # tenant visibility check so the user gets a clear "video not
+        # allowed" message instead of a generic permission error when
+        # both fail simultaneously.
+        if job_type == "video" and not profile.allows_video:
+            raise InvalidPayload(
+                "Profile này chỉ tạo ảnh (image-only) — chọn profile khác cho job video.",
+            )
         # Tenant visibility check — same rule as auto-pick, via project assignments.
         if requester_domain_id is not None and owner.domain_id != requester_domain_id:
             visible = (
@@ -67,12 +102,28 @@ async def _resolve_profile_for_job(
                     .where(
                         GrokProject.profile_id == profile.id,
                         ProjectDomainAssignment.domain_id == requester_domain_id,
+                        ProjectDomainAssignment.enabled.is_(True),
                     )
                     .limit(1)
                 )
             ).first()
             if not visible:
                 raise PermissionDenied("Profile not assigned to your domain")
+        # Tool-install visibility check — for desktop clients, profile must
+        # be reachable via a GrokProject assigned to THIS install.
+        if requester_tool_install_id is not None:
+            visible = (await db.execute(
+                select(GrokProject.id)
+                .join(ProjectToolInstallAssignment, ProjectToolInstallAssignment.project_id == GrokProject.id)
+                .where(
+                    GrokProject.profile_id == profile.id,
+                    ProjectToolInstallAssignment.tool_install_id == requester_tool_install_id,
+                    ProjectToolInstallAssignment.enabled.is_(True),
+                )
+                .limit(1)
+            )).first()
+            if not visible:
+                raise PermissionDenied("Profile chưa được gán cho máy desktop này")
         return profile
 
     # Auto-pick: any logged_in / running_job admin-pool profile for this provider.
@@ -86,7 +137,15 @@ async def _resolve_profile_for_job(
         Profile.provider == provider,
         Profile.status.in_(["logged_in", "running_job"]),
     ]
-    if assigned_to_domain is not None:
+    # Image-only profiles drop out of the pool for video jobs. Image jobs
+    # still see them (that's their whole purpose).
+    if job_type == "video":
+        where_clauses.append(Profile.allows_video.is_(True))
+    if assigned_to_install is not None:
+        # Strictest scope: install. No owner fallback — admin must
+        # explicitly assign a project to this install for it to show up.
+        where_clauses.append(Profile.id.in_(assigned_to_install))
+    elif assigned_to_domain is not None:
         where_clauses.append(
             (User.domain_id == requester_domain_id)
             | Profile.id.in_(assigned_to_domain)
@@ -100,12 +159,21 @@ async def _resolve_profile_for_job(
             for p in excluded_profile_ids
         ]
         where_clauses.append(Profile.id.not_in(excluded_uuids))
+    # For video jobs, order by active_video_jobs ASC so the pool spreads
+    # video load evenly across profiles (each video tab eats ~600MB-1.2GB
+    # Chromium RAM, so getting one video on profile A and the next on
+    # profile B is way better than stacking both on the same Chromium).
+    # For image jobs, active_jobs (DOM-only count after the slot refactor)
+    # still picks the freshest profile.
+    load_column = (
+        Profile.active_video_jobs if job_type == "video" else Profile.active_jobs
+    )
     stmt = (
         select(Profile)
         .join(User, User.id == Profile.user_id)
         .where(*where_clauses)
         .order_by(
-            Profile.active_jobs.asc(),
+            load_column.asc(),
             func.coalesce(Profile.last_used_at, Profile.created_at).asc(),
         )
         .limit(1)
@@ -151,6 +219,11 @@ async def pick_alternate_profile(
             provider=job.provider,
             requester_domain_id=requester_domain_id,
             excluded_profile_ids=banned,
+            # Critical: forward job_type so video-job rotation skips
+            # image-only profiles + uses the video load-balancing column.
+            # Without this, a video job rotated mid-flight could land on
+            # an image-only profile and fail again immediately.
+            job_type=job.job_type,
         )
     except InvalidPayload:
         # Pool exhausted (all profiles either down or already banned for
@@ -167,7 +240,9 @@ async def create_job(
     prompt: str,
     profile_id: uuid.UUID | None,
     options: dict[str, Any] | None,
+    project_id: uuid.UUID | None = None,
     api_key_id: uuid.UUID | None = None,
+    tool_install_id_str: str | None = None,
 ) -> Job:
     # Look up requester's domain — used to filter the pool down to profiles
     # super_admin has loaned to this tenant + legacy same-domain profiles.
@@ -179,19 +254,45 @@ async def create_job(
         if requester and requester.role != "super_admin"
         else None
     )
+    # Resolve the desktop install (if the request came in via X-Tool-Install-Id
+    # header on the HTTP handler). super_admin still bypasses install scoping
+    # so ops can run jobs from the kiosk during debugging.
+    requester_tool_install_id: uuid.UUID | None = None
+    if tool_install_id_str and requester and requester.role != "super_admin":
+        install = (await db.execute(
+            select(ToolInstall).where(ToolInstall.tool_id == tool_install_id_str)
+        )).scalar_one_or_none()
+        if install and install.status == "active":
+            requester_tool_install_id = install.id
+
     profile = await _resolve_profile_for_job(
         db, requested_id=profile_id, user_id=user_id, provider=provider,
         requester_domain_id=requester_domain_id,
+        requester_tool_install_id=requester_tool_install_id,
+        job_type=job_type,
     )
 
     # Pick the specific GrokProject the worker should use. Priority:
+    #   0) explicit `project_id` from the request — admin / Playground form
+    #      picked a project manually; honor it verbatim (must belong to the
+    #      resolved profile, otherwise 400)
     #   1) per-user pin (project_user_assignments) — tenant user gets
     #      THEIR project even when sharing the profile with others
     #   2) domain-wide assignment — every user in this tenant uses it
     #   3) super_admin bootstrap: first project on the profile
     # Profile has no projects yet → leave NULL → worker falls back to
     # grok.com/imagine root URL (legacy behaviour).
-    picked_project = None
+    picked_project: GrokProject | None = None
+    # 0) explicit override
+    if project_id is not None:
+        explicit = await db.get(GrokProject, project_id)
+        if explicit is None:
+            raise InvalidPayload(f"GrokProject {project_id} không tồn tại")
+        if explicit.profile_id != profile.id:
+            raise InvalidPayload(
+                "project_id không thuộc profile được chọn — pick lại project hoặc bỏ profile_id để auto-resolve.",
+            )
+        picked_project = explicit
     # 1) per-user pin
     user_pin_q = (
         select(GrokProject)
@@ -199,13 +300,33 @@ async def create_job(
         .where(
             GrokProject.profile_id == profile.id,
             ProjectUserAssignment.user_id == user_id,
+            ProjectUserAssignment.enabled.is_(True),
         )
         .order_by(GrokProject.created_at.asc())
         .limit(1)
     )
-    picked_project = (await db.execute(user_pin_q)).scalar_one_or_none()
+    if picked_project is None:
+        picked_project = (await db.execute(user_pin_q)).scalar_one_or_none()
 
-    # 2) domain-wide fallback (tenant path)
+    # 2a) tool-install-wide fallback (desktop kiosk path). When a request
+    # comes from a registered desktop install we prefer the install's
+    # assignments over the domain's, since installs are the more specific
+    # scope. Falls through to (2b) domain if no install assignment exists.
+    if picked_project is None and requester_tool_install_id is not None:
+        install_q = (
+            select(GrokProject)
+            .join(ProjectToolInstallAssignment, ProjectToolInstallAssignment.project_id == GrokProject.id)
+            .where(
+                GrokProject.profile_id == profile.id,
+                ProjectToolInstallAssignment.tool_install_id == requester_tool_install_id,
+                ProjectToolInstallAssignment.enabled.is_(True),
+            )
+            .order_by(GrokProject.created_at.asc())
+            .limit(1)
+        )
+        picked_project = (await db.execute(install_q)).scalar_one_or_none()
+
+    # 2b) domain-wide fallback (tenant web path)
     if picked_project is None and requester_domain_id is not None:
         domain_q = (
             select(GrokProject)
@@ -213,6 +334,7 @@ async def create_job(
             .where(
                 GrokProject.profile_id == profile.id,
                 ProjectDomainAssignment.domain_id == requester_domain_id,
+                ProjectDomainAssignment.enabled.is_(True),
             )
             .order_by(GrokProject.created_at.asc())
             .limit(1)

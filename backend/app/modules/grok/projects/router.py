@@ -29,7 +29,11 @@ from sqlalchemy import select
 
 from app.core.deps import CurrentUser, DbSession, SuperAdminUser
 from app.core.exceptions import InvalidPayload, NotFound, PermissionDenied
-from app.models import Domain, GrokProject, Profile, ProjectDomainAssignment, ProjectUserAssignment, User
+from app.models import (
+    Domain, GrokProject, Profile,
+    ProjectDomainAssignment, ProjectToolInstallAssignment, ProjectUserAssignment,
+    ToolInstall, User,
+)
 from app.modules.admin.audit import service as audit
 
 router = APIRouter(prefix="/api/grok-projects", tags=["grok-projects"])
@@ -79,6 +83,10 @@ class ProjectOut(BaseModel):
     # Quick summary so the UI doesn't have to fetch /domains separately
     # just to show "→ assigned to 2 tenants".
     domain_count: int = 0
+    # Parallel counter for desktop installs assigned to this project.
+    # Same purpose — list endpoint precomputes it so the row can render
+    # the "X tool install(s) assigned" link without another fetch.
+    tool_install_count: int = 0
 
     class Config:
         from_attributes = True
@@ -86,11 +94,32 @@ class ProjectOut(BaseModel):
 
 class ProjectDomainsOut(BaseModel):
     project_id: uuid.UUID
+    # All currently-assigned domains (enabled + disabled together).
+    # FE treats this as the "is assigned" checkbox state.
     domain_ids: list[uuid.UUID]
+    # Subset of `domain_ids` whose `enabled` flag is FALSE. Resolver
+    # ignores these as if they weren't assigned. FE shows them as a
+    # disabled toggle on the same row.
+    disabled_domain_ids: list[uuid.UUID] = []
 
 
 class ProjectDomainsUpdate(BaseModel):
     domain_ids: list[uuid.UUID]
+    # Optional subset that should be persisted with enabled=FALSE. Must
+    # be a subset of domain_ids; entries outside `domain_ids` are
+    # ignored. Missing → all assignments enabled (legacy behavior).
+    disabled_domain_ids: list[uuid.UUID] = []
+
+
+class ProjectToolInstallsOut(BaseModel):
+    project_id: uuid.UUID
+    tool_install_ids: list[uuid.UUID]
+    disabled_tool_install_ids: list[uuid.UUID] = []
+
+
+class ProjectToolInstallsUpdate(BaseModel):
+    tool_install_ids: list[uuid.UUID]
+    disabled_tool_install_ids: list[uuid.UUID] = []
 
 
 class UserInDomainOut(BaseModel):
@@ -103,10 +132,12 @@ class UserInDomainOut(BaseModel):
 class ProjectUsersOut(BaseModel):
     project_id: uuid.UUID
     user_ids: list[uuid.UUID]
+    disabled_user_ids: list[uuid.UUID] = []
 
 
 class ProjectUsersUpdate(BaseModel):
     user_ids: list[uuid.UUID]
+    disabled_user_ids: list[uuid.UUID] = []
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -130,12 +161,28 @@ async def _domain_counts(db, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, in
     return {pid: cnt for pid, cnt in rows}
 
 
-def _serialize(p: GrokProject, count: int = 0) -> ProjectOut:
+async def _tool_install_counts(db, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    if not project_ids:
+        return {}
+    from sqlalchemy import func
+    rows = (await db.execute(
+        select(
+            ProjectToolInstallAssignment.project_id,
+            func.count(ProjectToolInstallAssignment.tool_install_id),
+        )
+        .where(ProjectToolInstallAssignment.project_id.in_(project_ids))
+        .group_by(ProjectToolInstallAssignment.project_id)
+    )).all()
+    return {pid: cnt for pid, cnt in rows}
+
+
+def _serialize(p: GrokProject, count: int = 0, tool_count: int = 0) -> ProjectOut:
     return ProjectOut(
         id=p.id, profile_id=p.profile_id,
         grok_project_id=p.grok_project_id, name=p.name,
         description=p.description, created_at=p.created_at,
         domain_count=count,
+        tool_install_count=tool_count,
     )
 
 
@@ -165,8 +212,10 @@ async def list_projects(
 
     q = q.order_by(GrokProject.created_at.asc())
     rows = list((await db.execute(q)).scalars().all())
-    counts = await _domain_counts(db, [r.id for r in rows])
-    return [_serialize(r, counts.get(r.id, 0)) for r in rows]
+    project_ids = [r.id for r in rows]
+    counts = await _domain_counts(db, project_ids)
+    tool_counts = await _tool_install_counts(db, project_ids)
+    return [_serialize(r, counts.get(r.id, 0), tool_counts.get(r.id, 0)) for r in rows]
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -270,11 +319,20 @@ async def get_project_domains(
         raise PermissionDenied()
     rows = (
         await db.execute(
-            select(ProjectDomainAssignment.domain_id)
+            select(
+                ProjectDomainAssignment.domain_id,
+                ProjectDomainAssignment.enabled,
+            )
             .where(ProjectDomainAssignment.project_id == project_id)
         )
-    ).scalars().all()
-    return ProjectDomainsOut(project_id=project_id, domain_ids=list(rows))
+    ).all()
+    all_ids = [did for did, _ in rows]
+    disabled_ids = [did for did, ena in rows if not ena]
+    return ProjectDomainsOut(
+        project_id=project_id,
+        domain_ids=all_ids,
+        disabled_domain_ids=disabled_ids,
+    )
 
 
 @router.put("/{project_id}/domains", response_model=ProjectDomainsOut)
@@ -309,8 +367,13 @@ async def set_project_domains(
         ProjectDomainAssignment.__table__.delete()
         .where(ProjectDomainAssignment.project_id == project_id)
     )
+    disabled_set = {d for d in payload.disabled_domain_ids if d in set(payload.domain_ids)}
     for did in payload.domain_ids:
-        db.add(ProjectDomainAssignment(project_id=project_id, domain_id=did))
+        db.add(ProjectDomainAssignment(
+            project_id=project_id,
+            domain_id=did,
+            enabled=did not in disabled_set,
+        ))
 
     await audit.log_action(
         db, user_id=_super.id, action="grok_project_domains_set",
@@ -318,11 +381,91 @@ async def set_project_domains(
         metadata={
             "name": p.name,
             "domain_ids": [str(d) for d in payload.domain_ids],
+            "disabled_domain_ids": [str(d) for d in disabled_set],
         },
     )
     await db.commit()
     return ProjectDomainsOut(
-        project_id=project_id, domain_ids=list(payload.domain_ids),
+        project_id=project_id,
+        domain_ids=list(payload.domain_ids),
+        disabled_domain_ids=list(disabled_set),
+    )
+
+
+# ─── Per-project tool-install assignment ──────────────────────────────────
+# Sibling of the domain endpoints above. Used to scope projects to
+# specific desktop installs (kiosks). Logic mirrors the domain flow:
+# delete-then-insert, soft-disable via `enabled=false`.
+
+
+@router.get("/{project_id}/tool-installs", response_model=ProjectToolInstallsOut)
+async def get_project_tool_installs(
+    project_id: uuid.UUID, user: CurrentUser, db: DbSession,
+) -> ProjectToolInstallsOut:
+    p = await db.get(GrokProject, project_id)
+    if not p:
+        raise NotFound("grok_project")
+    if user.role not in ("super_admin", "admin"):
+        raise PermissionDenied()
+    rows = (await db.execute(
+        select(
+            ProjectToolInstallAssignment.tool_install_id,
+            ProjectToolInstallAssignment.enabled,
+        ).where(ProjectToolInstallAssignment.project_id == project_id)
+    )).all()
+    return ProjectToolInstallsOut(
+        project_id=project_id,
+        tool_install_ids=[tid for tid, _ in rows],
+        disabled_tool_install_ids=[tid for tid, ena in rows if not ena],
+    )
+
+
+@router.put("/{project_id}/tool-installs", response_model=ProjectToolInstallsOut)
+async def set_project_tool_installs(
+    project_id: uuid.UUID, payload: ProjectToolInstallsUpdate,
+    _super: SuperAdminUser, db: DbSession,
+) -> ProjectToolInstallsOut:
+    p = await db.get(GrokProject, project_id)
+    if not p:
+        raise NotFound("grok_project")
+    if payload.tool_install_ids:
+        found = (await db.execute(
+            select(ToolInstall.id).where(ToolInstall.id.in_(payload.tool_install_ids))
+        )).scalars().all()
+        missing = set(payload.tool_install_ids) - set(found)
+        if missing:
+            raise InvalidPayload(
+                f"Unknown tool_install_ids: {sorted(str(m) for m in missing)}"
+            )
+
+    await db.execute(
+        ProjectToolInstallAssignment.__table__.delete()
+        .where(ProjectToolInstallAssignment.project_id == project_id)
+    )
+    disabled_set = {
+        d for d in payload.disabled_tool_install_ids if d in set(payload.tool_install_ids)
+    }
+    for tid in payload.tool_install_ids:
+        db.add(ProjectToolInstallAssignment(
+            project_id=project_id,
+            tool_install_id=tid,
+            enabled=tid not in disabled_set,
+        ))
+
+    await audit.log_action(
+        db, user_id=_super.id, action="grok_project_tool_installs_set",
+        target_type="grok_project", target_id=project_id,
+        metadata={
+            "name": p.name,
+            "tool_install_ids": [str(t) for t in payload.tool_install_ids],
+            "disabled_tool_install_ids": [str(t) for t in disabled_set],
+        },
+    )
+    await db.commit()
+    return ProjectToolInstallsOut(
+        project_id=project_id,
+        tool_install_ids=list(payload.tool_install_ids),
+        disabled_tool_install_ids=list(disabled_set),
     )
 
 
@@ -362,11 +505,20 @@ async def get_project_users(
         raise PermissionDenied()
     rows = (
         await db.execute(
-            select(ProjectUserAssignment.user_id)
+            select(
+                ProjectUserAssignment.user_id,
+                ProjectUserAssignment.enabled,
+            )
             .where(ProjectUserAssignment.project_id == project_id)
         )
-    ).scalars().all()
-    return ProjectUsersOut(project_id=project_id, user_ids=list(rows))
+    ).all()
+    all_ids = [uid for uid, _ in rows]
+    disabled_ids = [uid for uid, ena in rows if not ena]
+    return ProjectUsersOut(
+        project_id=project_id,
+        user_ids=all_ids,
+        disabled_user_ids=disabled_ids,
+    )
 
 
 class ProjectAutoProvisionIn(BaseModel):
@@ -375,6 +527,145 @@ class ProjectAutoProvisionIn(BaseModel):
     description: str | None = None
     domain_ids: list[uuid.UUID] = Field(default_factory=list)
     user_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class DiscoveredProject(BaseModel):
+    """One project row as Grok itself reports it.
+
+    `imported` flags whether this slug is already in our `grok_projects`
+    table for the same profile — the FE uses it to disable the
+    "Import" button so admin doesn't create duplicate rows.
+    """
+    grok_project_id: str
+    name: str
+    description: str | None = None
+    imported: bool = False
+
+
+@router.get("/discover", response_model=list[DiscoveredProject])
+async def discover_projects(
+    profile_id: uuid.UUID,
+    _super: SuperAdminUser,
+    db: DbSession,
+) -> list[DiscoveredProject]:
+    """List every Grok workspace/project this profile currently owns.
+
+    Implementation: connect to the profile's VNC Chromium via CDP, open
+    a page, run `fetch('/rest/workspaces?…')` inside the page context so
+    the request carries the user's cookies + Chrome's TLS fingerprint
+    (which is what beats Cloudflare). Return the parsed list, marking
+    each row as already-imported if it matches an existing
+    GrokProject(profile_id, grok_project_id).
+
+    Admin clicks one of these in the UI → POST /api/grok-projects to
+    persist a row, no manual slug copy.
+    """
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise NotFound("profile")
+    if profile.status not in ("logged_in", "running_job"):
+        raise InvalidPayload(
+            f"Profile chưa logged_in (status={profile.status}). "
+            "Auto-login trước khi discover."
+        )
+
+    import re
+    import httpx
+    from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+
+    cdp_endpoint = f"http://grokflow-vnc-{str(profile.id).replace('-','')[:12]}:9223"
+    try:
+        async with httpx.AsyncClient(timeout=10) as cli:
+            resp = await cli.get(f"{cdp_endpoint}/json/version")
+            ws_url = resp.json().get("webSocketDebuggerUrl", "")
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidPayload(
+            f"Không kết nối được CDP ({type(exc).__name__}): {exc}",
+        )
+    if not ws_url:
+        raise InvalidPayload("Chromium chưa trả wsEndpoint — đợi vài giây.")
+    host = cdp_endpoint.replace("http://", "").rstrip("/")
+    ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+
+    raw_payload: dict | list | None = None
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(ws_url, timeout=12_000)
+            ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = await ctx.new_page()
+            try:
+                # We just need any same-origin page so fetch() lands as
+                # `https://grok.com/rest/...`. Root is fastest to load.
+                await page.goto(
+                    "https://grok.com/", wait_until="domcontentloaded", timeout=25_000,
+                )
+                try:
+                    raw_payload = await page.evaluate(
+                        """async () => {
+                            const r = await fetch(
+                                '/rest/workspaces?pageSize=200&orderBy=ORDER_BY_LAST_USE_TIME',
+                                { credentials: 'include' },
+                            );
+                            return { status: r.status, body: await r.text() };
+                        }"""
+                    )
+                except PWTimeout as exc:
+                    raise InvalidPayload(f"Fetch /rest/workspaces timeout: {exc}")
+            finally:
+                try:
+                    await page.close()
+                except Exception:  # noqa: BLE001
+                    pass
+    except InvalidPayload:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidPayload(
+            f"CDP/Playwright failure ({type(exc).__name__}): {exc}",
+        )
+
+    if not isinstance(raw_payload, dict) or raw_payload.get("status") != 200:
+        status_code = (raw_payload or {}).get("status") if isinstance(raw_payload, dict) else None
+        snippet = (raw_payload or {}).get("body", "")[:200] if isinstance(raw_payload, dict) else ""
+        raise InvalidPayload(
+            f"Grok trả {status_code} cho /rest/workspaces: {snippet!r}",
+        )
+
+    import json as _json
+    try:
+        data = _json.loads(raw_payload["body"])
+    except _json.JSONDecodeError as exc:
+        raise InvalidPayload(f"/rest/workspaces không phải JSON: {exc}")
+
+    # Response shape (captured): {"workspaces": [...], "pageToken": ...}
+    rows = data.get("workspaces") or data.get("items") or data.get("results") or []
+    if not isinstance(rows, list):
+        raise InvalidPayload(f"Shape lạ — không tìm thấy list workspaces: keys={list(data.keys())}")
+
+    # Existing imported slugs so we can disable repeat-import in the UI.
+    already = set(
+        (await db.execute(
+            select(GrokProject.grok_project_id).where(GrokProject.profile_id == profile_id)
+        )).scalars().all()
+    )
+
+    out: list[DiscoveredProject] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        slug = (
+            row.get("workspaceId") or row.get("id") or row.get("workspace_id")
+            or row.get("projectId") or row.get("project_id")
+        )
+        name = row.get("title") or row.get("name") or row.get("displayName")
+        if not slug or not name:
+            continue
+        out.append(DiscoveredProject(
+            grok_project_id=str(slug),
+            name=str(name),
+            description=row.get("description"),
+            imported=str(slug) in already,
+        ))
+    return out
 
 
 @router.post("/auto-provision", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -755,8 +1046,13 @@ async def set_project_users(
         ProjectUserAssignment.__table__.delete()
         .where(ProjectUserAssignment.project_id == project_id)
     )
+    disabled_set = {u for u in payload.disabled_user_ids if u in set(payload.user_ids)}
     for uid in payload.user_ids:
-        db.add(ProjectUserAssignment(project_id=project_id, user_id=uid))
+        db.add(ProjectUserAssignment(
+            project_id=project_id,
+            user_id=uid,
+            enabled=uid not in disabled_set,
+        ))
 
     await audit.log_action(
         db, user_id=_super.id, action="grok_project_users_set",
@@ -764,9 +1060,12 @@ async def set_project_users(
         metadata={
             "name": p.name,
             "user_ids": [str(u) for u in payload.user_ids],
+            "disabled_user_ids": [str(u) for u in disabled_set],
         },
     )
     await db.commit()
     return ProjectUsersOut(
-        project_id=project_id, user_ids=list(payload.user_ids),
+        project_id=project_id,
+        user_ids=list(payload.user_ids),
+        disabled_user_ids=list(disabled_set),
     )

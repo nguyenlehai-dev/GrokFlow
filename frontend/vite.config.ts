@@ -1,9 +1,41 @@
-import { defineConfig } from "vite";
+import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import httpProxy from "http-proxy";
+
+const VNC_ROUTE = /^\/vnc\/([a-f0-9]+)(\/.*)?$/;
+
+function vncProxyPlugin(): PluginOption {
+  return {
+    name: "grokflow-vnc-proxy",
+    configureServer(server) {
+      const proxy = httpProxy.createProxyServer({ changeOrigin: true });
+      proxy.on("error", (err, _req, res) => {
+        if (res && "writeHead" in res && !res.headersSent) {
+          (res as import("http").ServerResponse).writeHead(502);
+          (res as import("http").ServerResponse).end(`VNC proxy error: ${err.message}`);
+        }
+      });
+      server.middlewares.use((req, res, next) => {
+        const m = req.url?.match(VNC_ROUTE);
+        if (!m) return next();
+        const target = `http://grokflow-vnc-${m[1]}:6901`;
+        req.url = m[2] || "/";
+        proxy.web(req, res, { target });
+      });
+      server.httpServer?.on("upgrade", (req, socket, head) => {
+        const m = req.url?.match(VNC_ROUTE);
+        if (!m) return;
+        const target = `http://grokflow-vnc-${m[1]}:6901`;
+        req.url = m[2] || "/";
+        proxy.ws(req, socket, head, { target });
+      });
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), vncProxyPlugin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -49,6 +81,7 @@ export default defineConfig({
         target: process.env.VITE_DEV_API_TARGET ?? "http://localhost:8000",
         changeOrigin: true,
       },
+      // /vnc/<short>/ is handled dynamically by the vncProxyPlugin above.
     },
   },
 });

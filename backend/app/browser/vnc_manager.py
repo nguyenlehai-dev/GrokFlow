@@ -165,6 +165,15 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         environment={
             "STARTUP_URL": provider_url,
             "TZ": "Asia/Ho_Chi_Minh",
+            # Propagate the host's GROK_HTTP_PROXY (typically a Cloudflare
+            # WARP SOCKS endpoint set up by deploy/install_warp_proxy.sh)
+            # so chromium inside the VNC container routes its traffic
+            # through it. Empty/unset = direct connection.
+            **(
+                {"GROK_HTTP_PROXY": os.environ["GROK_HTTP_PROXY"]}
+                if os.environ.get("GROK_HTTP_PROXY")
+                else {}
+            ),
         },
         volumes={
             host_profile_path: {"bind": "/config", "mode": "rw"},
@@ -179,6 +188,16 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         restart_policy={"Name": "unless-stopped"},
         labels={"grokflow.profile_id": str(profile_id)},
         security_opt=["seccomp=unconfined"],
+        # CAP_NET_ADMIN + /dev/net/tun are required by Cloudflare WARP's
+        # warp-svc daemon which runs inside the container at supervisord
+        # priority 50. WARP gives chromium a SOCKS5 proxy at
+        # 127.0.0.1:40000 that routes outbound traffic through CF's own
+        # network — Turnstile is far more lenient on traffic-from-itself
+        # than on raw VPS-IP traffic. Without these caps the daemon
+        # logs an error and warp-init exits clean; chromium falls back
+        # to direct connection (back to the original CF challenge wall).
+        cap_add=["NET_ADMIN"],
+        devices=["/dev/net/tun:/dev/net/tun:rwm"],
     )
 
     # 409 on create means a container with that name already exists. With

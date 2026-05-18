@@ -9,6 +9,7 @@ import { LoginPage } from "@/modules/auth/views/LoginPage";
 import { RegisterPage } from "@/modules/auth/views/RegisterPage";
 import { LandingPage } from "@/modules/landing/views/LandingPage";
 import { TryImagePage } from "@/modules/landing/views/TryImagePage";
+import { lazyPage } from "./lazyPage";
 
 import { getAuthedRoutes } from "./moduleRegistry";
 
@@ -21,7 +22,8 @@ import { getAuthedRoutes } from "./moduleRegistry";
  *  Authed routes come from the moduleRegistry — every module's manifest
  *  contributes its routes here automatically. Adding a new module is a
  *  one-import change in moduleRegistry.ts. */
-export const router = createBrowserRouter([
+export const router = createBrowserRouter(
+  [
   {
     path: "/landing",
     element: <PublicRouteGuard flag="allow_landing"><LandingPage /></PublicRouteGuard>,
@@ -30,6 +32,14 @@ export const router = createBrowserRouter([
   {
     path: "/login",
     element: <PublicRouteGuard flag="allow_login"><LoginPage /></PublicRouteGuard>,
+    errorElement: <RouteErrorBoundary />,
+  },
+  // Dedicated admin login URL. Always renders the "admin" console layout
+  // regardless of the active domain's login_template. Useful when a domain
+  // is set to the branded "default" but staff still want the minimal form.
+  {
+    path: "/admin/login",
+    element: <LoginPage forceTemplate="admin" />,
     errorElement: <RouteErrorBoundary />,
   },
   {
@@ -46,6 +56,19 @@ export const router = createBrowserRouter([
   {
     path: "/try/image",
     element: <TryImagePage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  // Branded full-screen workspace for desktop kiosk users. Lives OUTSIDE
+  // the AppShell so the admin sidebar + header never render — the page
+  // owns the entire viewport. Still authed (ProtectedRoute) but unscoped
+  // by allowed_pages since it's the kiosk's primary surface.
+  {
+    path: "/create-video-pro",
+    element: (
+      <ProtectedRoute>
+        {lazyPage(() => import("@/modules/grok/views/CreateVideoProPage"), "CreateVideoProPage")}
+      </ProtectedRoute>
+    ),
     errorElement: <RouteErrorBoundary />,
   },
   {
@@ -68,4 +91,5 @@ export const router = createBrowserRouter([
       { path: "*", element: <RouteErrorBoundary /> },
     ],
   },
-]);
+  ],
+);
