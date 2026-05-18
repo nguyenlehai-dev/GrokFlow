@@ -69,6 +69,22 @@ class ModuleInstallRequest(BaseModel):
     git_url: str
     git_ref: str = "main"
     github_pat: str | None = None
+    # When set, an empty repo (no module.manifest.json) is auto-populated
+    # from the bundled SDK template and pushed back before install
+    # proceeds. Requires a PAT with `repo` write scope.
+    auto_scaffold: bool = False
+    # Optional human-friendly module label — used as the sidebar entry
+    # text when auto-scaffolding, otherwise derived from the slug.
+    module_label: str | None = None
+
+
+class CreateModuleRequest(BaseModel):
+    """Wizard flow: create a brand-new GitHub repo + scaffold + install."""
+    github_owner: str             # user or org login
+    github_repo: str              # new repo name to create
+    github_pat: str               # required — needs `repo` scope
+    private: bool = False
+    module_label: str | None = None    # defaults to repo name
 
 
 class ModuleOut(BaseModel):

@@ -39,6 +39,16 @@ export interface ModuleInstallPayload {
   git_url: string;
   git_ref: string;
   github_pat?: string | null;
+  auto_scaffold?: boolean;
+  module_label?: string | null;
+}
+
+export interface CreateModulePayload {
+  github_owner: string;
+  github_repo: string;
+  github_pat: string;
+  private?: boolean;
+  module_label?: string | null;
 }
 
 const BASE = "/api/admin/modules";
@@ -47,6 +57,8 @@ export const adminModulesService = {
   list: () => api.get<AdminModuleRow[]>(BASE).then((r) => r.data),
   install: (payload: ModuleInstallPayload) =>
     api.post<AdminModuleRow>(BASE, payload).then((r) => r.data),
+  createAndInstall: (payload: CreateModulePayload) =>
+    api.post<AdminModuleRow>(`${BASE}/create`, payload).then((r) => r.data),
   uninstall: (id: string) => api.delete(`${BASE}/${id}`),
   restart: (id: string) =>
     api.post<AdminModuleRow>(`${BASE}/${id}/restart`).then((r) => r.data),

@@ -33,6 +33,7 @@ from app.core.encryption import encrypt
 from app.core.exceptions import InvalidPayload
 from app.models import AdminModule
 from app.services import module_runtime as rt
+from app.services import module_scaffold
 
 from .schemas import ModuleInstallRequest, ModuleManifestSchema
 
@@ -95,6 +96,30 @@ async def install(req: ModuleInstallRequest, installer_user_id) -> AdminModule:
     except subprocess.CalledProcessError as exc:
         msg = (exc.stderr or b"").decode(errors="replace")[:200] or str(exc)
         raise InvalidPayload(f"git clone failed: {msg}") from exc
+
+    # Auto-scaffold: empty repos get populated from the SDK template and
+    # pushed back so the upstream now matches the contract. Caller's PAT
+    # has to have `repo` write scope; we surface a useful 422 if not.
+    if req.auto_scaffold and module_scaffold.looks_empty(work_dir):
+        # Derive a slug from the GitHub repo name (last path component).
+        repo_name = req.git_url.rstrip("/").split("/")[-1].removesuffix(".git")
+        try:
+            scaffold_slug = module_scaffold._slugify(repo_name)
+        except InvalidPayload:
+            scaffold_slug = "scaffolded_module"
+        module_scaffold.copy_template(
+            work_dir, scaffold_slug, label=req.module_label,
+        )
+        try:
+            module_scaffold.commit_and_push(
+                work_dir, branch=req.git_ref, pat=req.github_pat,
+                git_url=req.git_url,
+            )
+        except subprocess.CalledProcessError as exc:
+            msg = (exc.stderr or b"").decode(errors="replace")[:300] or str(exc)
+            raise InvalidPayload(
+                f"scaffold push failed (does the PAT have repo write scope?): {msg}"
+            ) from exc
 
     manifest = _parse_manifest(work_dir)
     _validate_resource_limits(manifest)

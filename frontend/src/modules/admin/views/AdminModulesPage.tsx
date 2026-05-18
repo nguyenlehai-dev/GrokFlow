@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Plus, RefreshCw, Trash2, Loader2, CircleCheck, CircleAlert, CirclePause, FileText, ArrowUpCircle, Settings, X } from "lucide-react";
+import { Boxes, Plus, RefreshCw, Trash2, Loader2, CircleCheck, CircleAlert, CirclePause, FileText, ArrowUpCircle, Settings, X, Sparkles } from "lucide-react";
 
 import { toast } from "@/components/ui/Toast";
 import { AdminGuard } from "../components/AdminGuard";
@@ -20,6 +20,7 @@ export function AdminModulesPage() {
 function Inner() {
   const qc = useQueryClient();
   const [installing, setInstalling] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const { data: modules = [], isLoading } = useQuery({
     queryKey: ["admin-modules"],
@@ -36,12 +37,20 @@ function Inner() {
           <Boxes size={20} className="text-violet-600" />
           <h1 className="text-2xl font-bold text-slate-800">Module marketplace</h1>
         </div>
-        <button
-          onClick={() => setInstalling(true)}
-          className="btn-primary inline-flex items-center gap-1.5"
-        >
-          <Plus size={14} /> Install module
-        </button>
+        <div className="space-x-2">
+          <button
+            onClick={() => setCreating(true)}
+            className="btn-ghost border border-violet-200 text-violet-700 inline-flex items-center gap-1.5"
+          >
+            <Sparkles size={14} /> Create new
+          </button>
+          <button
+            onClick={() => setInstalling(true)}
+            className="btn-primary inline-flex items-center gap-1.5"
+          >
+            <Plus size={14} /> Install module
+          </button>
+        </div>
       </div>
 
       <p className="text-sm text-slate-600 mb-4">
@@ -63,6 +72,15 @@ function Inner() {
           onClose={() => setInstalling(false)}
           onInstalled={() => {
             setInstalling(false);
+            qc.invalidateQueries({ queryKey: ["admin-modules"] });
+          }}
+        />
+      )}
+      {creating && (
+        <CreateModal
+          onClose={() => setCreating(false)}
+          onCreated={() => {
+            setCreating(false);
             qc.invalidateQueries({ queryKey: ["admin-modules"] });
           }}
         />
@@ -300,12 +318,16 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
   const [gitUrl, setGitUrl] = useState("");
   const [gitRef, setGitRef] = useState("main");
   const [pat, setPat] = useState("");
+  const [autoScaffold, setAutoScaffold] = useState(false);
+  const [moduleLabel, setModuleLabel] = useState("");
 
   const install = useMutation({
     mutationFn: () => adminModulesService.install({
       git_url: gitUrl.trim(),
       git_ref: gitRef.trim() || "main",
       github_pat: pat.trim() || null,
+      auto_scaffold: autoScaffold,
+      module_label: moduleLabel.trim() || null,
     }),
     onSuccess: () => { toast("Module đang được install — theo dõi status ở bảng", "success"); onInstalled(); },
     onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Install failed", "error"),
@@ -335,16 +357,44 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
         </label>
 
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">GitHub PAT (nếu repo private)</span>
+          <span className="text-sm font-medium text-slate-700">GitHub PAT (nếu repo private hoặc cần auto-scaffold)</span>
           <input
             type="password" value={pat} onChange={(e) => setPat(e.target.value)}
             placeholder="ghp_…"
             className="input mt-1 w-full font-mono text-sm"
           />
           <p className="text-xs text-slate-500 mt-1">
-            Token được mã hoá Fernet trước khi lưu. Cần scope <code>repo</code> để clone private.
+            Token mã hoá Fernet trước khi lưu. Scope <code>repo</code> (read) cho clone, scope <code>repo</code> (write) nếu bật scaffold.
           </p>
         </label>
+
+        <div className="rounded-md border border-violet-200 bg-violet-50 p-3 space-y-2">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox" checked={autoScaffold}
+              onChange={(e) => setAutoScaffold(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <div className="text-sm font-medium text-slate-800 inline-flex items-center gap-1">
+                <Sparkles size={13} className="text-violet-600" /> Auto-scaffold nếu repo trống
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Nếu repo chưa có <code>module.manifest.json</code>, core sẽ copy template Hello World vào + commit + push lên repo của bạn. PAT cần write scope.
+              </p>
+            </div>
+          </label>
+          {autoScaffold && (
+            <label className="block">
+              <span className="text-xs font-medium text-slate-700">Module label (hiển thị trên sidebar)</span>
+              <input
+                value={moduleLabel} onChange={(e) => setModuleLabel(e.target.value)}
+                placeholder="My Cool Module"
+                className="input mt-1 w-full text-sm"
+              />
+            </label>
+          )}
+        </div>
 
         <div className="flex justify-end gap-2 pt-2 border-t">
           <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
@@ -354,6 +404,100 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
             className="btn-primary inline-flex items-center gap-1.5 text-sm"
           >
             {install.isPending ? <><Loader2 size={14} className="animate-spin"/> Cloning…</> : <>Install</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [owner, setOwner] = useState("");
+  const [repo, setRepo] = useState("");
+  const [pat, setPat] = useState("");
+  const [label, setLabel] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
+
+  const create = useMutation({
+    mutationFn: () => adminModulesService.createAndInstall({
+      github_owner: owner.trim(),
+      github_repo: repo.trim(),
+      github_pat: pat.trim(),
+      private: isPrivate,
+      module_label: label.trim() || null,
+    }),
+    onSuccess: () => { toast("Module đang được tạo + scaffold + install", "success"); onCreated(); },
+    onError: (e: any) => toast(e?.response?.data?.detail?.message ?? "Create failed", "error"),
+  });
+
+  return (
+    <div className="fixed inset-0 z-40 bg-slate-900/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-lg bg-white rounded-xl shadow-xl p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-800 inline-flex items-center gap-2">
+            <Sparkles size={16} className="text-violet-600" /> Create new module
+          </h2>
+          <button onClick={onClose} className="btn-ghost btn-sm"><X size={14} /></button>
+        </div>
+        <p className="text-xs text-slate-500">
+          Tạo 1 repo GitHub mới + scaffold từ Hello World template + install. Bạn không phải tự tạo repo.
+          Cần PAT scope <code>repo</code> (write).
+        </p>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">GitHub owner</span>
+            <input
+              value={owner} onChange={(e) => setOwner(e.target.value)}
+              placeholder="username or org"
+              className="input mt-1 w-full font-mono text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Repo name</span>
+            <input
+              value={repo} onChange={(e) => setRepo(e.target.value)}
+              placeholder="my-module"
+              className="input mt-1 w-full font-mono text-sm"
+            />
+          </label>
+        </div>
+
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">GitHub PAT (write scope)</span>
+          <input
+            type="password" value={pat} onChange={(e) => setPat(e.target.value)}
+            placeholder="ghp_…"
+            className="input mt-1 w-full font-mono text-sm"
+          />
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Sidebar label</span>
+          <input
+            value={label} onChange={(e) => setLabel(e.target.value)}
+            placeholder="My Cool Module (default: repo name)"
+            className="input mt-1 w-full text-sm"
+          />
+        </label>
+
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input
+            type="checkbox" checked={isPrivate}
+            onChange={(e) => setIsPrivate(e.target.checked)}
+          />
+          <span>Tạo repo private</span>
+        </label>
+
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
+          <button
+            onClick={() => create.mutate()}
+            disabled={!owner.trim() || !repo.trim() || !pat.trim() || create.isPending}
+            className="btn-primary inline-flex items-center gap-1.5 text-sm"
+          >
+            {create.isPending ? <><Loader2 size={14} className="animate-spin"/> Creating…</> : <>Create & install</>}
           </button>
         </div>
       </div>

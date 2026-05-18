@@ -21,9 +21,11 @@ from app.core.exceptions import InvalidPayload, NotFound
 from app.models import AdminModule, TenantModule
 from app.modules.admin.audit import service as audit
 from app.services import module_runtime as rt
+from app.services import module_scaffold
 
 from . import installer
 from .schemas import (
+    CreateModuleRequest,
     ModuleInstallRequest, ModuleOut, ModuleSettingsUpdate,
     TenantModuleOut, TenantModuleToggle,
 )
@@ -208,6 +210,47 @@ async def update_module(
         metadata={"slug": row.slug, "git_ref": row.git_ref},
     )
     await db.commit()
+    return row
+
+
+@router.post("/create", response_model=ModuleOut, status_code=status.HTTP_201_CREATED)
+async def create_and_install(
+    req: CreateModuleRequest,
+    admin: SuperAdminUser,
+    db: DbSession,
+) -> AdminModule:
+    """One-click wizard: create a new GitHub repo from the SDK template,
+    then install it. Saves the admin from manually fork+push+install.
+
+    Requires a PAT with `repo` scope (write) for both the create-repo
+    call and the subsequent push of scaffolded files.
+    """
+    repo = await module_scaffold.github_create_repo(
+        owner=req.github_owner, name=req.github_repo, pat=req.github_pat,
+        private=req.private,
+    )
+    clone_url = repo.get("clone_url") or f"https://github.com/{req.github_owner}/{req.github_repo}.git"
+
+    install_req = ModuleInstallRequest(
+        git_url=clone_url,
+        git_ref="main",
+        github_pat=req.github_pat,
+        auto_scaffold=True,
+        module_label=req.module_label or req.github_repo,
+    )
+    raw_password = secrets.token_urlsafe(32)
+    row = await installer.install(install_req, installer_user_id=admin.id)
+    row.db_password_enc = encrypt(raw_password)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    await audit.log_action(
+        db, user_id=admin.id, action="create_and_install_module",
+        target_type="admin_module", target_id=row.id,
+        metadata={"slug": row.slug, "github": f"{req.github_owner}/{req.github_repo}"},
+    )
+    await db.commit()
+    installer.schedule_post_install(row.slug, raw_password)
     return row
 
 
