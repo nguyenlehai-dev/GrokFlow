@@ -1,253 +1,393 @@
-# Quy trình code & deploy — hướng dẫn nhanh
+# Quy trình code & deploy — hướng dẫn vận hành
 
 Tài liệu này dành cho **người vận hành** (bạn). Đọc xong làm theo từng dòng
-là chạy được. Tài liệu kỹ thuật chi tiết hơn xem
-[`BRANCHING.md`](BRANCHING.md).
+là chạy được. Chi tiết kỹ thuật xem [`BRANCHING.md`](BRANCHING.md).
 
 ---
 
-## Tóm tắt 1 dòng
+## TL;DR
 
 ```
-git push origin prod  →  trong vòng ~30 giây, https://flowgrok.vpspanel.io.vn đã chạy code mới
+git push origin staging  →  ~60s sau https://test.nexoratech.com.vn live (đã test)
+git push origin prod     →  ~60s sau https://flow.nexoratech.com.vn live (thật)
 ```
 
----
-
-## Hệ thống làm gì cho bạn
-
-VPS có **1 cron job chạy mỗi phút**, kiểm tra GitHub xem nhánh `prod` có
-commit mới không. Nếu có:
-
-1. Pull code mới về VPS
-2. Tự rebuild Docker container (chỉ rebuild phần đã đổi — backend/frontend)
-3. Chạy database migration (nếu có)
-4. Restart container
-5. Dọn dẹp Docker cache cũ
-
-Bạn KHÔNG cần SSH vào VPS. KHÔNG cần chạy script gì. Chỉ cần `git push`.
+Build/health fail trên server → **tự động rollback** về commit trước.
+Bạn không cần SSH, không cần script — chỉ `git push`.
 
 ---
 
-## 3 nhánh — biết để dùng đúng
+## 1. Sơ đồ luồng
 
-| Nhánh | Dùng để | Push thoải mái không? |
-|---|---|---|
-| `dev` | Code hằng ngày, có thể bể | ✅ push thoải mái |
-| `staging` | Test trước prod (tùy chọn) | ⚠ chỉ push khi cần test |
-| `prod` | **Live website** | ❌ chỉ merge từ `dev` sau khi đã test xong |
+```
+                                              ┌──────────────────────────────┐
+local code  ─push→  origin/dev  ──PR──→  origin/staging  ──cron(60s)──→  test.nexoratech.com.vn
+                                                                         (env=staging, DB riêng)
+                                              │                          │
+                                              │                          ↓ test OK?
+                                              │                          │
+                                              ↓ PR                       ↓
+                                          origin/prod  ─cron(60s)→  flow.nexoratech.com.vn
+                                                                    (env=production, LIVE)
+```
+
+| Nhánh | Mục đích | Auto-deploy? | Domain |
+|---|---|---|---|
+| `dev` | Code hằng ngày, có thể bể | ❌ chỉ chạy CI | (không) |
+| `staging` | Test trước prod | ✅ cron mỗi 60s | https://test.nexoratech.com.vn |
+| `prod` | Live website | ✅ cron mỗi 60s | https://flow.nexoratech.com.vn |
 
 ---
 
-## Quy trình hằng ngày (làm theo từng bước)
+## 2. Quy trình hằng ngày — single dev
 
-### A. Lần đầu setup máy mới (chỉ làm 1 lần)
+### A. Setup máy mới (1 lần)
 
 ```bash
-# Clone repo về máy
 git clone https://github.com/nguyenlehai-dev/GrokFlow.git
 cd GrokFlow
-
-# Chuyển sang nhánh dev (không bao giờ làm trực tiếp trên prod)
 git checkout dev
-git pull
 ```
 
-### B. Sửa code
+### B. Code → commit → push lên dev
 
 ```bash
-# Đảm bảo bạn đang ở nhánh dev
 git checkout dev
-git pull origin dev      # lấy commit mới nhất từ máy khác (nếu có)
+git pull origin dev          # đồng bộ với máy khác
 
-# ... sửa code ...
+# … sửa code …
 
-# Commit
 git add -A
-git commit -m "feat: thêm tính năng X"
-# Hoặc fix: ... / docs: ... / ops: ... / refactor: ...
-
-# Push lên dev — ai cũng thấy được, nhưng CHƯA live
+git commit -m "feat(...): mô tả ngắn"     # hoặc fix:/ops:/docs:/refactor:
 git push origin dev
 ```
 
-→ GitHub Actions tự chạy CI (test + build). Đợi check xanh ✓ trước khi
-qua bước C. Xem ở: https://github.com/nguyenlehai-dev/GrokFlow/actions
+CI trên GitHub sẽ tự chạy `pytest` + `npm run build`. Đợi check xanh trên
+PR trước khi merge.
 
-### C. Đẩy code lên website live (merge `dev` → `prod`)
-
-Khi bạn ưng commit trên `dev` rồi và muốn nó chạy live:
+### C. Đẩy lên staging để test
 
 ```bash
-# Lấy prod mới nhất về máy
+git checkout staging
+git pull --ff-only origin staging
+git merge --ff-only dev        # đem code dev sang staging
+git push origin staging
+```
+
+→ ~60s sau, https://test.nexoratech.com.vn có code mới.
+
+### D. Mở https://test.nexoratech.com.vn
+
+- **Trình duyệt sẽ hỏi user/pass** (HTTP basic auth gate trước nginx):
+  - User: `staging`
+  - Pass: lấy từ password manager (kêu admin cấp)
+- Sau đó vào màn login app, dùng tài khoản admin staging (cũng từ
+  password manager).
+- Test thoải mái — DB staging riêng hoàn toàn, không động prod.
+
+### E. Test OK → merge sang prod
+
+```bash
 git checkout prod
 git pull --ff-only origin prod
-
-# Merge dev vào (fast-forward — không tạo merge commit)
-git merge --ff-only dev
-
-# Push → kích hoạt auto-deploy
+git merge --ff-only staging    # FF merge, history sạch
 git push origin prod
 ```
 
-→ **Trong vòng ~30-60 giây, website live đã update.**
+→ ~60s sau, https://flow.nexoratech.com.vn (cùng domain prod khác) có
+code mới. **Đây là live thật, người dùng thấy ngay.**
 
-Quay lại nhánh `dev` để tiếp tục code:
-```bash
-git checkout dev
-```
+### F. Lỡ tay đẩy commit hỏng?
 
-### D. Theo dõi deploy đang chạy
-
-Cách 1 — qua GitHub Actions (xem từ máy):
-- Mở https://github.com/nguyenlehai-dev/GrokFlow/actions
-- Workflow tên `Deploy` chạy sau mỗi push prod, có log thời gian
-
-Cách 2 — qua log VPS (chi tiết hơn):
-```bash
-ssh vpsroot@192.168.1.15
-tail -f /home/vpsroot/grokflow-deploy.log
-```
-
-Mỗi lần cron tick có commit mới sẽ thấy:
-```
-[2026-05-10T01:27:59+07:00] new commit on prod: a44e3dd → 7a3c382
-[2026-05-10T01:28:01+07:00] rebuilding backend/worker/idle-cleanup
-[2026-05-10T01:28:19+07:00] alembic upgrade head
-[2026-05-10T01:28:25+07:00] post-deploy prune
-[2026-05-10T01:28:27+07:00] deploy done. disk: 21%. live commit: 7a3c382
-```
+Yên tâm — server tự rollback nếu backend không khởi động hoặc `/health`
+không xanh sau 90 giây (xem section **Auto-rollback** bên dưới).
 
 ---
 
-## Tình huống thường gặp
+## 3. Hai môi trường khác nhau thế nào?
 
-### Tôi push prod nhưng web vẫn chưa update
+| | Prod | Staging |
+|---|---|---|
+| Branch | `prod` | `staging` |
+| Domain | flow.nexoratech.com.vn | **test.nexoratech.com.vn** |
+| Repo dir trên VPS | `/home/vpsroot/grokflow` | `/home/vpsroot/grokflow-staging` |
+| Containers | `grokflow-*` | `grokflow-staging-*` |
+| Database (Postgres) | `grokflow` | `grokflow_staging` (instance riêng) |
+| Secrets (JWT, encryption key) | `.env.prod` | `.env.staging` (ngẫu nhiên hoàn toàn khác) |
+| Host port backend / frontend | 8000 / 5173 | 18000 / 15173 |
+| Deploy log | `/home/vpsroot/grokflow-deploy.log` | `/home/vpsroot/grokflow-deploy-staging.log` |
+| HTTP basic auth ngoài app | Không | **Có** (chặn người ngoài) |
+| Cron entry | mỗi 60s | mỗi 60s (lock riêng) |
 
-Đợi đủ 60 giây trước khi nghi ngờ (cron chạy mỗi phút). Sau 90s nếu vẫn chưa:
+Hai stack chạy song song trên cùng VPS, không bao giờ đụng nhau.
+
+---
+
+## 4. Auto-rollback — khi build/health fail
+
+### Cơ chế
+
+Mỗi tick deploy:
+
+1. Lưu commit hiện tại vào `.last-good-commit`
+2. `git reset --hard` về commit mới + rebuild service đã đổi
+3. Chạy alembic migration
+4. **Poll `backend:/health` qua docker network**, tối đa 90 giây
+5. Nếu không trả `{"status":"ok"}` → coi như fail
+6. → `git reset --hard <commit cũ>` + rebuild lại
+7. Webhook báo (nếu có) → 4 sự kiện: started / succeeded / **failed** / **rolled-back**
+
+### Tham số (đặt trong `.env.prod` hoặc `.env.staging`)
 
 ```bash
-ssh vpsroot@192.168.1.15
-cd /home/vpsroot/grokflow
-
-# Kiểm tra nhánh hiện tại
-git rev-parse --short HEAD
-git rev-parse --short origin/prod
-
-# Nếu hai khác nhau → cron không chạy. Chạy tay để debug:
-bash deploy/auto_deploy.sh prod
+HEALTH_TIMEOUT_SEC=90      # max thời gian chờ health (default 90s)
+ROLLBACK_ON_FAIL=true      # đặt false để giữ commit broken (debug)
+DEPLOY_WEBHOOK_URL=        # Discord/Slack webhook (optional)
 ```
 
-Nếu chạy tay được nhưng cron không → kiểm tra:
+### Khi bạn muốn debug 1 commit broken trên staging
+
 ```bash
-crontab -l | grep auto_deploy   # đảm bảo có dòng cron
-systemctl is-active cron        # phải là "active"
+ssh vpsroot@192.168.1.11
+sed -i 's|^ROLLBACK_ON_FAIL=.*|ROLLBACK_ON_FAIL=false|' /home/vpsroot/grokflow-staging/.env.staging
+# Push lại commit cần debug
+# Cron sẽ deploy + giữ nguyên dù health fail → SSH vào xem log container
 ```
 
-### Tôi merge nhầm code lỗi vào prod, làm sao revert?
+Nhớ bật lại `true` khi xong.
+
+---
+
+## 5. Rollback thủ công (khi auto-rollback chưa đủ)
 
 ```bash
 git checkout prod
-git pull
-git revert <SHA-bị-lỗi>      # tạo commit revert
-git push origin prod          # cron tự pull bản revert
-```
+git revert <bad-sha>           # cách an toàn: tạo commit revert mới
+git push origin prod
+# → ~60s sau VPS pull commit revert, deploy lại
 
-Hoặc reset hẳn về commit tốt trước đó (chỉ làm khi không ai khác đã pull):
-```bash
-git reset --hard <SHA-tốt>
+# Hoặc reset cứng (chỉ khi chưa ai khác fetch):
+git reset --hard <good-sha>
 git push --force-with-lease origin prod
 ```
 
-### Tôi đổi `.env.prod` trên VPS, có bị git ghi đè không?
+---
 
-KHÔNG. `.env.prod`, `browser_profiles/`, `storage/` đều nằm trong
-`.gitignore`. Cron chỉ `git reset --hard` các file mà git tracking,
-KHÔNG đụng tới các file ngoài. Bạn cứ sửa `.env.prod` trên VPS thoải mái.
+## 6. Theo dõi deploy
 
-### Đẩy nhiều commit cùng lúc lên prod có được không?
+### Cách 1: Tail log từ máy bạn
 
-Có. Cron chỉ deploy 1 lần cho commit mới nhất. Nếu bạn push 5 commit liên
-tiếp trong 30 giây, lần cron tick tiếp theo sẽ pull cả 5 và deploy 1 lần.
+```bash
+ssh vpsroot@192.168.1.11 'tail -f ~/grokflow-deploy.log'
+ssh vpsroot@192.168.1.11 'tail -f ~/grokflow-deploy-staging.log'
+```
 
-### CI trên GitHub fail thì sao?
+### Cách 2: GitHub Actions
 
-CI chạy ở `.github/workflows/ci.yml`. Nếu fail:
-- Trên `dev` → vẫn merge được, nhưng đừng (sửa lỗi trước)
-- Trên `prod` → CI fail KHÔNG block deploy (cron VPS không kiểm CI). Tự
-  chịu trách nhiệm: nếu test fail thì đừng merge lên prod.
+- Vào tab **Actions** của repo → workflow **Deploy** → xem commit vừa push
+- Workflow này không SSH, chỉ:
+  1. Log commit/author vào audit trail
+  2. Đợi 90s rồi `curl /health` từ ngoài (nếu set secret `HEALTH_URL_PROD` / `HEALTH_URL_STAGING`)
 
-Best practice: chỉ merge prod khi CI dev đã xanh ✓.
+### Cách 3: Discord/Slack webhook (khuyến nghị)
+
+Discord channel → Edit Channel → **Integrations → Webhooks → New Webhook → Copy URL**, rồi:
+
+```bash
+ssh vpsroot@192.168.1.11
+echo 'DEPLOY_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>' >> ~/grokflow/.env.prod
+echo 'DEPLOY_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>' >> ~/grokflow-staging/.env.staging
+```
+
+Sau đó mọi deploy sẽ ping channel với 4 loại sự kiện:
+- 🚀 Deploy started
+- ✅ Deploy succeeded (kèm commit + disk %)
+- ⚠️ Deploy failed — rolling back
+- ↩️ Rollback complete
+- ❌ Deploy failed (no rollback) — nếu `ROLLBACK_ON_FAIL=false`
 
 ---
 
-## Convention commit message
+## 7. CI / GitHub Actions
 
-Theo [Conventional Commits](https://www.conventionalcommits.org/) — tiền tố chuẩn:
+| Workflow | Trigger | Việc làm |
+|---|---|---|
+| `ci.yml` | Push `dev`, PR vào bất kỳ branch | Backend `pytest`, frontend `tsc -b && npm run build` |
+| `deploy.yml` | Push `staging` hoặc `prod` | Audit-only — log commit, smoke `/health` nếu có secret |
+
+CI **không** deploy — auto-deploy do cron trên VPS quản. CI chỉ chặn merge
+khi test/build fail.
+
+---
+
+## 8. Khắc phục sự cố
+
+### Đẩy lên rồi mà site không lên?
+
+```bash
+# Xem log deploy gần nhất
+ssh vpsroot@192.168.1.11 'tail -30 ~/grokflow-deploy.log'
+
+# Hoặc staging:
+ssh vpsroot@192.168.1.11 'tail -30 ~/grokflow-deploy-staging.log'
+```
+
+Tìm dòng `deploy done` (thành công) hoặc `DEPLOY FAILED` / `rollback complete`.
+
+### Container không lên
+
+```bash
+ssh vpsroot@192.168.1.11
+cd /home/vpsroot/grokflow      # hoặc /home/vpsroot/grokflow-staging
+docker compose -f docker-compose.intranet.yml ps
+docker compose -f docker-compose.intranet.yml logs backend --tail 100
+```
+
+### Cron không chạy?
+
+```bash
+ssh vpsroot@192.168.1.11 'crontab -l | grep auto_deploy; systemctl is-active cron'
+```
+
+Phải thấy 2 dòng `auto_deploy.sh prod` và `auto_deploy.sh staging`,
+cron service `active`.
+
+### Trigger deploy thủ công
+
+```bash
+ssh vpsroot@192.168.1.11
+bash /home/vpsroot/grokflow/deploy/auto_deploy.sh prod
+# Hoặc:
+bash /home/vpsroot/grokflow-staging/deploy/auto_deploy.sh staging
+```
+
+### Disk full?
+
+Script tự `docker prune` khi disk ≥ 90%. Nếu vẫn full:
+
+```bash
+ssh vpsroot@192.168.1.11
+docker system prune -af --volumes
+df -h /
+```
+
+---
+
+## 9. Quản lý quyền truy cập staging (HTTP basic auth)
+
+Staging có 1 lớp basic auth ngoài app login để chặn người ngoài.
+
+**File:** `/etc/nginx/grokflow-vhosts/.htpasswd-staging`
+
+### Thêm user mới
+
+```bash
+ssh vpsroot@192.168.1.11
+NEW_HASH=$(openssl passwd -apr1)        # gõ pass, copy hash kết quả
+echo "username:$NEW_HASH" | docker exec -i grokflow-staging-backend-1 \
+  tee -a /host_nginx_vhosts/.htpasswd-staging
+# inotify reloader sẽ tự reload nginx
+```
+
+### Xoá user
+
+```bash
+ssh vpsroot@192.168.1.11
+docker exec grokflow-staging-backend-1 \
+  sed -i '/^username:/d' /host_nginx_vhosts/.htpasswd-staging
+```
+
+### Đổi password user hiện có
+
+Xoá rồi thêm lại.
+
+### Bỏ basic auth (mở public)
+
+Sửa `/etc/nginx/grokflow-vhosts/grokflow-test_nexoratech_com_vn.conf` —
+xoá 2 dòng `auth_basic ...` ở đầu `server { ... }` block. Inotify reload
+tự áp dụng.
+
+---
+
+## 10. Initial admin user
+
+Mỗi env (staging/prod) cần ít nhất 1 super_admin để login vào app sau khi
+DB khởi tạo lần đầu. Lệnh idempotent:
+
+```bash
+ssh vpsroot@192.168.1.11
+docker exec \
+  -e INITIAL_ADMIN_EMAIL=admin@yourdomain.com \
+  -e INITIAL_ADMIN_PASSWORD='your_strong_password' \
+  -e INITIAL_DOMAIN_LABEL='Staging' \
+  grokflow-staging-backend-1 \
+  python -m app.scripts.seed_first_run
+```
+
+Đổi `grokflow-staging-backend-1` → `grokflow-backend-1` nếu seed cho prod.
+Re-run an toàn (chỉ tạo nếu chưa có).
+
+---
+
+## 11. Bootstrap staging mới từ đầu (one-time)
+
+Khi VPS mới hoặc xoá staging dir và muốn dựng lại:
+
+```bash
+ssh vpsroot@192.168.1.11
+sudo mkdir -p /home/vpsroot/grokflow-staging
+sudo chown vpsroot: /home/vpsroot/grokflow-staging
+cd /home/vpsroot/grokflow-staging
+cp /home/vpsroot/grokflow/deploy/install_auto_deploy.sh .
+bash install_auto_deploy.sh --branch staging
+
+# Sửa .env.staging — đổi password, port, domain (xem .env.prod.example)
+nano .env.staging
+
+# Tạo nginx vhost trỏ test.<domain> → staging ports (xem BRANCHING.md)
+# Thêm hostname vào Cloudflare Tunnel dashboard
+# Seed admin (section 10)
+```
+
+---
+
+## 12. Quy tắc commit message
+
+Khớp style trong git log:
 
 | Prefix | Khi nào dùng |
 |---|---|
 | `feat:` | Tính năng mới user thấy được |
 | `fix:` | Sửa bug |
 | `perf:` | Tối ưu hiệu năng |
-| `ops:` | Hạ tầng / Docker / CI / deploy |
-| `docs:` | Chỉ sửa tài liệu |
-| `refactor:` | Sửa code, không đổi hành vi |
-| `chore:` | Việc lặt vặt (bump version, format...) |
+| `ops:` | Hạ tầng / deploy / Docker / CI |
+| `docs:` | Chỉ docs |
+| `refactor:` | Restructure code, không đổi behavior |
+| `test:` | Chỉ test |
 
-Ví dụ:
-```
-feat: thêm filter theo provider trong jobs
-fix(provider): submit click không trigger generate API
-ops: thêm cron auto-deploy trên VPS
-docs: hướng dẫn quy trình deploy bằng tiếng Việt
-```
-
-Tiêu đề ≤ 70 ký tự. Nếu cần giải thích thêm thì xuống dòng cách 1 dòng,
-viết phần body.
+Subject ≤ 70 ký tự. Giải thích **why** trong body nếu không hiển nhiên.
 
 ---
 
-## Disable auto-deploy tạm thời
-
-Nếu muốn dừng cron (ví dụ đang sửa khẩn cấp trên VPS):
+## Bảng tham chiếu nhanh
 
 ```bash
-ssh vpsroot@192.168.1.15
-crontab -e
-# Comment dòng auto_deploy.sh bằng dấu #
-# Lưu, thoát
+# Deploy code lên staging
+git push origin staging
+
+# Promote staging lên prod
+git checkout prod && git merge --ff-only staging && git push origin prod
+
+# Xem log deploy
+ssh vpsroot@192.168.1.11 'tail -f ~/grokflow-deploy.log'
+
+# Trigger deploy ngay (bypass cron)
+ssh vpsroot@192.168.1.11 'bash ~/grokflow/deploy/auto_deploy.sh prod'
+
+# Revert prod
+git revert <bad-sha> && git push origin prod
+
+# Tạm tắt rollback trên staging để debug
+ssh vpsroot@192.168.1.11 \
+  "sed -i 's/^ROLLBACK_ON_FAIL=.*/ROLLBACK_ON_FAIL=false/' ~/grokflow-staging/.env.staging"
 ```
-
-Bật lại:
-```bash
-crontab -e   # bỏ dấu # đi
-# hoặc:
-bash /home/vpsroot/grokflow/deploy/install_auto_deploy.sh
-```
-
----
-
-## File quan trọng
-
-| File | Vai trò |
-|---|---|
-| `deploy/auto_deploy.sh` | Script cron chạy mỗi phút, thực hiện deploy |
-| `deploy/install_auto_deploy.sh` | Cài đặt cron lần đầu trên VPS |
-| `docker-compose.intranet.yml` | Cấu hình container — log rotation, resource limits |
-| `.github/workflows/ci.yml` | Test + build mỗi khi push dev |
-| `.github/workflows/deploy.yml` | Audit log + health check sau khi push prod |
-| `docs/BRANCHING.md` | Doc chi tiết kỹ thuật (English) |
-| `docs/QUY-TRINH-DEPLOY.md` | File này (tiếng Việt) |
-
----
-
-## Nếu cần help
-
-Hỏi đội dev qua kênh nội bộ. Nếu khẩn cấp:
-
-1. Kiểm tra log: `ssh vpsroot@192.168.1.15 "tail -50 /home/vpsroot/grokflow-deploy.log"`
-2. Health check: `curl https://flowgrok.vpspanel.io.vn/health` → phải trả `{"status":"ok"}`
-3. Container status: `ssh vpsroot@192.168.1.15 "docker ps"`
-
-Nếu trang trắng / 502: check `docker compose --env-file .env.prod -f docker-compose.intranet.yml logs --tail 50 backend`.
