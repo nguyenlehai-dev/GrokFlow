@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ChevronDown, LogOut, Menu, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronDown, LogOut, Menu, X, Boxes } from "lucide-react";
+import * as LucideIcons from "lucide-react";
 
 import { useAuthStore, userCanSeePath } from "@/core/auth/store";
 import { useDomainStore } from "@/core/domain/store";
@@ -9,6 +11,7 @@ import { useTranslation } from "react-i18next";
 
 import { getAuthedNav } from "@/app/moduleRegistry";
 import { useDocumentTitle } from "@/core/useDocumentTitle";
+import { adminModulesService } from "@/modules/admin/services/modules.service";
 import { NotificationBell } from "./NotificationBell";
 import { MaintenanceBanner } from "@/components/ui/MaintenanceBanner";
 import { SubscriptionBanner } from "@/components/layout/SubscriptionBanner";
@@ -39,7 +42,46 @@ export function AppShell() {
   // same render tree race and trigger React's "Maximum update depth
   // exceeded" loop. ProtectedRoute is the single source of truth.
 
-  const NAV: NavEntry[] = useMemo(() => getAuthedNav(user?.role), [user?.role]);
+  const baseNav: NavEntry[] = useMemo(() => getAuthedNav(user?.role), [user?.role]);
+
+  // Pull installed modules so we can inject a "Modules" group in the sidebar
+  // for super_admin. Static nav is augmented with these — module marketplace
+  // entries live in the DB, not in the React build, so we need a live fetch.
+  const isSuperUser = user?.role === "super_admin";
+  const { data: installedModules = [] } = useQuery({
+    queryKey: ["admin-modules"],
+    queryFn: () => adminModulesService.list(),
+    enabled: isSuperUser,
+    refetchInterval: 30_000,
+    staleTime: 20_000,
+  });
+
+  const NAV: NavEntry[] = useMemo(() => {
+    if (!isSuperUser || installedModules.length === 0) return baseNav;
+    const moduleLinks: NavLeaf[] = installedModules
+      .filter((m) => m.status === "running")
+      .map((m) => {
+        const iconName = m.manifest?.menu?.icon ?? "Box";
+        const Icon = (LucideIcons as any)[iconName] ?? Boxes;
+        return {
+          type: "link" as const,
+          to: `/admin/modules/${m.slug}`,
+          label: m.manifest?.menu?.label ?? m.slug,
+          icon: Icon,
+          superOnly: true,
+        };
+      });
+    if (moduleLinks.length === 0) return baseNav;
+    const modulesGroup: NavGroup = {
+      type: "group",
+      key: "user-modules",
+      label: "Modules",
+      icon: Boxes,
+      superOnly: true,
+      items: moduleLinks,
+    };
+    return [...baseNav, modulesGroup];
+  }, [baseNav, isSuperUser, installedModules]);
 
   // Sync i18next with the user's saved locale once /me has populated.
   // Doing it here (not in main.tsx) means the LanguageDetector default

@@ -8,6 +8,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev curl gnupg lsb-release ca-certificates \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Cloudflare WARP — runs as a SOCKS5 proxy at 127.0.0.1:40000 inside this

@@ -96,6 +96,8 @@ def _load_modules() -> list[ModuleManifest]:
     from app.modules.admin.roles import manifest as roles
     from app.modules.admin.settings import manifest as settings
     from app.modules.admin.tools import manifest as admin_tools
+    from app.modules.admin_modules import manifest as admin_modules
+    from app.modules.sdk import manifest as sdk
     from app.modules.flow import manifest as flow
     from app.modules.gateway import manifest as gateway
     from app.modules.grok.files import manifest as grok_files
@@ -130,6 +132,8 @@ def _load_modules() -> list[ModuleManifest]:
         roles,
         settings,
         admin_tools,
+        admin_modules,
+        sdk,
         git_admin,
         # Other products
         flow,

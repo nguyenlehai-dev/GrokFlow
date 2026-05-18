@@ -30,3 +30,22 @@ async def enforce_api_key_rate_limit(api_key: ApiKey) -> None:
 
     if api_key.daily_limit and api_key.used_today >= api_key.daily_limit:
         raise RateLimited()
+
+
+async def enforce_service_token_rate_limit(slug: str, limit_per_minute: int = 300) -> None:
+    """Per-module rate limit on /api/sdk/* calls so a misbehaving plugin
+    can't DDoS the core. Fixed-window counter keyed on the module slug.
+
+    Default 300/min = 5/sec sustained; modules doing batch operations can
+    request a higher cap in the manifest (future).
+    """
+    redis = get_redis()
+    now = datetime.now(timezone.utc)
+    minute_bucket = int(now.timestamp() // 60)
+    key = f"rate:sdk:{slug}:{minute_bucket}"
+
+    count = await redis.incr(key)
+    if count == 1:
+        await redis.expire(key, 70)
+    if count > limit_per_minute:
+        raise RateLimited()
