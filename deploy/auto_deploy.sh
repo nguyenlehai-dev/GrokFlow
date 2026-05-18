@@ -138,17 +138,22 @@ deploy_failed=false
 failure_reason=""
 
 # ---- Rebuild + restart ----------------------------------------------------
-if ! {
-    if [[ "$backend_changed" == "true" || "$compose_changed" == "true" ]]; then
-        log "rebuilding backend/worker/idle-cleanup"
-        $DC up -d --build backend worker idle-cleanup
-    else
-        log "backend unchanged, skipping rebuild"
-        $DC up -d backend worker idle-cleanup
-    fi
-}; then
+# Always bring up the full stack first so first-time deploys (staging) start
+# every service even when nothing under backend/ or frontend/ changed. For
+# incremental deploys this is a no-op for already-running services.
+if ! $DC up -d; then
     deploy_failed=true
-    failure_reason="backend up/build failed"
+    failure_reason="initial up -d failed"
+fi
+
+if [[ "$deploy_failed" == "false" ]] && {
+    [[ "$backend_changed" == "true" || "$compose_changed" == "true" ]]
+}; then
+    log "rebuilding backend/worker/idle-cleanup"
+    if ! $DC up -d --build backend worker idle-cleanup; then
+        deploy_failed=true
+        failure_reason="backend up/build failed"
+    fi
 fi
 
 # Wait for backend container, then run migrations.
