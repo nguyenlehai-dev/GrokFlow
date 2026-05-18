@@ -90,6 +90,14 @@ trap 'rm -f "$LOCK_FILE"' EXIT
 
 cd "$REPO_DIR"
 
+# The compose file hardcodes `env_file: ./.env.prod` for the backend service
+# so the container's runtime env vars come from that file. For non-prod
+# branches we maintain a symlink so the same compose works unchanged across
+# environments. (For prod, .env.prod is the real file — symlink would clobber it.)
+if [[ "$ENV_FILE" != ".env.prod" && -f "$ENV_FILE" && ! -e ".env.prod" ]]; then
+    ln -s "$ENV_FILE" .env.prod
+fi
+
 # ---- Detect new commit ----------------------------------------------------
 git fetch --quiet origin "$BRANCH"
 
