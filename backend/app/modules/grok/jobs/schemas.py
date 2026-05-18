@@ -28,6 +28,11 @@ class JobCreate(BaseModel):
     job_type: str = Field(pattern="^(image|video)$")
     prompt: str = Field(min_length=1, max_length=4000)
     profile_id: uuid.UUID | None = None
+    # Explicit per-job project override. When set, the auto-pick rules in
+    # service._create_job are skipped and this project is used verbatim.
+    # The project's profile MUST match `profile_id` if both are set;
+    # otherwise the row is invalid and we 400.
+    project_id: uuid.UUID | None = None
     # Optional convenience fields — backend merges these into `options` JSONB.
     size: str | None = Field(default=None, description="e.g. 1024x1024")
     model: str | None = Field(default=None)

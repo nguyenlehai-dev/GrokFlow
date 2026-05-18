@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Header, UploadFile, File as FastapiFile, status
 from pydantic import BaseModel
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.browser import profile_manager, vnc_manager
 from app.core.config import settings
@@ -24,8 +24,30 @@ from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
 from app.core.deps import SuperAdminUser
 from app.services.nginx_sync import refresh_vnc_map
-from app.models import Domain, GrokProject, Profile, ProjectDomainAssignment, User
+from app.models import Domain, GrokProject, Job, Profile, ProjectDomainAssignment, User
 from app.modules.admin.audit import service as audit
+
+
+async def _assert_action_allowed(db, admin: User, action_key: str) -> None:
+    """Per-domain RBAC over profile-row actions.
+
+    Super_admin can always do anything. For everyone else, the action
+    key must appear in their domain's `allowed_profile_actions` list
+    (the column added in 0029). The frontend grays out the buttons but
+    we re-check here so a hand-rolled API call can't bypass the UI.
+    """
+    if admin.role == "super_admin":
+        return
+    if not admin.domain_id:
+        # Defensive: a non-super_admin without a domain shouldn't exist,
+        # but if it does, deny by default rather than allow.
+        raise PermissionDenied(f"Action '{action_key}' chưa được cấp quyền cho user này")
+    domain = await db.get(Domain, admin.domain_id)
+    allowed = (domain.allowed_profile_actions if domain else []) or []
+    if action_key not in allowed:
+        raise PermissionDenied(
+            f"Quyền '{action_key}' đã bị super_admin tắt cho domain của bạn",
+        )
 
 
 async def _assert_profile_accessible(
@@ -58,6 +80,7 @@ async def _assert_profile_accessible(
         .where(
             GrokProject.profile_id == profile.id,
             ProjectDomainAssignment.domain_id == admin.domain_id,
+            ProjectDomainAssignment.enabled.is_(True),
         )
         .limit(1)
     )).first()
@@ -167,7 +190,10 @@ def _profile_ids_assigned_to_domain(domain_id):
     return (
         select(GrokProject.profile_id)
         .join(ProjectDomainAssignment, ProjectDomainAssignment.project_id == GrokProject.id)
-        .where(ProjectDomainAssignment.domain_id == domain_id)
+        .where(
+            ProjectDomainAssignment.domain_id == domain_id,
+            ProjectDomainAssignment.enabled.is_(True),
+        )
         .scalar_subquery()
     )
 
@@ -187,6 +213,8 @@ async def create_profile(payload: ProfileCreate, admin: AdminUser, db: DbSession
         status="created",
         max_concurrent_jobs=payload.max_concurrent_jobs,
         max_concurrent_video=payload.max_concurrent_video,
+        allows_video=payload.allows_video,
+        tier=payload.tier,
     )
     db.add(profile)
     await audit.log_action(db, user_id=admin.id, action="create_profile",
@@ -243,6 +271,12 @@ async def update_profile(
     if payload.max_concurrent_video is not None:
         profile.max_concurrent_video = payload.max_concurrent_video
         changes["max_concurrent_video"] = payload.max_concurrent_video
+    if payload.allows_video is not None:
+        profile.allows_video = payload.allows_video
+        changes["allows_video"] = payload.allows_video
+    if payload.tier is not None:
+        profile.tier = payload.tier
+        changes["tier"] = payload.tier
     # Audit so changes to status (esp. "deleted" / "logged_in") are traceable.
     await audit.log_action(
         db, user_id=admin.id, action="update_profile",
@@ -259,6 +293,7 @@ async def delete_profile(profile_id: uuid.UUID, admin: AdminUser, db: DbSession)
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "delete")
     profile_manager.remove_profile_dir(profile.profile_path)
     await audit.log_action(db, user_id=admin.id, action="delete_profile",
                            target_type="profile", target_id=profile.id,
@@ -278,6 +313,7 @@ async def upload_cookies(
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "upload_cookies")
     if profile.status == "running_job":
         raise InvalidPayload("Profile is busy running a job")
 
@@ -442,6 +478,7 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "auto_login")
     if profile.status == "running_job":
         raise InvalidPayload("Profile is busy running a job")
 
@@ -464,16 +501,44 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
     # Tell nginx where this new container lives so the iframe URL routes.
     # No-op when the host vhost dir isn't mounted (dev / tests).
     refresh_vnc_map()
+    # Schedule a second refresh ~4s later to catch any race where the
+    # container's NetworkSettings.Networks wasn't populated yet at the
+    # moment of the first refresh — most common when the user clicks
+    # Auto-login on multiple profiles in quick succession and Docker's
+    # IPAM is briefly behind. asyncio.create_task is fire-and-forget;
+    # the second refresh is best-effort and never blocks the response.
+    import asyncio as _asyncio
 
-    base = settings.cors_origin_list[0] if settings.cors_origin_list else ""
+    async def _delayed_refresh() -> None:
+        await _asyncio.sleep(4)
+        try:
+            refresh_vnc_map()
+        except Exception:  # noqa: BLE001 — never crash on the followup
+            pass
+
+    _asyncio.create_task(_delayed_refresh())
+
     # Per-profile noVNC route. Nginx proxies /vnc/<short-id>/ → <container>:6901
     # `path` param tells noVNC to open WS at /vnc/<short>/websockify (its default
     # 'websockify' resolves to root, breaking the routing).
     short = str(profile.id).replace("-", "")[:12]
-    # resize=scale → noVNC scales the remote framebuffer to fit the iframe,
-    # so the desktop is fully visible regardless of the iframe size.
+    # Return RELATIVE URL — the browser resolves it against the page's
+    # current origin. This matters in multi-tenant deploys where a user
+    # may be browsing tenant A (e.g. nexoratech.com.vn) while the API
+    # CORS origin is tenant B (flowgrok.vpspanel.io.vn). Returning an
+    # absolute URL with B's host makes the iframe cross-origin, which
+    # triggers Cloudflare 530 + X-Frame-Options: sameorigin + CORS
+    # preflight failures all at once. Relative is portable across tenants.
+    # Every tenant vhost already routes /vnc/<short>/* to the kasmweb
+    # container via the shared _vnc_map.conf.
+    # resize=scale → noVNC keeps the remote framebuffer at its native
+    # 1366x768 and CSS-scales the canvas to fit the iframe. We chose
+    # this over `remote` because remote-resize re-renders Chromium at
+    # the iframe's pixel size and Chromium's UI looks aggressively
+    # zoomed when that size is small. Click coordinate accuracy isn't
+    # critical once WARP is bypassing Cloudflare Turnstile.
     iframe_url = (
-        f"{base}/vnc/{short}/vnc.html"
+        f"/vnc/{short}/vnc.html"
         f"?autoconnect=1&resize=scale&path=vnc/{short}/websockify"
     )
     return VncSessionOut(
@@ -521,6 +586,7 @@ async def stop_vnc(profile_id: uuid.UUID, admin: AdminUser, db: DbSession) -> Pr
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "stop_vnc")
     try:
         vnc_manager.stop_for_profile(str(profile.id))
     except Exception:  # noqa: BLE001
@@ -542,12 +608,59 @@ async def vnc_session_status(_admin: AdminUser) -> VncStatusOut:
 
 
 @router.post("/{profile_id}/disable", response_model=ProfileOut)
-async def disable_profile(profile_id: uuid.UUID, _admin: AdminUser, db: DbSession) -> Profile:
+async def disable_profile(profile_id: uuid.UUID, admin: AdminUser, db: DbSession) -> Profile:
     profile = await db.get(Profile, profile_id)
     if not profile:
         raise NotFound("profile")
     await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "disable")
     profile.status = "disabled"
+    await db.commit()
+    await db.refresh(profile)
+    return profile
+
+
+_RUNNING_JOB_STATES = ("running", "processing_provider", "uploading_result")
+
+
+@router.post("/{profile_id}/reset-stuck", response_model=ProfileOut)
+async def reset_stuck_profile(
+    profile_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> Profile:
+    """Force-unstick a profile stuck on `running_job`.
+
+    Use case: worker died mid-job or the slot-release path failed silently,
+    leaving the profile's status=running_job and active_jobs>0 forever.
+    The background `idle_cleanup` heal also fixes this, but on a slow
+    cadence (default 1h); this endpoint lets admins recover instantly.
+
+    Safety: if real jobs are still in a running state for this profile,
+    we sync the counters but DO NOT flip status to logged_in — that would
+    let new jobs grab a slot while old ones are mid-flight."""
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
+
+    live = (await db.execute(
+        select(func.count()).select_from(Job).where(
+            Job.profile_id == profile_id,
+            Job.status.in_(_RUNNING_JOB_STATES),
+        )
+    )).scalar_one() or 0
+    live_video = (await db.execute(
+        select(func.count()).select_from(Job).where(
+            Job.profile_id == profile_id,
+            Job.status.in_(_RUNNING_JOB_STATES),
+            Job.job_type == "video",
+        )
+    )).scalar_one() or 0
+
+    profile.active_jobs = int(live)
+    profile.active_video_jobs = int(live_video)
+    if live == 0 and profile.status == "running_job":
+        profile.status = "logged_in"
+        profile.error_message = None
     await db.commit()
     await db.refresh(profile)
     return profile

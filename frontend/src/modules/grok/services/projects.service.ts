@@ -18,23 +18,33 @@ export const projectsService = {
 
   getDomains: (id: string) =>
     api
-      .get<{ project_id: string; domain_ids: string[] }>(
+      .get<{ project_id: string; domain_ids: string[]; disabled_domain_ids?: string[] }>(
         `/api/grok-projects/${id}/domains`,
       )
       .then((r) => r.data),
 
-  setDomains: (id: string, domain_ids: string[]) =>
-    api.put(`/api/grok-projects/${id}/domains`, { domain_ids }),
+  setDomains: (id: string, domain_ids: string[], disabled_domain_ids: string[] = []) =>
+    api.put(`/api/grok-projects/${id}/domains`, { domain_ids, disabled_domain_ids }),
+
+  getToolInstalls: (id: string) =>
+    api
+      .get<{ project_id: string; tool_install_ids: string[]; disabled_tool_install_ids?: string[] }>(
+        `/api/grok-projects/${id}/tool-installs`,
+      )
+      .then((r) => r.data),
+
+  setToolInstalls: (id: string, tool_install_ids: string[], disabled_tool_install_ids: string[] = []) =>
+    api.put(`/api/grok-projects/${id}/tool-installs`, { tool_install_ids, disabled_tool_install_ids }),
 
   getUsers: (id: string) =>
     api
-      .get<{ project_id: string; user_ids: string[] }>(
+      .get<{ project_id: string; user_ids: string[]; disabled_user_ids?: string[] }>(
         `/api/grok-projects/${id}/users`,
       )
       .then((r) => r.data),
 
-  setUsers: (id: string, user_ids: string[]) =>
-    api.put(`/api/grok-projects/${id}/users`, { user_ids }),
+  setUsers: (id: string, user_ids: string[], disabled_user_ids: string[] = []) =>
+    api.put(`/api/grok-projects/${id}/users`, { user_ids, disabled_user_ids }),
 
   usersByDomain: (domainId: string) =>
     api
@@ -45,4 +55,21 @@ export const projectsService = {
     api
       .post<Project>("/api/grok-projects/auto-provision", payload)
       .then((r) => r.data),
+
+  /** Read the profile's Grok account project list directly from grok.com
+   *  via the running VNC Chromium. Returns rows already in our DB flagged
+   *  with `imported=true` so the UI can disable duplicate-import. */
+  discover: (profileId: string) =>
+    api
+      .get<DiscoveredProject[]>("/api/grok-projects/discover", {
+        params: { profile_id: profileId },
+      })
+      .then((r) => r.data),
 };
+
+export interface DiscoveredProject {
+  grok_project_id: string;
+  name: string;
+  description: string | null;
+  imported: boolean;
+}

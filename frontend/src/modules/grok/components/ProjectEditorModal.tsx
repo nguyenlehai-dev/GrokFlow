@@ -42,20 +42,53 @@ export function ProjectEditorModal({
 
   const [selectedDomainIds, setSelectedDomainIds] = useState<Set<string> | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string> | null>(null);
+  // Disabled subsets — assigned-but-suspended rows. Persisted via the
+  // `disabled_*_ids` field on the corresponding PUT endpoint. Resolver
+  // ignores these assignments as if they didn't exist.
+  const [disabledDomainIds, setDisabledDomainIds] = useState<Set<string> | null>(null);
+  const [disabledUserIds, setDisabledUserIds] = useState<Set<string> | null>(null);
+
   const effectiveDomains = selectedDomainIds ?? new Set(currentAssign?.domain_ids ?? []);
   const effectiveUsers = selectedUserIds ?? new Set(currentUsers?.user_ids ?? []);
+  const effectiveDisabledDomains =
+    disabledDomainIds ?? new Set(currentAssign?.disabled_domain_ids ?? []);
+  const effectiveDisabledUsers =
+    disabledUserIds ?? new Set(currentUsers?.disabled_user_ids ?? []);
 
   const toggleDomain = (id: string) => {
     const next = new Set(effectiveDomains);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setSelectedDomainIds(next);
+    // Unchecking a domain implicitly removes any disabled flag on it.
+    if (effectiveDisabledDomains.has(id)) {
+      const d = new Set(effectiveDisabledDomains);
+      d.delete(id);
+      setDisabledDomainIds(d);
+    }
   };
   const toggleUser = (id: string) => {
     const next = new Set(effectiveUsers);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setSelectedUserIds(next);
+    if (effectiveDisabledUsers.has(id)) {
+      const d = new Set(effectiveDisabledUsers);
+      d.delete(id);
+      setDisabledUserIds(d);
+    }
+  };
+  const toggleDomainDisabled = (id: string) => {
+    const next = new Set(effectiveDisabledDomains);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setDisabledDomainIds(next);
+  };
+  const toggleUserDisabled = (id: string) => {
+    const next = new Set(effectiveDisabledUsers);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setDisabledUserIds(next);
   };
 
   const save = useMutation({
@@ -77,10 +110,19 @@ export function ProjectEditorModal({
         });
         projectId = data.id;
       }
-      // Push both assignment sets in parallel.
+      // Push both assignment sets in parallel — include the disabled
+      // subsets so the resolver respects user's per-row toggles.
       await Promise.all([
-        projectsService.setDomains(projectId, Array.from(effectiveDomains)),
-        projectsService.setUsers(projectId, Array.from(effectiveUsers)),
+        projectsService.setDomains(
+          projectId,
+          Array.from(effectiveDomains),
+          Array.from(effectiveDisabledDomains).filter((d) => effectiveDomains.has(d)),
+        ),
+        projectsService.setUsers(
+          projectId,
+          Array.from(effectiveUsers),
+          Array.from(effectiveDisabledUsers).filter((u) => effectiveUsers.has(u)),
+        ),
       ]);
     },
     onSuccess: () => {
@@ -173,9 +215,13 @@ export function ProjectEditorModal({
                     key={d.id}
                     domain={d}
                     checked={effectiveDomains.has(d.id)}
+                    disabled={effectiveDisabledDomains.has(d.id)}
                     onToggle={() => toggleDomain(d.id)}
+                    onToggleDisabled={() => toggleDomainDisabled(d.id)}
                     selectedUserIds={effectiveUsers}
+                    disabledUserIds={effectiveDisabledUsers}
                     onToggleUser={toggleUser}
+                    onToggleUserDisabled={toggleUserDisabled}
                   />
                 ))}
               </div>

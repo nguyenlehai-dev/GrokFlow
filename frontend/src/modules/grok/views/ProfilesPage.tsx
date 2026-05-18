@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/core/auth/store";
+import { useDomainStore } from "@/core/domain/store";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { UploadCookiesModal } from "../components/UploadCookiesModal";
 import { AutoLoginModal } from "../components/AutoLoginModal";
@@ -15,6 +16,12 @@ export function ProfilesPage() {
   const me = useAuthStore((s) => s.user);
   const isAdmin = (me?.role === "admin" || me?.role === "super_admin");
   const isSuper = me?.role === "super_admin";
+  // Super_admin always sees every action; tenant admins respect the
+  // per-domain allowlist set by super_admin in the Domain editor.
+  const domainConfig = useDomainStore((s) => s.config);
+  const allowedActions = domainConfig?.allowed_profile_actions
+    ?? ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"];
+  const can = (key: string) => isSuper || allowedActions.includes(key);
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["profiles"],
@@ -26,9 +33,16 @@ export function ProfilesPage() {
   const [autoLoginFor, setAutoLoginFor] = useState<string | null>(null);
   // Per-row state for the domain assignment modal — super_admin only.
   const [projectsFor, setProjectsFor] = useState<{ id: string; name: string } | null>(null);
+  // Client-side filter by tier. "all" shows everything; specific tiers
+  // narrow the table to that bucket so admin can scan "heavy only".
+  const [tierFilter, setTierFilter] = useState<"all" | "free" | "heavy" | "pro">("all");
 
   const disable = useMutation({
     mutationFn: (id: string) => profilesService.disable(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  const resetStuck = useMutation({
+    mutationFn: (id: string) => profilesService.resetStuck(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
   });
   const stopVnc = useMutation({
@@ -47,6 +61,20 @@ export function ProfilesPage() {
   const updateMaxVideo = useMutation({
     mutationFn: ({ id, max }: { id: string; max: number }) =>
       profilesService.update(id, { max_concurrent_video: max }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  // Toggle that decides whether a profile is allowed to accept video
+  // jobs. Off ⇒ the resolver (backend) skips this profile when picking
+  // for video — the video slots column is also greyed out below.
+  const updateAllowsVideo = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) =>
+      profilesService.update(id, { allows_video: value }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  // Tier change — cosmetic only, drives the row badge + filter.
+  const updateTier = useMutation({
+    mutationFn: ({ id, tier }: { id: string; tier: string }) =>
+      profilesService.update(id, { tier }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
   });
 
@@ -97,6 +125,36 @@ export function ProfilesPage() {
         </div>
       )}
 
+      {/* Tier filter chips. Counts re-derived from the live data so the UI
+          stays accurate after admin edits a tier. */}
+      {data && data.length > 0 && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">Tier:</span>
+          {(["all", "free", "heavy", "pro"] as const).map((tierKey) => {
+            const count = tierKey === "all"
+              ? data.length
+              : data.filter((p) => ((p as { tier?: string }).tier ?? "free") === tierKey).length;
+            const active = tierFilter === tierKey;
+            return (
+              <button
+                key={tierKey}
+                onClick={() => setTierFilter(tierKey)}
+                className={`px-2.5 py-1 rounded-full ring-1 transition-colors ${
+                  active
+                    ? "bg-slate-900 text-white ring-slate-900"
+                    : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <span className="uppercase font-semibold">{tierKey}</span>
+                <span className={`ml-1 ${active ? "text-slate-300" : "text-slate-400"}`}>
+                  ({count})
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-slate-500">{t("grok.profiles_loading")}</p>
       ) : (
@@ -107,6 +165,7 @@ export function ProfilesPage() {
                 <th className="px-4 py-2">{t("grok.profiles_th_name")}</th>
                 <th className="px-4 py-2">{t("grok.profiles_th_provider")}</th>
                 <th className="px-4 py-2">{t("grok.profiles_th_status")}</th>
+                <th className="px-4 py-2" title={t("grok.profiles_th_mode_title")}>{t("grok.profiles_th_mode")}</th>
                 <th className="px-4 py-2" title={t("grok.profiles_th_image_slots_title")}>{t("grok.profiles_th_image_slots")}</th>
                 <th className="px-4 py-2" title={t("grok.profiles_th_video_slots_title")}>{t("grok.profiles_th_video_slots")}</th>
                 <th className="px-4 py-2">{t("grok.profiles_th_last_used")}</th>
@@ -114,22 +173,65 @@ export function ProfilesPage() {
               </tr>
             </thead>
             <tbody>
-              {data?.map((p) => {
+              {data?.filter((p) => {
+                if (tierFilter === "all") return true;
+                return ((p as { tier?: string }).tier ?? "free") === tierFilter;
+              }).map((p) => {
                 const usage = p.max_concurrent_jobs > 0 ? p.active_jobs / p.max_concurrent_jobs : 0;
                 const slotColor = usage >= 1 ? "text-rose-600" : usage >= 0.7 ? "text-amber-600" : "text-emerald-600";
-                const videoUsage = p.max_concurrent_video > 0
+                const allowsVideo = p.allows_video !== false; // default true for old rows
+                const videoUsage = allowsVideo && p.max_concurrent_video > 0
                   ? (p.active_video_jobs ?? 0) / p.max_concurrent_video
                   : 0;
-                const videoColor = videoUsage >= 1
+                const videoColor = !allowsVideo
+                  ? "text-slate-400"
+                  : videoUsage >= 1
                   ? "text-rose-600"
                   : videoUsage >= 0.7
                   ? "text-amber-600"
                   : "text-emerald-600";
+                const tier = (p as { tier?: string }).tier ?? "free";
+                const tierBadge =
+                  tier === "heavy"
+                    ? "bg-amber-100 text-amber-800 ring-amber-200"
+                    : tier === "pro"
+                    ? "bg-violet-100 text-violet-800 ring-violet-200"
+                    : "bg-slate-100 text-slate-600 ring-slate-200";
                 return (
                   <tr key={p.id} className="border-t">
-                    <td className="px-4 py-2 font-medium">{p.name}</td>
+                    <td className="px-4 py-2">
+                      <div className="font-medium flex items-center gap-2">
+                        {p.name}
+                        {isAdmin ? (
+                          <select
+                            value={tier}
+                            onChange={(e) => updateTier.mutate({ id: p.id, tier: e.target.value })}
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 cursor-pointer ${tierBadge}`}
+                            title="Tier (chỉ để label / lọc — không ảnh hưởng routing)"
+                          >
+                            <option value="free">FREE</option>
+                            <option value="heavy">HEAVY</option>
+                            <option value="pro">PRO</option>
+                          </select>
+                        ) : (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${tierBadge} uppercase font-semibold`}>
+                            {tier}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-2">{p.provider}</td>
                     <td className="px-4 py-2"><StatusBadge status={p.status} /></td>
+                    <td className="px-4 py-2">
+                      <ModeToggle
+                        allowsVideo={allowsVideo}
+                        canEdit={!!isAdmin}
+                        busy={updateAllowsVideo.isPending}
+                        onChange={(v) => updateAllowsVideo.mutate({ id: p.id, value: v })}
+                        labelImageOnly={t("grok.profiles_mode_image_only")}
+                        labelBoth={t("grok.profiles_mode_image_video")}
+                      />
+                    </td>
                     <td className="px-4 py-2">
                       <span className={`font-mono font-semibold ${slotColor}`}>
                         {p.active_jobs}/{p.max_concurrent_jobs}
@@ -152,10 +254,15 @@ export function ProfilesPage() {
                       )}
                     </td>
                     <td className="px-4 py-2">
-                      <span className={`font-mono font-semibold ${videoColor}`}>
-                        {p.active_video_jobs ?? 0}/{p.max_concurrent_video ?? 4}
+                      <span
+                        className={`font-mono font-semibold ${videoColor}`}
+                        title={!allowsVideo ? t("grok.profiles_video_disabled_hint") : undefined}
+                      >
+                        {allowsVideo
+                          ? `${p.active_video_jobs ?? 0}/${p.max_concurrent_video ?? 4}`
+                          : "—"}
                       </span>
-                      {isAdmin && (
+                      {isAdmin && allowsVideo && (
                         <input
                           type="number"
                           min={1}
@@ -177,7 +284,26 @@ export function ProfilesPage() {
                     </td>
                     {isAdmin && (
                       <td className="px-4 py-2 space-x-2 whitespace-nowrap">
-                        <button className="btn-primary" onClick={() => setAutoLoginFor(p.id)}>{t("grok.profiles_action_auto_login")}</button>
+                        <button
+                          className="btn-primary"
+                          onClick={() => setAutoLoginFor(p.id)}
+                          disabled={!can("auto_login")}
+                          title={!can("auto_login") ? t("grok.profiles_action_blocked_title") : undefined}
+                        >
+                          {t("grok.profiles_action_auto_login")}
+                        </button>
+                        <button
+                          className="btn-ghost"
+                          onClick={() => setCookiesFor(p.id)}
+                          disabled={!can("upload_cookies")}
+                          title={
+                            !can("upload_cookies")
+                              ? t("grok.profiles_action_blocked_title")
+                              : t("grok.profiles_action_upload_cookies_title")
+                          }
+                        >
+                          {t("grok.profiles_action_upload_cookies")}
+                        </button>
                         {isSuper && (
                           <button
                             className="btn-ghost"
@@ -187,9 +313,44 @@ export function ProfilesPage() {
                             {t("grok.profiles_action_projects")}
                           </button>
                         )}
-                        <button className="btn-ghost" onClick={() => stopVnc.mutate(p.id)} title={t("grok.profiles_action_stop_title")}>{t("grok.profiles_action_stop")}</button>
-                        <button className="btn-ghost" onClick={() => disable.mutate(p.id)}>{t("grok.profiles_action_disable")}</button>
-                        <button className="btn-ghost text-rose-600" onClick={() => remove.mutate(p.id)}>{t("grok.profiles_action_delete")}</button>
+                        <button
+                          className="btn-ghost"
+                          onClick={() => stopVnc.mutate(p.id)}
+                          disabled={!can("stop_vnc")}
+                          title={
+                            !can("stop_vnc")
+                              ? t("grok.profiles_action_blocked_title")
+                              : t("grok.profiles_action_stop_title")
+                          }
+                        >
+                          {t("grok.profiles_action_stop")}
+                        </button>
+                        {p.status === "running_job" && (
+                          <button
+                            className="btn-ghost text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                            onClick={() => resetStuck.mutate(p.id)}
+                            disabled={resetStuck.isPending}
+                            title="Reset profile bị kẹt ở Running — đồng bộ lại counter và mở khoá slot"
+                          >
+                            {resetStuck.isPending && resetStuck.variables === p.id ? "Đang reset…" : "Reset kẹt"}
+                          </button>
+                        )}
+                        <button
+                          className="btn-ghost"
+                          onClick={() => disable.mutate(p.id)}
+                          disabled={!can("disable")}
+                          title={!can("disable") ? t("grok.profiles_action_blocked_title") : undefined}
+                        >
+                          {t("grok.profiles_action_disable")}
+                        </button>
+                        <button
+                          className="btn-ghost text-rose-600"
+                          onClick={() => remove.mutate(p.id)}
+                          disabled={!can("delete")}
+                          title={!can("delete") ? t("grok.profiles_action_blocked_title") : undefined}
+                        >
+                          {t("grok.profiles_action_delete")}
+                        </button>
                       </td>
                     )}
                   </tr>
@@ -197,7 +358,7 @@ export function ProfilesPage() {
               })}
               {data?.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 6 : 5} className="px-4 py-6 text-center text-slate-500">
+                  <td colSpan={isAdmin ? 7 : 6} className="px-4 py-6 text-center text-slate-500">
                     {isAdmin ? t("grok.profiles_empty_admin") : t("grok.profiles_empty_user")}
                   </td>
                 </tr>
@@ -221,20 +382,67 @@ export function ProfilesPage() {
   );
 }
 
+/** Pill-style two-option toggle: "Ảnh + Video" / "Chỉ ảnh".
+ *  - Customers see it as a read-only badge.
+ *  - Admins click to flip; backend call rejects mid-flight so the UI
+ *    optimistic state stays in sync via React Query invalidation.
+ *  - Greyed out while the mutation is in flight to avoid double-clicks. */
+function ModeToggle({
+  allowsVideo, canEdit, busy, onChange, labelImageOnly, labelBoth,
+}: {
+  allowsVideo: boolean;
+  canEdit: boolean;
+  busy: boolean;
+  onChange: (v: boolean) => void;
+  labelImageOnly: string;
+  labelBoth: string;
+}) {
+  const label = allowsVideo ? labelBoth : labelImageOnly;
+  const tone = allowsVideo
+    ? "bg-violet-100 text-violet-700 border-violet-200"
+    : "bg-amber-100 text-amber-700 border-amber-200";
+  if (!canEdit) {
+    return (
+      <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-semibold rounded border ${tone}`}>
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!allowsVideo)}
+      disabled={busy}
+      className={`inline-flex items-center px-2 py-0.5 text-[11px] font-semibold rounded border transition ${tone} hover:opacity-80 disabled:opacity-50`}
+      title="Click để chuyển chế độ"
+    >
+      {label}
+    </button>
+  );
+}
+
+
 interface CreateValues {
   name: string;
   provider: "grok" | "flow";
   max_concurrent_jobs: number;
+  allows_video: boolean;
+  tier: string;
 }
 
 function CreateProfileModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<CreateValues>({
-    defaultValues: { provider: "grok", max_concurrent_jobs: 4 },
+    defaultValues: { provider: "grok", max_concurrent_jobs: 4, allows_video: true, tier: "free" },
   });
   const onSubmit = async (v: CreateValues) => {
-    await profilesService.create({ ...v, max_concurrent_jobs: Number(v.max_concurrent_jobs) });
+    await profilesService.create({
+      ...v,
+      max_concurrent_jobs: Number(v.max_concurrent_jobs),
+      allows_video: Boolean(v.allows_video),
+      tier: v.tier,
+    });
     qc.invalidateQueries({ queryKey: ["profiles"] });
     onClose();
   };
@@ -254,6 +462,18 @@ function CreateProfileModal({ onClose }: { onClose: () => void }) {
           </select>
         </div>
         <div>
+          <label className="text-sm font-medium">Tier (gói acc)</label>
+          <select className="input" {...register("tier")}>
+            <option value="free">Free — acc miễn phí (~5/day)</option>
+            <option value="heavy">Heavy — SuperGrok Premium (~500/day)</option>
+            <option value="pro">Pro — acc trả phí cao cấp</option>
+          </select>
+          <p className="text-xs text-slate-500 mt-1">
+            Chỉ là label phân loại để dễ quản lý — không ảnh hưởng routing.
+            Có thể đổi sau ở row profile.
+          </p>
+        </div>
+        <div>
           <label className="text-sm font-medium">{t("grok.profiles_modal_max_jobs")}</label>
           <input
             type="number"
@@ -266,6 +486,15 @@ function CreateProfileModal({ onClose }: { onClose: () => void }) {
             {t("grok.profiles_modal_max_jobs_hint")}
           </p>
         </div>
+        <label className="flex items-start gap-2 cursor-pointer pt-1">
+          <input type="checkbox" className="mt-1" {...register("allows_video")} />
+          <span>
+            <span className="text-sm font-medium">{t("grok.profiles_modal_allows_video")}</span>
+            <span className="block text-xs text-slate-500 mt-0.5">
+              {t("grok.profiles_modal_allows_video_hint")}
+            </span>
+          </span>
+        </label>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-ghost">{t("grok.profiles_modal_cancel")}</button>
           <button className="btn-primary" disabled={isSubmitting}>{t("grok.profiles_modal_create")}</button>

@@ -1,0 +1,452 @@
+// "Create Video Pro" — Tech Studio premium theme.
+//
+// Design pillars (per UI/UX Pro Max product/style heuristics):
+//   1. CONTENT FIRST — prompts + log are the protagonists; chrome stays
+//      muted glass so it never competes with data.
+//   2. DEPTH & ELEVATION — every interactive surface has a defined tier
+//      (sidebar < panels < cards < CTAs) communicated via shadow scale
+//      + subtle ring + backdrop-blur instead of stark borders.
+//   3. SEMANTIC NEON — color is functional, not decorative:
+//        cyan   = primary / brand
+//        violet = secondary / accent
+//        amber  = batch / waiting
+//        emerald = success
+//        rose   = danger / stop / error
+//   4. MOTION WITH MEANING — pulse on "running", shimmer on active
+//      progress, lift on hover. Decorative-only animations are banned.
+//
+// Color tokens are defined as CSS custom properties on `.cvp-skin` so
+// future light-mode / brand-override variants can swap them without
+// touching component code.
+
+@layer utilities {
+  .cvp-skin {
+    // ─── Tokens ───────────────────────────────────────────────────
+    --cvp-bg-0: #030712;          // deepest — page bg
+    --cvp-bg-1: #060b1a;          // sidebar
+    --cvp-bg-2: rgba(15, 23, 42, 0.65); // card surface (over blur)
+    --cvp-bg-3: rgba(15, 23, 42, 0.85); // raised surface (modals, log)
+    --cvp-line: rgba(148, 163, 184, 0.12); // hairline divider
+    --cvp-line-strong: rgba(148, 163, 184, 0.22);
+
+    --cvp-text-1: #f1f5f9;        // headings / primary
+    --cvp-text-2: #cbd5e1;        // body
+    --cvp-text-3: #94a3b8;        // muted
+    --cvp-text-4: #64748b;        // disabled / placeholder
+
+    --cvp-primary: #06b6d4;       // cyan — brand
+    --cvp-primary-glow: rgba(6, 182, 212, 0.35);
+    --cvp-accent: #8b5cf6;        // violet — secondary
+    --cvp-accent-glow: rgba(139, 92, 246, 0.35);
+    --cvp-success: #10b981;
+    --cvp-warning: #f59e0b;
+    --cvp-danger: #f43f5e;
+
+    // ─── Page bg ──────────────────────────────────────────────────
+    background:
+      // Cyan glow top-left
+      radial-gradient(ellipse 50% 50% at 15% 10%, rgba(6, 182, 212, 0.10), transparent 60%),
+      // Violet glow bottom-right
+      radial-gradient(ellipse 60% 50% at 85% 95%, rgba(139, 92, 246, 0.08), transparent 60%),
+      // Subtle vignette
+      radial-gradient(circle at 50% 50%, #0a0f1f 0%, #050811 70%, #02040a 100%);
+    color: var(--cvp-text-2);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-feature-settings: "cv11", "ss01", "ss02"; // Inter's clean alternates
+    letter-spacing: -0.005em;
+    position: relative;
+    overflow: hidden;
+
+    // Star-field overlay — two layers, very subtle so it doesn't fight
+    // the data. Set inside a ::before so it doesn't catch pointer events.
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        radial-gradient(1px 1px at 20px 30px, rgba(255, 255, 255, 0.4), transparent),
+        radial-gradient(1px 1px at 80px 110px, rgba(255, 255, 255, 0.2), transparent),
+        radial-gradient(1.5px 1.5px at 180px 70px, rgba(6, 182, 212, 0.6), transparent),
+        radial-gradient(1px 1px at 240px 170px, rgba(255, 255, 255, 0.3), transparent),
+        radial-gradient(1px 1px at 340px 60px, rgba(139, 92, 246, 0.4), transparent),
+        radial-gradient(1.5px 1.5px at 420px 220px, rgba(255, 255, 255, 0.35), transparent);
+      background-repeat: repeat;
+      background-size: 480px 280px;
+      pointer-events: none;
+      opacity: 0.6;
+      mix-blend-mode: screen;
+    }
+
+    // Crisp tabular numerals in tables / logs / counters.
+    .font-mono, code, pre {
+      font-family: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "calt" 0, "liga" 0;
+    }
+
+    // ─── Scrollbar ────────────────────────────────────────────────
+    *::-webkit-scrollbar { width: 10px; height: 10px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.18);
+      border-radius: 4px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    *::-webkit-scrollbar-thumb:hover { background: rgba(6, 182, 212, 0.4); background-clip: padding-box; }
+  }
+
+  // ─── Sidebar ────────────────────────────────────────────────────
+  .cvp-sidebar {
+    background:
+      linear-gradient(180deg, rgba(6, 182, 212, 0.04), transparent 30%),
+      var(--cvp-bg-1, #060b1a);
+    border-right: 1px solid var(--cvp-line, rgba(148, 163, 184, 0.12));
+    backdrop-filter: blur(20px);
+    @apply min-h-screen;
+    position: relative;
+    z-index: 2;
+    box-shadow: 1px 0 0 rgba(255, 255, 255, 0.02) inset;
+  }
+
+  .cvp-brand {
+    background: linear-gradient(135deg, var(--cvp-primary, #06b6d4), var(--cvp-accent, #8b5cf6));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+
+  // Group header — small, uppercase, with hairline divider underneath.
+  .cvp-group-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--cvp-text-3, #94a3b8);
+    padding: 0 0.5rem;
+    margin: 0.25rem 0 0.5rem;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    &::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, var(--cvp-line-strong, rgba(148, 163, 184, 0.22)), transparent);
+    }
+  }
+
+  // Sidebar item — three states (default / hover / active) with a left-
+  // edge indicator bar that animates in on active. Touch target ≥ 44px.
+  .cvp-nav-item {
+    @apply flex items-center gap-2.5 w-full px-3 rounded-lg text-[12px] font-medium transition-all duration-200;
+    min-height: 40px;
+    color: var(--cvp-text-2, #cbd5e1);
+    background: transparent;
+    border: 1px solid transparent;
+    position: relative;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: -1px;
+      top: 50%;
+      width: 3px;
+      height: 0;
+      background: linear-gradient(180deg, var(--cvp-primary, #06b6d4), var(--cvp-accent, #8b5cf6));
+      border-radius: 0 3px 3px 0;
+      transform: translateY(-50%);
+      transition: height 200ms ease-out;
+    }
+
+    &:hover {
+      color: var(--cvp-text-1, #f1f5f9);
+      background: rgba(6, 182, 212, 0.06);
+    }
+    &.is-active {
+      color: var(--cvp-text-1, #f1f5f9);
+      background: linear-gradient(90deg, rgba(6, 182, 212, 0.14), rgba(139, 92, 246, 0.06) 60%, transparent);
+      border-color: rgba(6, 182, 212, 0.25);
+      box-shadow: 0 0 24px -8px var(--cvp-primary-glow, rgba(6, 182, 212, 0.35));
+      &::before { height: 60%; }
+    }
+  }
+
+  // ─── Topbar ─────────────────────────────────────────────────────
+  .cvp-topbar {
+    background:
+      linear-gradient(180deg, rgba(6, 11, 26, 0.95), rgba(6, 11, 26, 0.6));
+    border-bottom: 1px solid var(--cvp-line, rgba(148, 163, 184, 0.12));
+    backdrop-filter: blur(16px);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  // The whole working area gets a soft ring instead of the previous
+  // red border — production polish over "this is the active region"
+  // emphasis (info hierarchy now lives in the cards themselves).
+  .cvp-panel-border {
+    @apply m-3 rounded-2xl relative;
+    box-shadow: 0 0 0 1px var(--cvp-line, rgba(148, 163, 184, 0.12));
+    z-index: 1;
+  }
+
+  // ─── Cards & surfaces ───────────────────────────────────────────
+  .cvp-card {
+    background: var(--cvp-bg-2, rgba(15, 23, 42, 0.65));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--cvp-line, rgba(148, 163, 184, 0.12));
+    border-radius: 12px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.03),
+      0 1px 2px rgba(0, 0, 0, 0.2);
+    transition: border-color 200ms ease, box-shadow 200ms ease;
+  }
+  .cvp-card-hover {
+    &:hover {
+      border-color: rgba(6, 182, 212, 0.35);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 0 0 1px rgba(6, 182, 212, 0.15),
+        0 8px 24px -12px rgba(6, 182, 212, 0.4);
+    }
+  }
+
+  // Amber-toned card for the batch panel (semantic warning/scheduling).
+  .cvp-batch {
+    background:
+      linear-gradient(135deg, rgba(245, 158, 11, 0.10), rgba(15, 23, 42, 0.65) 60%);
+    border-color: rgba(245, 158, 11, 0.30);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 0 24px -12px rgba(245, 158, 11, 0.25);
+  }
+
+  // Terminal-style log surface.
+  .cvp-log {
+    background: linear-gradient(180deg, #02040a, #060b1a);
+    border-color: rgba(16, 185, 129, 0.18);
+    box-shadow:
+      inset 0 0 0 1px rgba(16, 185, 129, 0.10),
+      0 4px 18px -8px rgba(0, 0, 0, 0.6);
+  }
+
+  // ─── Inputs ─────────────────────────────────────────────────────
+  .cvp-input {
+    @apply text-[12px] px-2.5 py-1.5 rounded-md font-medium;
+    background: rgba(2, 6, 23, 0.7);
+    color: var(--cvp-text-1, #f1f5f9);
+    border: 1px solid var(--cvp-line-strong, rgba(148, 163, 184, 0.22));
+    transition: all 150ms ease;
+    min-height: 32px;
+    &:hover { border-color: rgba(6, 182, 212, 0.35); }
+    &:focus {
+      outline: none;
+      border-color: var(--cvp-primary, #06b6d4);
+      box-shadow: 0 0 0 3px var(--cvp-primary-glow, rgba(6, 182, 212, 0.35));
+    }
+    &::placeholder { color: var(--cvp-text-4, #64748b); }
+  }
+
+  // ─── Buttons ────────────────────────────────────────────────────
+  .cvp-btn-violet {
+    @apply rounded-md font-semibold uppercase tracking-wider text-white;
+    background: linear-gradient(135deg, #a78bfa, #6366f1);
+    border: 1px solid rgba(167, 139, 250, 0.5);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 4px 12px -4px rgba(139, 92, 246, 0.5);
+    transition: all 150ms ease;
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.25),
+        0 8px 20px -6px rgba(139, 92, 246, 0.6);
+    }
+    &:active { transform: translateY(0); }
+  }
+  .cvp-btn-teal {
+    @apply rounded-md font-semibold uppercase tracking-wider text-white;
+    background: linear-gradient(135deg, #14b8a6, #06b6d4);
+    border: 1px solid rgba(20, 184, 166, 0.5);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 4px 12px -4px rgba(20, 184, 166, 0.5);
+    transition: all 150ms ease;
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.25),
+        0 8px 20px -6px rgba(20, 184, 166, 0.6);
+    }
+  }
+
+  // Primary CTA (Bắt Đầu) — needs to read as THE action on screen.
+  .cvp-btn-primary {
+    background: linear-gradient(135deg, var(--cvp-primary, #06b6d4) 0%, #0891b2 100%);
+    border: 1px solid rgba(6, 182, 212, 0.6);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.25),
+      0 0 0 1px rgba(6, 182, 212, 0.3),
+      0 6px 16px -4px var(--cvp-primary-glow, rgba(6, 182, 212, 0.35));
+    color: white;
+    font-weight: 600;
+    transition: all 150ms ease;
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        0 0 0 1px rgba(6, 182, 212, 0.5),
+        0 10px 24px -6px rgba(6, 182, 212, 0.55);
+    }
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+    }
+  }
+  .cvp-btn-danger {
+    background: linear-gradient(135deg, var(--cvp-danger, #f43f5e), #be123c);
+    border: 1px solid rgba(244, 63, 94, 0.6);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 4px 12px -4px rgba(244, 63, 94, 0.4);
+    color: white;
+    font-weight: 600;
+  }
+  .cvp-btn-ghost {
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid var(--cvp-line, rgba(148, 163, 184, 0.12));
+    color: var(--cvp-text-2, #cbd5e1);
+    transition: all 150ms ease;
+    &:hover {
+      background: rgba(148, 163, 184, 0.14);
+      color: var(--cvp-text-1, #f1f5f9);
+      border-color: var(--cvp-line-strong, rgba(148, 163, 184, 0.22));
+    }
+  }
+
+  // ─── Status pills ───────────────────────────────────────────────
+  .cvp-pill {
+    @apply inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded;
+    letter-spacing: 0.08em;
+  }
+  .cvp-pill-success { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3); }
+  .cvp-pill-warning { background: rgba(245, 158, 11, 0.15); color: #fcd34d; box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.3); }
+  .cvp-pill-danger  { background: rgba(244, 63, 94, 0.15); color: #fda4af; box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.3); }
+  .cvp-pill-running {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.4);
+    position: relative;
+    &::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #fbbf24;
+      box-shadow: 0 0 8px #fbbf24;
+      animation: cvp-pulse 1.2s ease-in-out infinite;
+    }
+  }
+  .cvp-pill-idle    { background: rgba(148, 163, 184, 0.1); color: var(--cvp-text-3, #94a3b8); box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.2); }
+
+  // ─── Table rows ─────────────────────────────────────────────────
+  .cvp-row {
+    transition: background 150ms ease, border-color 200ms ease;
+    border-left: 2px solid transparent;
+    &:hover {
+      background: rgba(6, 182, 212, 0.04);
+      border-left-color: var(--cvp-primary, #06b6d4);
+    }
+    &.is-success { border-left-color: var(--cvp-success, #10b981); }
+    &.is-running { border-left-color: var(--cvp-warning, #f59e0b); }
+    &.is-failed  { border-left-color: var(--cvp-danger,  #f43f5e); }
+  }
+
+  // ─── Progress bar ──────────────────────────────────────────────
+  .cvp-progress-track {
+    @apply rounded-full overflow-hidden;
+    background: rgba(2, 6, 23, 0.8);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+  .cvp-progress-fill {
+    background: linear-gradient(90deg, #10b981, #06b6d4 50%, #8b5cf6);
+    background-size: 200% 100%;
+    height: 100%;
+    border-radius: 999px;
+    position: relative;
+    overflow: hidden;
+    transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 12px -2px rgba(6, 182, 212, 0.5);
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+      transform: translateX(-100%);
+      animation: cvp-shimmer 2s ease-in-out infinite;
+    }
+  }
+
+  // Batch barber-pole pattern for "waiting between batches".
+  .cvp-batch-progress {
+    background: rgba(245, 158, 11, 0.15);
+    overflow: hidden;
+    position: relative;
+    border-radius: 999px;
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: repeating-linear-gradient(
+        45deg,
+        rgba(251, 191, 36, 0.4),
+        rgba(251, 191, 36, 0.4) 8px,
+        transparent 8px,
+        transparent 16px
+      );
+      animation: cvp-stripe 1s linear infinite;
+    }
+  }
+
+  // Big monospaced timer display for batch countdown.
+  .cvp-timer {
+    font-family: "JetBrains Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    color: #fcd34d;
+    text-shadow: 0 0 12px rgba(245, 158, 11, 0.5);
+  }
+}
+
+// ─── Keyframes ─────────────────────────────────────────────────────
+// These live outside the @layer so they're globally addressable.
+
+@keyframes cvp-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(0.8); }
+}
+@keyframes cvp-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+@keyframes cvp-stripe {
+  from { background-position-x: 0; }
+  to   { background-position-x: 16px; }
+}
+
+// Respect prefers-reduced-motion — kill all decorative motion.
+@media (prefers-reduced-motion: reduce) {
+  .cvp-pill-running::before,
+  .cvp-progress-fill::after,
+  .cvp-batch-progress::before {
+    animation: none !important;
+  }
+}

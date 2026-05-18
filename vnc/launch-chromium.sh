@@ -9,8 +9,30 @@
 #   --disable-features=...         — kill background work that wastes RAM
 #   --aggressive-cache-discard     — drop unused caches sooner
 #   --renderer-process-limit=8     — cap renderer count (one per tab)
+#
+# IMPORTANT — we call the chromium BINARY directly (/usr/lib/chromium/chromium),
+# not the /usr/bin/chromium wrapper. The wrapper sources /etc/chromium.d/*
+# which on Debian/Ubuntu injects extra flags including:
+#
+#   --load-extension=`ls -dm /usr/share/chromium/extensions/*`
+#
+# When that directory is empty (our case), `ls` returns nothing and we end
+# up with `--load-extension=` (empty value). Chromium then treats the
+# NEXT positional arg ($URL) as the extension path. Result: no startup URL
+# AND a Cloudflare-detectable automation fingerprint. Bypassing the wrapper
+# gives us deterministic flags.
 
 set -euo pipefail
+
+# Clear stale ProcessSingleton symlinks from a previous container.
+# These are symlinks like /config/SingletonLock -> <hostname>-<pid>;
+# after a `docker restart` the hostname/PID no longer exists but the
+# symlink stays. Chromium then refuses to start ("Failed to create a
+# ProcessSingleton for your profile directory") and supervisord
+# retry-loops into FATAL state. The symlink owner can be 10001 (vncuser)
+# while the underlying target doesn't exist — `rm -f` on the symlink
+# itself works.
+rm -f /config/SingletonLock /config/SingletonCookie /config/SingletonSocket 2>/dev/null || true
 
 for i in $(seq 1 20); do
     xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
@@ -19,12 +41,44 @@ done
 
 URL="${STARTUP_URL:-https://grok.com/}"
 
-exec /usr/bin/chromium \
+# Explicit unset of any flag inheritance.
+unset CHROMIUM_FLAGS
+
+# Outbound proxy. Three sources, in priority order:
+#   1. $GROK_HTTP_PROXY env var explicitly set by caller
+#   2. Sibling Cloudflare WARP daemon (warp-init.sh in this container)
+#      listening on 127.0.0.1:40000 — wait up to 20s for it to bind
+#   3. None — direct connection
+# WARP makes outbound look like it's coming from Cloudflare's own
+# network so Turnstile / bot-walls relax dramatically.
+PROXY_ARG=""
+if [[ -n "${GROK_HTTP_PROXY:-}" ]]; then
+    PROXY_ARG="--proxy-server=${GROK_HTTP_PROXY}"
+    echo "[launch] chromium will route via env proxy: ${GROK_HTTP_PROXY}" >&2
+else
+    # Wait briefly for the sibling WARP supervisord program — chromium
+    # starts at priority 400 while warp at 50, but warp's connect step
+    # can lag the priority gate. 20s is the same budget warp-init uses.
+    for _ in $(seq 1 20); do
+        if ss -tln 2>/dev/null | grep -q "127.0.0.1:40000"; then
+            PROXY_ARG="--proxy-server=socks5://127.0.0.1:40000"
+            echo "[launch] using local WARP proxy 127.0.0.1:40000" >&2
+            break
+        fi
+        sleep 1
+    done
+    [[ -z "$PROXY_ARG" ]] && echo "[launch] no WARP proxy reachable — direct connection" >&2
+fi
+
+exec /usr/lib/chromium/chromium \
+    ${PROXY_ARG} \
     --no-sandbox \
     --disable-dev-shm-usage \
     --no-first-run \
     --no-default-browser-check \
     --disable-blink-features=AutomationControlled \
+    --force-device-scale-factor=1 \
+    --high-dpi-support=0 \
     --remote-debugging-port=9222 \
     --remote-debugging-address=0.0.0.0 \
     --remote-allow-origins=* \

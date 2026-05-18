@@ -6,6 +6,7 @@ import { Server as ServerIcon, ChevronRight, Cpu, MemoryStick, Network } from "l
 import { AdminGuard } from "@/modules/admin/components/AdminGuard";
 import { serversService } from "../services/servers.service";
 import type { ServerStatus } from "../models/types";
+import { ProblemsWidget } from "../components/ProblemsWidget";
 
 export function ServersListPage() {
   return (
@@ -35,6 +36,11 @@ function Inner() {
       <h1 className="page-title flex items-center gap-2">
         <ServerIcon size={22} /> {t("admin.servers_title")}
       </h1>
+
+      {/* Zabbix-style overview: Problems by severity per host. Always
+          visible at the top so the eye lands on red/orange counts
+          before scanning the grid below. */}
+      <ProblemsWidget />
 
       {isLoading ? (
         <div className="card text-slate-500">{t("admin.servers_loading")}</div>

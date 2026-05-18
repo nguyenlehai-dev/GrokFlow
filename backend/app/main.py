@@ -24,6 +24,19 @@ async def lifespan(app: FastAPI):
     # systemd unit). Tests can still call create_all explicitly via fixtures.
     async with SessionLocal() as db:
         await seed_default_plans(db)
+
+    # Resync the VNC map on startup. Docker IPAM reassigns container IPs
+    # after a host reboot, so any nginx map written before the reboot
+    # points at the wrong upstream → /vnc/* returns 502. Refreshing here
+    # closes that gap without waiting for the next start-vnc-session call.
+    # Best-effort: silent skip when docker.sock isn't mounted (e.g. unit
+    # tests).
+    try:
+        from app.services.nginx_sync import refresh_vnc_map
+        refresh_vnc_map()
+    except Exception:  # noqa: BLE001 — startup must never block on this
+        pass
+
     yield
     # On shutdown: drain the shared httpx pool so workers exit cleanly.
     await close_http()

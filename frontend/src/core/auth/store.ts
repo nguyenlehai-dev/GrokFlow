@@ -31,6 +31,9 @@ interface User {
   status: string;
   // Tenant membership. null for super_admin / legacy unscoped users.
   domain_id?: string | null;
+  // Tool install scope. Non-null = desktop kiosk user; FE skips the admin
+  // shell + auto-lands on /create-video-pro on login.
+  tool_install_id?: string | null;
   // Per-domain named role (FK to Role row). When set, the user's menu is
   // further narrowed by role.allowed_pages.
   role_id?: string | null;

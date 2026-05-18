@@ -9,6 +9,7 @@ import { toast } from "@/components/ui/Toast";
 import type { Profile } from "../models/profile";
 import { jobsService } from "../services/jobs.service";
 import { profilesService } from "../services/profiles.service";
+import { projectsService } from "../services/projects.service";
 import { ASPECT_OPTIONS, SIZES_FROM_ASPECT } from "../configs/aspects";
 import type { CreateJobForm } from "./CreateJobForm.types";
 import { CreateJobReferenceImagePicker, type InputImage } from "./CreateJobReferenceImagePicker";
@@ -47,7 +48,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
 
   const { register, handleSubmit, watch, control, setValue, formState: { isSubmitting } } = useForm<CreateJobForm>({
     defaultValues: {
-      provider: "grok", job_type: "image", profile_id: "",
+      provider: "grok", job_type: "image", profile_id: "", project_id: "",
       size: "1024x1024", aspect: "1:1",
       quality: "speed",                  // image-only
       resolution: "720p", duration: 6,   // video-only
@@ -57,6 +58,34 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
   const provider = watch("provider");
   const jobType = watch("job_type");
   const aspect = watch("aspect");
+  const profileIdWatch = watch("profile_id");
+
+  // Project list — only fetched when the user has picked an explicit
+  // profile. When `profile_id` is empty (auto-pick) we hide the project
+  // dropdown because the backend's per-user / per-domain rules need to
+  // run first to know which profile gets the job.
+  const { data: projects } = useQuery({
+    queryKey: ["grok-projects", profileIdWatch || "none"],
+    queryFn: () => projectsService.list(profileIdWatch),
+    enabled: !!profileIdWatch,
+  });
+
+  // Reset project when profile changes so a stale project from a
+  // previous profile doesn't leak in.
+  useEffect(() => {
+    setValue("project_id", "");
+  }, [profileIdWatch, setValue]);
+
+  // If the user picked an image-only profile and then flips to Video,
+  // silently drop the selection back to Auto pick. Without this the
+  // submit would hit the backend's 422 — worse UX than just clearing it.
+  useEffect(() => {
+    if (jobType !== "video" || !profileIdWatch) return;
+    const picked = (profiles ?? []).find((p) => p.id === profileIdWatch);
+    if (picked && picked.allows_video === false) {
+      setValue("profile_id", "");
+    }
+  }, [jobType, profileIdWatch, profiles, setValue]);
 
   useEffect(() => {
     if (provider === "flow") setValue("job_type", "video");
@@ -86,6 +115,36 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
 
   const eligibleProfiles = (profiles ?? []).filter((p) => p.provider === provider);
 
+  // Preview which profile the backend WOULD pick when "Auto pick" is
+  // selected. Mirrors backend's _resolve_profile_for_job rules:
+  //   - provider match
+  //   - status in {logged_in, running_job}
+  //   - if video job: allows_video must be true
+  //   - ordered by least-loaded (active_video_jobs for video, active_jobs
+  //     otherwise), tie-broken by oldest last_used_at
+  // Shown as a hint below the dropdown so the user sees the routing
+  // decision before submitting. Not a contract — the actual choice is
+  // re-resolved server-side at create time (state may change in between).
+  const autoPickPreview = (() => {
+    if (profileIdWatch) return null; // user picked manually
+    const pool = eligibleProfiles.filter((p) => {
+      const ready = p.status === "logged_in" || p.status === "running_job";
+      if (!ready) return false;
+      if (jobType === "video" && p.allows_video === false) return false;
+      return true;
+    });
+    if (pool.length === 0) return null;
+    const sorted = [...pool].sort((a, b) => {
+      const aLoad = jobType === "video" ? (a.active_video_jobs ?? 0) : a.active_jobs;
+      const bLoad = jobType === "video" ? (b.active_video_jobs ?? 0) : b.active_jobs;
+      if (aLoad !== bLoad) return aLoad - bLoad;
+      const aTime = a.last_used_at ? new Date(a.last_used_at).getTime() : 0;
+      const bTime = b.last_used_at ? new Date(b.last_used_at).getTime() : 0;
+      return aTime - bTime;
+    });
+    return sorted[0];
+  })();
+
   const onSubmit = async (v: CreateJobForm) => {
     const payload: any = {
       provider: v.provider, job_type: v.job_type, prompt: v.prompt,
@@ -107,6 +166,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
       },
     };
     if (v.profile_id) payload.profile_id = v.profile_id;
+    if (v.project_id) payload.project_id = v.project_id;
     if (v.seed != null && Number(v.seed) > 0) payload.seed = Number(v.seed);
     if (inputImage) payload.input_image_file_id = inputImage.file_id;
     try {
@@ -125,8 +185,16 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
   // running another job). Even if all slots are currently occupied the
   // backend will queue the new job — concurrency is a runtime gate, not a
   // queue-admission gate.
-  const profileSelectable = (p: Profile) =>
-    p.status === "logged_in" || p.status === "running_job";
+  //
+  // When the user picks job_type=video, also exclude image-only profiles
+  // (allows_video=false). The backend rejects this combo with 422, but
+  // disabling in the UI saves the round-trip and makes the rule visible.
+  const profileSelectable = (p: Profile) => {
+    const ready = p.status === "logged_in" || p.status === "running_job";
+    if (!ready) return false;
+    if (jobType === "video" && p.allows_video === false) return false;
+    return true;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/50 backdrop-blur-sm p-4 animate-fade-in">
@@ -186,14 +254,24 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
                 <select className="input" {...field}>
                   <option value="">{t("grok.create_job_auto_pick")}</option>
                   {eligibleProfiles.map((p) => {
+                    const ready = p.status === "logged_in" || p.status === "running_job";
+                    const imageOnlyForVideo =
+                      jobType === "video" && p.allows_video === false;
                     const selectable = profileSelectable(p);
                     const slots = `${p.active_jobs}/${p.max_concurrent_jobs}`;
                     const full = p.active_jobs >= p.max_concurrent_jobs;
-                    const note = !selectable
+                    // Reason annotation in the option label so the user
+                    // understands why some entries are greyed out. Order
+                    // matters: image-only takes precedence over "full"
+                    // (the latter doesn't help if the profile flat-out
+                    // can't accept this job type).
+                    const note = !ready
                       ? ` — ${p.status}`
-                      : full
-                        ? ` — ${t("grok.create_job_full_will_queue")}`
-                        : "";
+                      : imageOnlyForVideo
+                        ? ` — ${t("grok.create_job_profile_image_only")}`
+                        : full
+                          ? ` — ${t("grok.create_job_full_will_queue")}`
+                          : "";
                     return (
                       <option key={p.id} value={p.id} disabled={!selectable}>
                         {p.name} [{slots}{note}]
@@ -207,9 +285,48 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
               <p className="text-xs text-amber-600 mt-1">{t("grok.create_job_no_profile", { provider })}</p>
             )}
             {eligibleProfiles.length > 0 && eligibleProfiles.every((p) => !profileSelectable(p)) && (
-              <p className="text-xs text-rose-600 mt-1">{t("grok.create_job_profile_not_logged_in", { provider })}</p>
+              <p className="text-xs text-rose-600 mt-1">
+                {jobType === "video"
+                  && eligibleProfiles.every(
+                    (p) => (p.status === "logged_in" || p.status === "running_job") && p.allows_video === false,
+                  )
+                  ? t("grok.create_job_all_image_only")
+                  : t("grok.create_job_profile_not_logged_in", { provider })}
+              </p>
+            )}
+            {autoPickPreview && (
+              <p className="text-xs text-emerald-600 mt-1">
+                {t("grok.create_job_auto_pick_preview", {
+                  name: autoPickPreview.name,
+                  load: jobType === "video"
+                    ? `${autoPickPreview.active_video_jobs ?? 0}/${autoPickPreview.max_concurrent_video ?? 4} video`
+                    : `${autoPickPreview.active_jobs}/${autoPickPreview.max_concurrent_jobs} image`,
+                })}
+              </p>
             )}
           </div>
+          {profileIdWatch && (projects?.length ?? 0) > 0 && (
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium">Grok Project</label>
+              <Controller
+                control={control}
+                name="project_id"
+                render={({ field }) => (
+                  <select className="input" {...field}>
+                    <option value="">Auto pick (theo pin user → domain)</option>
+                    {(projects ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} — {p.grok_project_id.slice(0, 12)}…
+                      </option>
+                    ))}
+                  </select>
+                )}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Bỏ trống = backend pick theo rule. Chọn 1 project = ép worker chạy trong project đó.
+              </p>
+            </div>
+          )}
         </div>
 
         <div>

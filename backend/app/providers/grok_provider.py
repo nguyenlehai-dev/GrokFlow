@@ -190,15 +190,14 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            # Project-scoped chat flow only supports text-to-image — it
-            # types `/imagine <prompt>` and submits without uploading the
-            # input file. If the user provided a reference image for
-            # image-to-image, skip this path so the legacy Imagine-studio
-            # flow (`_run_image`) runs — that one DOES call _attach_files.
+            # Project-scoped chat flow. Now supports image-to-image too
+            # (uploads the reference inside the chat composer before typing
+            # the slash command). Video still goes to Imagine studio
+            # because Grok project chat doesn't have a slash-command for
+            # video gen in current builds.
             if (
                 job.grok_project_id
                 and job.job_type == "image"
-                and not job.attachments
             ):
                 result = await self._run_image_in_project(job)
                 if result is not None:
@@ -614,25 +613,51 @@ class GrokProvider(Provider):
         x-statsig-id capture works; set `GROK_API_ENABLED=0` to roll back
         to pure-Playwright operation without redeploying.
 
-        Image-to-image (job carries an input attachment) is NOT supported
-        on this path yet — the simple `/imagine <prompt>` slash command
-        doesn't accept image attachments inline, so the API would silently
-        ignore the input and generate from text only. Return None so the
-        Playwright path (which has `_attach_files` wired up) runs.
+        Image-to-image: when `job.attachments` is present, we upload the
+        reference via `client.upload_file()` first, then pass the resulting
+        `{fileMetadataId, fileUri}` to `imagine()`. The asset URL gets
+        inlined in the message (videoize wire format) so Grok binds the
+        image to the Imagine pipeline. If Grok rejects this shape, the
+        caller falls back to Playwright as usual.
         """
-        if job.attachments:
-            # No log spam — this is the expected fallback for img2img.
-            return None
-
         session = await self._build_api_session(job)
         if session is None:
             return None
         client, profile_id, tag = session
 
+        attachment_meta: dict[str, str] | None = None
+        if job.attachments:
+            try:
+                att = job.attachments[0]
+                self._log(tag, f"i2i: uploading {att.name} ({len(att.bytes)} bytes)")
+                attachment_meta = await client.upload_file(
+                    content=att.bytes,
+                    filename=att.name,
+                    mime=att.mime,
+                    log=lambda m: self._log(tag, m),
+                )
+            except GrokAPIError as exc:
+                self._log(tag, f"i2i upload error: {exc.code} — {exc.message}")
+                # Terminal errors must surface to the user immediately —
+                # they're not going to fix themselves on retry and the
+                # Playwright fallback will hit the same wall (Grok blocks
+                # the same image whether we upload via REST or DOM).
+                if exc.code in {"content_moderated", "cookie_expired"}:
+                    return JobResult(
+                        success=False,
+                        error_code=exc.code,
+                        error_message=exc.message,
+                        retryable=False,
+                    )
+                # Other upload failures (network, unknown_error) → fall
+                # through to Playwright in case it's a transient REST glitch.
+                return None
+
         try:
             image_bytes_list = await client.imagine(
                 prompt=job.prompt,
                 project_id=job.grok_project_id,
+                attachment=attachment_meta,
                 log=lambda m: self._log(tag, m),
             )
         except GrokAPIError as exc:
@@ -675,6 +700,21 @@ class GrokProvider(Provider):
         """
         profile_id = self._profile_id_from_path(job.profile_path)
         tag = f"prj:{profile_id[:8]}"
+        # Project chat ALSO opens a Chromium tab — gate it on the same
+        # DOM slot pool as `_run_image`. Worker no longer pre-acquires
+        # for image, so this is the actual cap.
+        from app.core.profile_slots import (
+            acquire_image_dom_slot, release_image_dom_slot,
+        )
+        if not await acquire_image_dom_slot(profile_id):
+            self._log(tag, "DOM slot full — skipping project chat path")
+            return None  # caller falls back; worker will requeue
+        try:
+            return await self._run_image_in_project_inner(job, tag, profile_id)
+        finally:
+            await release_image_dom_slot(profile_id)
+
+    async def _run_image_in_project_inner(self, job, tag: str, profile_id: str):
         info = self._ensure_vnc_running(job)
         if not info:
             return None
@@ -750,6 +790,30 @@ class GrokProvider(Provider):
                 if chat_input is None:
                     self._log(tag, "no chat input — fallback to /imagine")
                     return None
+
+                # Image-to-image: upload the reference BEFORE typing so the
+                # chat composer attaches it inline. Same hidden <input
+                # type='file'> as the Imagine-studio path uses, just inside
+                # the project page DOM.
+                if job.attachments:
+                    try:
+                        await self._attach_files(page, job.attachments)
+                        # React re-renders the composer after a successful
+                        # upload — re-find the input handle so subsequent
+                        # type calls don't hit a detached element.
+                        await asyncio.sleep(2.5)
+                        for sel in input_candidates:
+                            loc = page.locator(sel).first
+                            try:
+                                await loc.wait_for(timeout=4000, state="visible")
+                                chat_input = loc
+                                break
+                            except PWTimeout:
+                                continue
+                        self._log(tag, "input image attached in project chat")
+                    except Exception as exc:  # noqa: BLE001
+                        self._log(tag, f"project attach failed: {exc} — fallback")
+                        return None
 
                 # Send "/imagine <prompt>". Grok's project chat respects
                 # this slash command on Imagine-capable accounts.
@@ -862,9 +926,33 @@ class GrokProvider(Provider):
                         retryable=True,
                     )
             finally:
+                # Close the WORKING tab + scoop up any result-page strays
+                # ("grok.com/imagine/post/<id>") that this job may have left
+                # behind. Each lingering tab = ~100MB Chromium RAM, so
+                # leaving them across many jobs balloons VNC memory.
+                # Only close tabs whose URL clearly maps to this job's
+                # output (`/imagine/post/`) — never touch sibling job tabs.
                 try:
                     if page:
-                        await page.close()
+                        try:
+                            await asyncio.wait_for(page.close(), timeout=3)
+                        except Exception as exc:  # noqa: BLE001
+                            self._log(tag, f"page.close timeout/error: {exc}")
+                    # Sweep result pages still in the context — these are
+                    # what we see leaking in CDP /json after the job done.
+                    try:
+                        for p in list(ctx.pages):
+                            if p is page:
+                                continue
+                            u = (p.url or "")
+                            if "/imagine/post/" in u:
+                                try:
+                                    await asyncio.wait_for(p.close(), timeout=2)
+                                    self._log(tag, f"GC closed result tab: …{u[-40:]}")
+                                except Exception:  # noqa: BLE001
+                                    pass
+                    except Exception:  # noqa: BLE001
+                        pass
                 except Exception:  # noqa: BLE001
                     pass
                 try:
@@ -875,6 +963,29 @@ class GrokProvider(Provider):
     async def _run_image(self, job: JobInput) -> JobResult:
         profile_id = self._profile_id_from_path(job.profile_path)
         tag = f"{job.job_type[:3]}:{profile_id[:8]}"
+        # Image jobs reach this DOM path only when API + project-chat
+        # both fell through. Acquire a DOM slot now so concurrent
+        # Chromium tabs stay capped at the profile's max — RAM-bounded.
+        # Video paths still acquire upstream in the worker, so don't
+        # double-acquire when called for video.
+        dom_slot_taken = False
+        if job.job_type == "image":
+            from app.core.profile_slots import acquire_image_dom_slot
+            dom_slot_taken = await acquire_image_dom_slot(profile_id)
+            if not dom_slot_taken:
+                return JobResult(
+                    success=False, error_code="rate_limited",
+                    error_message="DOM tab limit reached on this profile — retry shortly.",
+                    retryable=True,
+                )
+        try:
+            return await self._run_image_inner(job, tag, profile_id)
+        finally:
+            if dom_slot_taken:
+                from app.core.profile_slots import release_image_dom_slot
+                await release_image_dom_slot(profile_id)
+
+    async def _run_image_inner(self, job: JobInput, tag: str, profile_id: str) -> JobResult:
         info = self._ensure_vnc_running(job)
         if not info:
             return JobResult(
@@ -1399,15 +1510,56 @@ class GrokProvider(Provider):
                         tag,
                         f"no /post/ nav after 20s, generate_api_called={generate_call_seen['hit']} — polling anyway",
                     )
-                    # Quota-text scan — only fail with rate_limited if Grok
-                    # actually surfaced a throttle message. The sidebar
-                    # 'Upgrade to SuperGrok' promo is permanent — exclude.
+                    # Body-text scan after submit-with-no-nav. Two failure
+                    # modes Grok surfaces here, each maps to a different
+                    # error_code so the worker handles them right:
+                    #   • Content policy refusal → terminal (don't retry,
+                    #     don't rotate — same prompt fails everywhere).
+                    #   • Quota / rate limit → retryable + rotate.
                     body_tail = (await page.evaluate(
                         "() => (document.body.innerText || '').slice(-3000).toLowerCase()"
                     ))
+                    # Content-policy refusal phrases (image + video gen).
+                    # Grok's exact wording shifts month to month; this list
+                    # is broad enough to catch the common refusal shapes.
+                    moderation_phrases = [
+                        "violates our content policy",
+                        "violates the content policy",
+                        "against our content policy",
+                        "i can't generate", "i cannot generate",
+                        "i'm not able to generate",
+                        "i'm unable to generate",
+                        "sorry, i can't", "sorry, i cannot",
+                        "content policy", "content guidelines",
+                        "policy violation",
+                        "not allowed to", "i won't generate",
+                        "request was flagged",
+                        "moderated", "not safe for work",
+                    ]
+                    found_mod = next((h for h in moderation_phrases if h in body_tail), None)
+                    if found_mod:
+                        page.remove_listener("request", _on_request)
+                        return JobResult(
+                            success=False, error_code="content_moderated",
+                            error_message=(
+                                f"Grok từ chối prompt vì vi phạm content policy "
+                                f"('{found_mod}'). Đổi prompt khác — không retry."
+                            ),
+                            retryable=False,
+                        )
+                    # Quota-text scan — only fail with rate_limited if Grok
+                    # actually surfaced a throttle message. The sidebar
+                    # 'Upgrade to SuperGrok' promo is permanent — exclude.
                     quota_phrases = [
                         "you've reached your", "you have reached your",
                         "daily limit reached", "daily limit has been reached",
+                        # Grok's banner when account exhausted its quota
+                        # — shows alongside "Upgrade to SuperGrok Heavy"
+                        # upsell. The plain "Upgrade to SuperGrok" text
+                        # alone lives permanently in the sidebar promo;
+                        # match "rate limit reached" instead (only shows
+                        # when actually rate-limited).
+                        "rate limit reached",
                         "rate limit exceeded", "too many requests",
                         "try again in", "out of credits",
                         "quota exceeded", "please slow down", "monthly limit",
@@ -1420,7 +1572,12 @@ class GrokProvider(Provider):
                             error_message=f"Grok rejected submit — '{found}'.",
                             retryable=True,
                         )
-                page.remove_listener("request", _on_request)
+                # Keep the request listener attached during polling so the
+                # watchdog can distinguish "Grok ignored the submit" (no
+                # generation API call ever) from "Grok is generating but
+                # slow" (call fired, just hasn't materialized DOM yet).
+                # Listener gets cleaned up when the playwright context
+                # tears down at function exit — no leak.
 
                 # Poll BOTH images and videos simultaneously. For video jobs we
                 # care about <video> elements with non-empty src; for image jobs
@@ -1438,6 +1595,15 @@ class GrokProvider(Provider):
                 new_video_urls: set[str] = set()
 
                 next_progress_log = time.monotonic() + 15
+                # Fast-fail watchdog for video jobs only. Old behaviour was
+                # "no <video> in 90s → fail" which gave false positives
+                # whenever Grok was just slow (90-150s is normal under
+                # load). New rule: only fast-fail if we can confirm Grok
+                # NEVER fired a generation API call after submit. If the
+                # call DID fire, Grok is just slow — wait the full
+                # VIDEO_TIMEOUT_MS (6 min). 120s gives enough head-room
+                # before we conclude the call truly never came.
+                stuck_check_deadline = time.monotonic() + 120 if want_video else None
 
                 while time.monotonic() < deadline:
                     cur_imgs = await self._collect_image_urls(page) - seen_urls
@@ -1462,6 +1628,34 @@ class GrokProvider(Provider):
                     if time.monotonic() >= next_progress_log:
                         next_progress_log = time.monotonic() + 30
                         self._log(tag, f"polling… imgs={len(new_urls_set)} vids={len(new_video_urls)} elapsed={int(time.monotonic() - (deadline - timeout_ms/1000))}s")
+
+                    # Watchdog: video job + 120s passed + still no <video>
+                    # element on page. Two interpretations:
+                    #   (a) generate_call_seen.hit == False → Grok never
+                    #       hit the generation API since submit. Could be
+                    #       silent throttle / shadow-ban / CF block.
+                    #       Fast-fail with rate_limited → worker rotates.
+                    #   (b) generate_call_seen.hit == True → generation
+                    #       API DID fire; Grok just hasn't rendered the
+                    #       <video> tag yet (90-150s legitimate under
+                    #       load). DON'T fail — let polling continue to
+                    #       the full 6-min deadline.
+                    # Watchdog only triggers once (sets deadline=None).
+                    if (
+                        stuck_check_deadline is not None
+                        and time.monotonic() >= stuck_check_deadline
+                        and not new_video_urls
+                    ):
+                        stuck_check_deadline = None  # only check once
+                        if not generate_call_seen["hit"]:
+                            self._log(tag, "fast-fail: 120s post-submit, vids=0, no generate API call — Grok ignored submit")
+                            return JobResult(
+                                success=False, error_code="rate_limited",
+                                error_message="Grok không nhận submit (không có /api/imagine call) — profile có thể bị throttle. Rotating.",
+                                retryable=True,
+                            )
+                        else:
+                            self._log(tag, f"slow gen: 120s post-submit but generate API call seen — waiting full {timeout_ms // 1000}s")
 
                     # In-loop text scanning was removed: it generated too many
                     # false-positives by matching phrases that appear in chat
@@ -1607,6 +1801,25 @@ class GrokProvider(Provider):
                     await asyncio.wait_for(page.close(), timeout=3)
                 except Exception:  # noqa: BLE001
                     pass
+            # Also sweep any stray `/imagine/post/<id>` result tabs that this
+            # job's submit-then-result navigation may have spawned. Each
+            # lingering tab eats ~100MB Chromium RAM. We only touch tabs
+            # with this exact URL shape — sibling jobs' /imagine prompt tabs
+            # are NEVER on /post/ until they finish, so this is collision-safe.
+            try:
+                if 'context' in locals() and context is not None:
+                    for p in list(context.pages):
+                        if p is page:
+                            continue
+                        u = (p.url or "")
+                        if "/imagine/post/" in u:
+                            try:
+                                await asyncio.wait_for(p.close(), timeout=2)
+                                self._log(tag, f"GC closed result tab: …{u[-40:]}")
+                            except Exception:  # noqa: BLE001
+                                pass
+            except Exception:  # noqa: BLE001
+                pass
 
     @staticmethod
     async def _collect_image_urls(page) -> set[str]:

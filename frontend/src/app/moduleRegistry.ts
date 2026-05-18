@@ -9,6 +9,8 @@ import { moduleManifest as grok } from "@/modules/grok/router";
 import { moduleManifest as flow } from "@/modules/flow/router";
 import { moduleManifest as gateway } from "@/modules/gateway/router";
 import { moduleManifest as servers } from "@/modules/servers/router";
+import { moduleManifest as tool } from "@/modules/tool/router";
+import { moduleManifest as toolDistribution } from "@/modules/tool_distribution/router";
 
 /** The single source of truth for which modules are loaded into the app.
  *
@@ -31,6 +33,8 @@ export const MODULES: FrontendModule[] = [
   grok,     // Profiles / Jobs / API Docs
   flow,     // Video tools
   gateway,  // LLM Gateway
+  toolDistribution, // Admin-managed installer downloads (win / mac / docs)
+  tool,     // VIP super_admin branded dashboard (purple skin)
   servers,  // VPS management (super_admin)
   // Public (mounted outside the auth shell)
   auth,
@@ -59,7 +63,7 @@ export function getPublicRoutes(): ModuleRoute[] {
  *
  *  Adding a new module to the "Web" bucket: extend WEB_GROUP_KEYS with the
  *  module's NavGroup key. No changes needed in the module itself. */
-const WEB_GROUP_KEYS = new Set(["grok", "flow", "gateway"]);
+const WEB_GROUP_KEYS = new Set(["grok", "flow", "gateway", "tool_dist"]);
 
 export function getAuthedNav(role: string | undefined | null = null): NavEntry[] {
   const flat = MODULES

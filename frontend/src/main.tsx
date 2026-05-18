@@ -5,6 +5,7 @@ import { RouterProvider } from "react-router-dom";
 
 import { router } from "@/app/router";
 import { ToastContainer } from "@/components/ui/Toast";
+import { ConfirmDialogHost } from "@/components/ui/ConfirmDialog";
 import { useDomainStore } from "@/core/domain/store";
 import "@/core/i18n";  // side-effect: initializes i18next (auto-detects locale)
 import "@/assets/scss/main.scss";
@@ -49,6 +50,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
       <ToastContainer />
+      <ConfirmDialogHost />
     </QueryClientProvider>
   </React.StrictMode>,
 );

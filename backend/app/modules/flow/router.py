@@ -345,6 +345,14 @@ async def retry_job(
 # File download (used by /flow-output/<name> nginx alias too)
 # ---------------------------------------------------------------------------
 
+_FLOW_MIME = {
+    ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".aac": "audio/aac",
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".zip": "application/zip",
+}
+
+
 @router.get("/download/{filename}")
 async def download(filename: str):
     """Stream an output file by its public filename.
@@ -352,11 +360,16 @@ async def download(filename: str):
     Filenames embed the job_id (see service.output_file_path) so we don't
     have to look up the job row to authorise — anyone with the link can
     download (link-as-credential pattern, fine for this use case). Path
-    traversal is rejected by the name validator."""
+    traversal is rejected by the name validator.
+
+    Mime is set from the extension so the browser can render videos /
+    audio inline (the <video> tag refuses to play octet-stream)."""
     path = service.output_file_path(filename)
     if not path:
         raise HTTPException(status_code=404, detail="file not found")
-    return FileResponse(path, filename=filename, media_type="application/octet-stream")
+    ext = path.suffix.lower()
+    mime = _FLOW_MIME.get(ext, "application/octet-stream")
+    return FileResponse(path, filename=filename, media_type=mime)
 
 
 # ---------------------------------------------------------------------------

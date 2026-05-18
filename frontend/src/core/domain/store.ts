@@ -24,6 +24,12 @@ export interface DomainConfig {
   // Admin clears these fields when the patch is done.
   maintenance_starts_at?: string | null;
   maintenance_announcement?: string | null;
+  // "default" = branded split layout, "admin" = minimal console layout.
+  // /admin/login overrides this and always renders "admin".
+  login_template?: "default" | "admin";
+  // Allowlist of profile-row actions tenant admins can use. Super_admin
+  // bypasses on the backend; the frontend reads this to disable buttons.
+  allowed_profile_actions?: string[];
 }
 
 interface DomainState {
@@ -63,6 +69,8 @@ const DEFAULT: DomainConfig = {
   maintenance_message: null,
   maintenance_starts_at: null,
   maintenance_announcement: null,
+  login_template: "default",
+  allowed_profile_actions: ["auto_login", "upload_cookies", "stop_vnc", "disable", "delete"],
 };
 
 export const useDomainStore = create<DomainState>((set, get) => ({
