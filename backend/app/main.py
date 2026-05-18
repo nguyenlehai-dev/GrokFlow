@@ -1,5 +1,9 @@
 from contextlib import asynccontextmanager
 
+# ROLLBACK-TEST: intentional import error to verify staging auto-rollback.
+# Revert this commit (or push a fix) immediately after the test passes.
+raise RuntimeError("rollback-test: this commit should never go live — staging cron must revert it")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
