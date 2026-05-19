@@ -138,32 +138,36 @@ def _reset_profile_status_for(container_name: str) -> None:
     """Map `grokflow-vnc-<short_id>` back to a profile id and flip its
     status to 'need_login'. The short_id is the first 12 hex of the
     profile's UUID — we match by prefix.
+
+    Uses SQLAlchemy sync engine over psycopg2 (already in the backend's
+    deps) so this helper can run in `asyncio.to_thread` without
+    fighting the async SessionLocal that lives on the event loop.
     """
     short = container_name.removeprefix("grokflow-vnc-")
     if not short:
         return
 
-    # Sync-DB inside a sync helper — open a fresh psycopg connection so
-    # we don't fight the async SessionLocal that lives on the event loop.
     try:
-        import psycopg
+        from sqlalchemy import create_engine, text
         from app.core.config import settings
-        # Build a sync DSN from the async settings.DATABASE_URL.
-        dsn = settings.DATABASE_URL
-        if "+asyncpg" in dsn:
-            dsn = dsn.replace("postgresql+asyncpg", "postgresql")
-        with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE profiles
-                   SET status = 'need_login',
-                       active_jobs = 0,
-                       active_video_jobs = 0,
-                       error_message = 'CDP watchdog: container restarted'
-                 WHERE provider = 'grok'
-                   AND REPLACE(id::text, '-', '') LIKE %s
-                """,
-                (short + "%",),
+        # Convert the async DSN to a sync one — same DB, different driver.
+        dsn = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
+        engine = create_engine(dsn, pool_pre_ping=True, pool_size=1, max_overflow=0)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE profiles
+                       SET status = 'need_login',
+                           active_jobs = 0,
+                           active_video_jobs = 0,
+                           error_message = 'CDP watchdog: container restarted'
+                     WHERE provider = 'grok'
+                       AND REPLACE(id::text, '-', '') LIKE :prefix
+                    """
+                ),
+                {"prefix": short + "%"},
             )
+        engine.dispose()
     except Exception as exc:  # noqa: BLE001
         print(f"[cdp-watchdog] profile status reset err: {exc}", flush=True)
