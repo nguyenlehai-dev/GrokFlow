@@ -33,7 +33,13 @@ cat > "$SERVICE_PATH" <<'EOF'
 [Unit]
 Description=Reload nginx after GrokFlow VNC map change
 After=nginx.service
-Requires=nginx.service
+# Wants (not Requires) — Requires creates an ordering cycle when systemd
+# tries to stop both units (path → service → nginx → path), which it
+# auto-breaks by killing the path unit. Result: watcher dies the first
+# time nginx is restarted (deploy / package update), map changes stop
+# triggering reloads, /vnc/<short>/ 502s. Wants gives the same start-up
+# guarantee without the stop-time cycle.
+Wants=nginx.service
 
 [Service]
 Type=oneshot

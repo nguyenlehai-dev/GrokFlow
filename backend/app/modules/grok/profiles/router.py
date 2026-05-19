@@ -509,9 +509,20 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
     # poll here (rather than fire-and-forget) means the endpoint takes
     # an extra ~1s on average but the user NEVER sees the 502 flash.
     import asyncio as _asyncio
-    await _asyncio.to_thread(
+    map_written = await _asyncio.to_thread(
         refresh_vnc_map_until_present, short, timeout_sec=10.0
     )
+    # Nginx-reload settle window. After the backend writes the map file,
+    # the host's systemd path watcher (grokflow-nginx-reload.path) fires
+    # an inotify event → runs `nginx -t && nginx -s reload`. That takes
+    # ~0.5-1s end-to-end. Returning immediately races the user's iframe
+    # against the in-flight reload — first request still hits the old
+    # cached map → 502. A short async sleep here gives the reload time
+    # to complete before we hand the URL to the frontend. Skip the wait
+    # when the map didn't actually need to change (refresh_vnc_map_until_present
+    # found short_id was already present → no inotify event triggered).
+    if map_written:
+        await _asyncio.sleep(1.2)
     # Return RELATIVE URL — the browser resolves it against the page's
     # current origin. This matters in multi-tenant deploys where a user
     # may be browsing tenant A (e.g. nexoratech.com.vn) while the API

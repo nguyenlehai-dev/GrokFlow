@@ -214,13 +214,21 @@ def refresh_vnc_map() -> bool:
     sleeps until either every running container has an IP, or we
     exhaust the budget (then write what we have — the systemd path
     watcher will fire on next call anyway).
+
+    Emits `[vnc-map]` log lines so operators can grep `docker logs
+    grokflow-backend-1 | grep vnc-map` and see actual write/no-op/skip
+    state — without this we silently no-op'd for 2h once (May 2026
+    incident) because the idle-cleanup container was missing the
+    vhost-dir mount.
     """
     if not _is_writable():
+        print(f"[vnc-map] skip: {VNC_MAP_PATH.parent} not writable (mount missing?)", flush=True)
         return False
     try:
         import docker  # imported lazily so unit tests don't need it
         docker.from_env()
-    except Exception:
+    except Exception as exc:
+        print(f"[vnc-map] skip: docker SDK unavailable ({type(exc).__name__})", flush=True)
         return False
 
     import time
@@ -276,10 +284,17 @@ def refresh_vnc_map() -> bool:
         except OSError:
             existing = ""
         if existing == text:
-            return True  # no-op success
+            return True  # no-op success (silent — happens 4×/min from the loop)
         VNC_MAP_PATH.write_text(text, encoding="utf-8")
+        short_ids = [s for s, _ in entries]
+        print(
+            f"[vnc-map] wrote {len(entries)} entr"
+            f"{'y' if len(entries) == 1 else 'ies'}: {short_ids}",
+            flush=True,
+        )
         return True
-    except OSError:
+    except OSError as exc:
+        print(f"[vnc-map] write failed: {exc}", flush=True)
         return False
 
 
