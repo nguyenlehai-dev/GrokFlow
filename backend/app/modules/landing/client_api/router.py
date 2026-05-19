@@ -53,16 +53,7 @@ from app.core.exceptions import NotFound, PermissionDenied
 from app.core.rate_limit import enforce_api_key_rate_limit
 from app.models import File, Job
 from app.modules.admin.audit import service as audit
-from app.modules.grok.files.router import make_share_token
 from app.modules.grok.jobs import service as job_service
-
-
-# Signed token lifetime for partner download URLs. 7 days is long
-# enough for partners to fetch + persist into their own CDN at leisure
-# while still capping blast-radius if a URL leaks. Partners polling
-# /status/{id} get a fresh token on every poll, so an expired URL just
-# means "re-poll status" — no manual rotation needed.
-_DOWNLOAD_TOKEN_MINUTES = 60 * 24 * 7
 
 
 router = APIRouter(prefix="/api/client", tags=["client-api"])
@@ -227,19 +218,18 @@ def _collect_media_urls(
             image_files.append(f)
 
     def _url(f: File) -> str:
-        # Absolutize + sign. Partners pasting the URL into a browser /
-        # video tag have no way to attach an `Authorization: Bearer ...`
-        # header — they'd hit `permission_denied`. Embed a signed
-        # short-lived JWT in `?token=` so the URL is self-authenticating.
-        # Public CDN URLs (f.public_url already signed by the CDN) stay
-        # absolute as-is. Token regenerated on every poll so partners
-        # never need to handle rotation manually.
+        # Public bare URL — same pattern as Replicate / OpenAI / Stability:
+        # the file_id IS the secret (UUIDv4, 122 bits of entropy, effectively
+        # unguessable). Partners paste these directly into browsers, HTML
+        # <img src>, messaging apps, CDN caches, link-unfurl bots — all work
+        # without an Authorization header. Output file_types ('image',
+        # 'video') are served as public-readable on the download endpoint.
+        # Public CDN URLs (f.public_url, when configured) stay absolute as-is.
         if f.public_url and (
             f.public_url.startswith("http://") or f.public_url.startswith("https://")
         ):
             return f.public_url
-        token = make_share_token(f.id, minutes=_DOWNLOAD_TOKEN_MINUTES)
-        return f"{base_url}/api/files/{f.id}/download?token={token}"
+        return f"{base_url}/api/files/{f.id}/download"
 
     n = max(1, requested_count)
 
