@@ -20,7 +20,13 @@ type ToolSpec = {
   responseExample: string;
 };
 
-const BASE = "https://flowgrok.vpspanel.io.vn";
+// Use the user's current origin so cURL examples always work — every
+// tenant vhost (plxeditor.com, flowgrok.plxeditor.com, …) routes
+// /api/flow/* to the same backend. The previous hardcoded
+// `flowgrok.vpspanel.io.vn` was a stale domain that no longer resolves,
+// so partners copying cURL from these docs hit `getaddrinfo failed`.
+const BASE =
+  typeof window !== "undefined" ? window.location.origin : "https://your-grokflow-host";
 
 const SPECS: ToolSpec[] = [
   {
@@ -241,6 +247,50 @@ const SPECS: ToolSpec[] = [
   "duration": 18.4
 }`,
   },
+  {
+    method: "POST",
+    endpoint: "/api/flow/jobs/{job_id}/retry",
+    title: "12. Retry Failed Job",
+    description:
+      "Chạy lại 1 job đã thất bại với cùng params + input files. Trả về job mới (status=pending). Job gốc giữ nguyên status=failed cho lịch sử.",
+    params: [{ name: "job_id", type: "string", required: true, desc: "ID job thất bại." }],
+    requestExample: `curl -X POST '${BASE}/api/flow/jobs/f47ac10b-…/retry' \\
+  -H 'Authorization: Bearer YOUR_JWT'`,
+    responseExample: `{
+  "id": "new-uuid-…",
+  "operation": "cut",
+  "status": "pending",
+  "progress": 0.0,
+  "params": { "start_time": "00:00:00", "end_time": "00:00:02" }
+}`,
+  },
+  {
+    method: "GET",
+    endpoint: "/api/flow/download/{filename}",
+    title: "13. Download Output File",
+    description:
+      "Tải file output. `filename` lấy từ `output_filename` trong response của job. Alias: cùng file cũng phục vụ qua `/flow-output/{filename}` (nginx alias, không cần đi qua backend).",
+    params: [{ name: "filename", type: "string", required: true, desc: "Tên file output (path param)." }],
+    requestExample: `curl -L -o output.mp4 \\
+  '${BASE}/api/flow/download/aba1406d-..._cut.mp4' \\
+  -H 'Authorization: Bearer YOUR_JWT'`,
+    responseExample: `# Binary stream — Content-Type: video/mp4 (hoặc audio/mp3, image/png…)
+# Headers: Content-Length, Content-Disposition: attachment`,
+  },
+  {
+    method: "GET",
+    endpoint: "/api/flow/health",
+    title: "14. Flow Subsystem Health",
+    description: "Kiểm tra Flow API + ffmpeg backend đã sẵn sàng. Trả 200 nếu OK.",
+    params: [],
+    requestExample: `curl '${BASE}/api/flow/health' \\
+  -H 'Authorization: Bearer YOUR_JWT'`,
+    responseExample: `{
+  "status": "healthy",
+  "backend": "native",
+  "version": "1.0.0"
+}`,
+  },
 ];
 
 function MethodBadge({ method }: { method: "POST" | "GET" }) {
@@ -373,6 +423,16 @@ export function FlowApiDocsPage() {
           </code>{" "}
           — chỉ cần GrokFlow JWT, không cần X-API-Key.
         </p>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          <div className="mb-1 font-medium">Lấy JWT (thay <code className="text-xs">YOUR_JWT</code> trong các ví dụ bên dưới):</div>
+          <pre className="overflow-x-auto rounded bg-slate-900 p-2 text-xs text-slate-100">{`curl -X POST '${BASE}/api/auth/login' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"you@example.com","password":"..."}'
+# → trả về { "access_token": "eyJ…", "expires_in": 86400 }`}</pre>
+          <div className="mt-1 text-xs text-slate-500">
+            JWT có hiệu lực 24h. Re-login khi hết hạn (server trả 401 → frontend đã có axios retry interceptor bảo vệ deploy nhưng KHÔNG retry 401).
+          </div>
+        </div>
         <a
           href="/api/v1/docs"
           target="_blank"
