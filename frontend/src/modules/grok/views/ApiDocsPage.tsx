@@ -16,7 +16,7 @@ type EndpointGroup = {
 
 type Endpoint = {
   title: string;                    // e.g. "Create Image Job"
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   auth: "jwt" | "apikey" | "any" | "admin";
   summary: string;
@@ -731,6 +731,7 @@ const BADGES: Record<Endpoint["auth"], { label: string; cls: string }> = {
 const METHOD_CLS: Record<Endpoint["method"], string> = {
   GET:    "bg-emerald-500 text-white",
   POST:   "bg-blue-500 text-white",
+  PUT:    "bg-amber-600 text-white",
   PATCH:  "bg-amber-500 text-white",
   DELETE: "bg-rose-500 text-white",
 };

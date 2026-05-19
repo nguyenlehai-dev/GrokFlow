@@ -1,5 +1,6 @@
 import axios from "axios";
 import { useAuthStore } from "@/core/auth/store";
+import { installRetryInterceptor } from "./retry";
 
 /** Gateway API client.
  *
@@ -22,6 +23,10 @@ const baseURL = onLocalhost
   : "/api/gateway-proxy";
 
 export const gatewayApi = axios.create({ baseURL });
+
+// Retry 502/503/504 during backend redeploys so admin UI doesn't show
+// errors during the ~10s container swap window.
+installRetryInterceptor(gatewayApi);
 
 gatewayApi.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
