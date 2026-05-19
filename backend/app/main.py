@@ -62,9 +62,21 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         print(f"[startup] vnc tab gc failed to start: {exc}", flush=True)
 
+    # CDP health watchdog — auto-restart any VNC container whose
+    # Chromium has stopped responding to /json/version (renderer crash,
+    # DevTools handshake stuck, etc.). Without this loop, partner-facing
+    # jobs hit `[network_error] CDP discovery` and an admin had to
+    # manually click 'Reset CDP' to recover.
+    cdp_watchdog_task: asyncio.Task | None = None
+    try:
+        from app.services.vnc_cdp_watchdog import cdp_watchdog_loop
+        cdp_watchdog_task = asyncio.create_task(cdp_watchdog_loop())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] vnc cdp watchdog failed to start: {exc}", flush=True)
+
     yield
     # On shutdown: stop background tasks + drain the shared httpx pool.
-    for t in (vnc_events_task, tab_gc_task):
+    for t in (vnc_events_task, tab_gc_task, cdp_watchdog_task):
         if t is None:
             continue
         t.cancel()
