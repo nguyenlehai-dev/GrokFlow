@@ -97,16 +97,81 @@ def _build_options(p: ClientGenerateIn) -> dict[str, Any] | None:
     return opts or None
 
 
-def _collect_media_urls(files: list[File]) -> tuple[list[str], list[str]]:
-    image_urls: list[str] = []
-    video_urls: list[str] = []
+def _collect_media_urls(
+    files: list[File],
+    *,
+    target: str,
+    requested_count: int,
+    result_url: str | None,
+) -> tuple[list[str], list[str]]:
+    """Split files by mime + cap the count returned to what the partner asked.
+
+    Background: Grok's video streaming endpoint emits multiple progress=100
+    events when its model generates several candidate clips for one prompt
+    (we've observed 13 separate .mp4 files for a `count=1` request). The
+    worker saves every one of them to the files table because they're
+    legitimate outputs — but the partner contract promised `count: 1`,
+    so dumping 13 URLs is confusing.
+
+    Cap policy:
+      - image: return up to `requested_count` URLs in file order
+        (variants from one prompt are interchangeable; first N is fine)
+      - video: prefer Job.result_url as the canonical answer; if it
+        exists and matches, return just that one (count=1) or pad up
+        to `requested_count` from the remaining variants
+      - target='video' with count>1: take the LATEST N by created_at
+        (the model's later samples are usually the more refined)
+    """
+    image_files: list[File] = []
+    video_files: list[File] = []
     for f in files:
-        url = f.public_url or f"/api/files/{f.id}/download"
         if (f.mime_type or "").startswith("video/"):
-            video_urls.append(url)
+            video_files.append(f)
         else:
-            image_urls.append(url)
+            image_files.append(f)
+
+    def _url(f: File) -> str:
+        return f.public_url or f"/api/files/{f.id}/download"
+
+    n = max(1, requested_count)
+
+    if target == "video":
+        # Sort newest-first; the model's later samples tend to be the
+        # most refined version Grok emitted for the prompt.
+        ordered = sorted(video_files, key=lambda f: f.created_at, reverse=True)
+        chosen: list[File] = []
+        if result_url:
+            # Honor what the worker pinned as the canonical result.
+            primary = next(
+                (f for f in ordered if result_url.endswith(f"/{f.id}/download")),
+                None,
+            )
+            if primary is not None:
+                chosen.append(primary)
+        for f in ordered:
+            if len(chosen) >= n:
+                break
+            if f in chosen:
+                continue
+            chosen.append(f)
+        video_urls = [_url(f) for f in chosen]
+        image_urls = [_url(f) for f in image_files][:n]
+        return image_urls, video_urls
+
+    # target == "image" (or unknown — treat as image)
+    image_urls = [_url(f) for f in image_files][:n]
+    video_urls = [_url(f) for f in video_files][:n]
     return image_urls, video_urls
+
+
+def _requested_count(job: Job) -> int:
+    """Recover the `count`/`n` the partner asked for. Falls back to 1."""
+    payload = job.input_payload or {}
+    for key in ("count", "n"):
+        val = payload.get(key)
+        if isinstance(val, int) and val >= 1:
+            return val
+    return 1
 
 
 @router.post("/generate", response_model=ClientGenerateOut, status_code=201)
@@ -164,7 +229,12 @@ async def get_task_status(
             .where(File.job_id == job.id, File.file_type != "input")
             .order_by(File.created_at)
         )).scalars().all())
-        image_urls, video_urls = _collect_media_urls(rows)
+        image_urls, video_urls = _collect_media_urls(
+            rows,
+            target=job.job_type,
+            requested_count=_requested_count(job),
+            result_url=job.result_url,
+        )
 
     result_blob: dict[str, Any] | None = None
     if image_urls or video_urls:
