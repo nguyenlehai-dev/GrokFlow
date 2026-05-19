@@ -285,7 +285,20 @@ def refresh_vnc_map() -> bool:
             existing = ""
         if existing == text:
             return True  # no-op success (silent — happens 4×/min from the loop)
-        VNC_MAP_PATH.write_text(text, encoding="utf-8")
+
+        # Atomic write via temp-file + rename. The vhost dir is bind-mounted
+        # from the host's /etc/nginx/grokflow-vhosts/ where the placeholder
+        # file is owned by root (created by install_nginx_watcher.sh under
+        # sudo). The backend gunicorn worker runs as uid 10001, so it can't
+        # `open(path, "w")` a root-owned file even though it CAN write into
+        # the dir (drwxrwsr-x with the setgid bit makes gid grokflow). Atomic
+        # rename only needs dir-write, and the resulting file becomes uid
+        # 10001:10001 — subsequent writes go direct-path. Without this fix
+        # we silently EACCES'd for hours on new VNC profiles.
+        import os
+        tmp_path = VNC_MAP_PATH.with_suffix(VNC_MAP_PATH.suffix + ".tmp")
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(tmp_path, VNC_MAP_PATH)
         short_ids = [s for s, _ in entries]
         print(
             f"[vnc-map] wrote {len(entries)} entr"
