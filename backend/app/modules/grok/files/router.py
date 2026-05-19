@@ -74,14 +74,19 @@ async def _resolve_bearer(db, bearer: str) -> User | None:
     return u
 
 
-@router.get("/{file_id}")
+@router.get("/{file_id}/meta")
 async def get_file_meta(
     file_id: uuid.UUID,
     db: DbSession,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    """File metadata. Auth via Bearer — accepts both GrokFlow JWT and
-    partner API key (uxpm_live_*), same as /download."""
+    """File metadata (JSON). Moved from `/api/files/{file_id}` to
+    `/api/files/{file_id}/meta` — the bare-id GET now serves the file
+    content directly so partners can paste the URL anywhere.
+
+    Auth via Bearer — accepts both GrokFlow JWT and partner API key
+    (uxpm_live_*), same as /download.
+    """
     f = await db.get(File, file_id)
     if not f:
         raise NotFound("file")
@@ -97,7 +102,7 @@ async def get_file_meta(
         "file_type": f.file_type,
         "mime_type": f.mime_type,
         "file_size": f.file_size,
-        "download_url": f"/api/files/{f.id}/download",
+        "download_url": f"/api/files/{f.id}",
     }
 
 
@@ -132,6 +137,8 @@ _PUBLIC_FILE_TYPES = {"image", "video"}
 
 @router.get("/{file_id}/download")
 @router.head("/{file_id}/download")
+@router.get("/{file_id}")
+@router.head("/{file_id}")
 @short_router.get("/{file_id}")
 @short_router.head("/{file_id}")
 @api_file_router.get("/{file_id}")
