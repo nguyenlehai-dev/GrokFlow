@@ -154,20 +154,32 @@ def _base_url(request: Request) -> str:
     the relative path into curl, getting cryptic errors. The contract
     now returns full https://host/api/files/<id>/download.
 
-    We derive host from the inbound request so per-tenant deploys
-    (plxeditor.com, flowgrok.plxeditor.com, etc.) each return URLs on
-    THEIR own hostname. Falls back to https when X-Forwarded-Proto
-    isn't set (host nginx vhost sets it; direct-to-uvicorn dev calls
-    might not).
+    Scheme detection priority:
+      1. cf-visitor JSON header (Cloudflare's source of truth — the
+         tunnel between CF and origin is plaintext HTTP, but cf-visitor
+         tells us the client→CF scheme was https).
+      2. x-forwarded-proto (host nginx might set this — many don't).
+      3. request.url.scheme (raw uvicorn — would be http behind any proxy).
+      4. Hardcoded https for any non-localhost host (production
+         deploys are always behind TLS; localhost gets http).
     """
-    proto = (
-        request.headers.get("x-forwarded-proto")
-        or request.url.scheme
-        or "https"
-    )
     host = request.headers.get("x-forwarded-host") or request.headers.get("host")
     if not host:
         host = request.url.netloc
+
+    proto: str | None = None
+    cf_visitor = request.headers.get("cf-visitor")
+    if cf_visitor and '"scheme":"https"' in cf_visitor:
+        proto = "https"
+    elif cf_visitor and '"scheme":"http"' in cf_visitor:
+        proto = "http"
+    if not proto:
+        proto = request.headers.get("x-forwarded-proto")
+    if not proto:
+        proto = request.url.scheme
+    # Last resort: any non-localhost hostname in prod is https-only.
+    if not proto or (proto == "http" and host and not host.startswith(("localhost", "127.0.0.1"))):
+        proto = "https"
     return f"{proto}://{host}"
 
 
