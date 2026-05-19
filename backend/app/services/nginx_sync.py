@@ -72,7 +72,7 @@ server {{
 
     # API + docs go to FastAPI. Listed first so they win the longest-prefix
     # match over the catch-all `/` location below.
-    location ~ ^/(api|openapi.json|docs|redoc)(/|$) {{
+    location ~ ^/(api|openapi.json|docs|redoc|f)(/|$) {{
         proxy_pass {BACKEND_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
