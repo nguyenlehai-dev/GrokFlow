@@ -15,6 +15,11 @@ from . import service
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
+# Short alias router — `/f/<id>` instead of `/api/files/<id>/download`.
+# Same handler under the hood (download_file), just registered under a
+# different prefix so partners get a memorable, embeddable URL.
+short_router = APIRouter(prefix="/f", tags=["files"])
+
 
 # Admin family: tenant admins and super_admin can read everyone's files
 # in their scope. The legacy check rejected super_admin (role != "admin")
@@ -123,6 +128,8 @@ _PUBLIC_FILE_TYPES = {"image", "video"}
 
 @router.get("/{file_id}/download")
 @router.head("/{file_id}/download")
+@short_router.get("/{file_id}")
+@short_router.head("/{file_id}")
 async def download_file(
     file_id: uuid.UUID,
     db: DbSession,
@@ -181,3 +188,19 @@ async def download_file(
             ),
         },
     )
+
+
+# Glue both prefixes together so the module's single manifest entry
+# can register the meta+download routes (/api/files/*) AND the short
+# alias (/f/<id>) at the same time. Order matters: the more-specific
+# /api/files prefix is registered first so a stray /f/api/files/...
+# request (won't happen but principle of least surprise) hits the
+# right handler.
+combined_router = APIRouter()
+combined_router.include_router(router)
+combined_router.include_router(short_router)
+
+# What the module manifest mounts. `router` keeps its original name
+# for backward compat with any internal callers; `combined_router`
+# is the canonical export.
+router = combined_router  # noqa: F811 — intentional shadow
