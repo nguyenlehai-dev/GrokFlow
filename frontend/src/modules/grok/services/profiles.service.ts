@@ -20,6 +20,17 @@ export const profilesService = {
    *  when no live jobs remain. See backend reset_stuck_profile route. */
   resetStuck: (id: string) => api.post<Profile>(`/api/profiles/${id}/reset-stuck`).then((r) => r.data),
   stopVnc: (id: string) => api.post(`/api/profiles/${id}/stop-vnc`),
+  /** Kill the VNC container + refresh nginx map + reset profile status
+   *  to need_login. One-click recovery when Chromium crashed inside but
+   *  Docker still reports the container healthy (CDP discovery error). */
+  resetCdp: (id: string) => api.post<{
+    profile_id: string;
+    profile_status: string;
+    container_was_removed: boolean;
+    map_refreshed: boolean;
+    next_action: string;
+    message: string;
+  }>(`/api/profiles/${id}/reset-cdp`).then((r) => r.data),
 
   startVncSession: (id: string) =>
     api.post<VncSession>(`/api/profiles/${id}/start-vnc-session`).then((r) => r.data),

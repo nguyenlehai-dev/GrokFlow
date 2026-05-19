@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { UploadCookiesModal } from "../components/UploadCookiesModal";
 import { AutoLoginModal } from "../components/AutoLoginModal";
 import { ProjectsModal } from "../components/ProjectsModal";
+import { SystemHealButton } from "../components/SystemHealButton";
 import type { Profile } from "../models/profile";
 import { profilesService } from "../services/profiles.service";
 
@@ -44,6 +45,14 @@ export function ProfilesPage() {
   const resetStuck = useMutation({
     mutationFn: (id: string) => profilesService.resetStuck(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profiles"] }),
+  });
+  const resetCdp = useMutation({
+    mutationFn: (id: string) => profilesService.resetCdp(id),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["profiles"] });
+      // eslint-disable-next-line no-alert
+      alert(`Reset CDP xong: ${data.message}\n\nClick "Auto login" để mở phiên mới.`);
+    },
   });
   const stopVnc = useMutation({
     mutationFn: (id: string) => profilesService.stopVnc(id),
@@ -91,9 +100,12 @@ export function ProfilesPage() {
               : t("grok.profiles_user_subtitle")}
           </p>
         </div>
-        {isAdmin && (
-          <button onClick={() => setOpen(true)} className="btn-primary">+ {t("grok.profiles_create")}</button>
-        )}
+        <div className="flex items-center gap-2">
+          {isSuper && <SystemHealButton />}
+          {isAdmin && (
+            <button onClick={() => setOpen(true)} className="btn-primary">+ {t("grok.profiles_create")}</button>
+          )}
+        </div>
       </div>
 
       {isAdmin && (
@@ -335,6 +347,18 @@ export function ProfilesPage() {
                             {resetStuck.isPending && resetStuck.variables === p.id ? "Đang reset…" : "Reset kẹt"}
                           </button>
                         )}
+                        <button
+                          className="btn-ghost text-violet-600 hover:bg-violet-50 hover:text-violet-700"
+                          onClick={() => {
+                            if (confirm("Reset CDP sẽ XOÁ VNC container hiện tại + làm mới nginx map. Bạn cần Auto-login lại sau khi reset. Tiếp tục?")) {
+                              resetCdp.mutate(p.id);
+                            }
+                          }}
+                          disabled={resetCdp.isPending || !can("stop_vnc")}
+                          title="Fix khi Chromium crash bên trong VNC (CDP discovery error). Sau khi reset → click Auto login để mở phiên mới."
+                        >
+                          {resetCdp.isPending && resetCdp.variables === p.id ? "Đang reset…" : "Reset CDP"}
+                        </button>
                         <button
                           className="btn-ghost"
                           onClick={() => disable.mutate(p.id)}
