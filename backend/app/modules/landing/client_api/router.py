@@ -1,20 +1,42 @@
-"""Adapter routes implementing the partner-facing GrokService contract.
+"""Partner-facing Grok API — FROZEN CONTRACT.
 
-Contract (as requested by integration partners):
+============================================================================
+SIMPLE CONTRACT (partner-recommended — use these for new integrations)
+============================================================================
+
+  POST /api/client/generate-image
+       body  : { prompt, ratio?, count?, reference_images?: string[] }
+       reply : { task_id, status, target: "image" }
+
+  POST /api/client/generate-video
+       body  : { prompt, ratio?, duration?, count?, reference_images?: string[] }
+       reply : { task_id, status, target: "video" }
+
+  GET  /api/client/status/{task_id}
+       reply : { task_id, status, target, image_urls[], video_urls[],
+                 error_message, created_at, completed_at }
+
+Auth (all 3 endpoints + downloads): Authorization: Bearer <uxpm_live_*>
+
+============================================================================
+LEGACY CONTRACT (kept verbatim for existing integrations — DO NOT BREAK)
+============================================================================
 
   POST /api/client/generate
-       body  : { target: "image"|"video", prompt, ratio, count,
-                 quality, duration, negative_prompt, reference_images[] }
-       auth  : Authorization: Bearer <uxpm_live_*>
+       body  : { target: "image"|"video", prompt, ratio?, count?,
+                 quality?, duration?, negative_prompt?, reference_images? }
        reply : { task_id, status, target }
 
   GET  /api/client/tasks/{task_id}/status
-       auth  : Authorization: Bearer <uxpm_live_*>
-       reply : { task_id, status, target, image_urls[], video_urls[],
-                 error_message, created_at, completed_at, result }
+       reply : same as /status/{task_id}
 
-Both translate into the existing Grok job pipeline (same service layer
-as `/v1/jobs/image` and `/v1/jobs/video`).
+============================================================================
+
+This file is a FROZEN contract. Internal logic (worker rotation, project
+re-mapping, retry, file collection, etc.) may evolve freely — but the
+request/response shape above must not change. Partners' production apps
+break every time field names move. If you need a different shape, add
+a NEW endpoint instead of mutating these ones.
 """
 from __future__ import annotations
 
@@ -22,7 +44,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -37,12 +59,39 @@ from app.modules.grok.jobs import service as job_service
 router = APIRouter(prefix="/api/client", tags=["client-api"])
 
 
+class ImageGenerateIn(BaseModel):
+    """Minimal payload for the simplified image endpoint.
+
+    No `target` field (it's implicit in the URL), no `quality` /
+    `negative_prompt` (partner feedback: noise, not used). Just the
+    knobs that matter: prompt + ratio + how many variants + optional
+    reference images for I2I.
+    """
+    prompt: str = Field(min_length=1, max_length=4000)
+    ratio: str | None = None
+    count: int = Field(default=1, ge=1, le=10)
+    reference_images: list[str] | None = None
+
+
+class VideoGenerateIn(BaseModel):
+    """Minimal payload for the simplified video endpoint.
+
+    Same as ImageGenerateIn + `duration` (seconds, optional).
+    `reference_images` present → I2V (animate the still); absent → T2V.
+    """
+    prompt: str = Field(min_length=1, max_length=4000)
+    ratio: str | None = None
+    duration: int | None = None
+    count: int = Field(default=1, ge=1, le=10)
+    reference_images: list[str] | None = None
+
+
+# Legacy shape — DO NOT modify. Add new fields to NEW endpoints instead.
 class ClientGenerateIn(BaseModel):
     target: Literal["image", "video"]
     prompt: str = Field(min_length=1, max_length=4000)
     ratio: str | None = None
     count: int = Field(default=1, ge=1, le=10)
-    # Note: contract cap is 10; internal entitlement plan may cap lower per user.
     quality: str | None = None
     duration: int | None = None
     negative_prompt: str | None = None
@@ -97,12 +146,38 @@ def _build_options(p: ClientGenerateIn) -> dict[str, Any] | None:
     return opts or None
 
 
+def _base_url(request: Request) -> str:
+    """Compute the absolute origin for response URLs.
+
+    Partners reported that `image_urls: ["/api/files/<id>/download"]`
+    forced them to manually prepend a base URL — and most just pasted
+    the relative path into curl, getting cryptic errors. The contract
+    now returns full https://host/api/files/<id>/download.
+
+    We derive host from the inbound request so per-tenant deploys
+    (plxeditor.com, flowgrok.plxeditor.com, etc.) each return URLs on
+    THEIR own hostname. Falls back to https when X-Forwarded-Proto
+    isn't set (host nginx vhost sets it; direct-to-uvicorn dev calls
+    might not).
+    """
+    proto = (
+        request.headers.get("x-forwarded-proto")
+        or request.url.scheme
+        or "https"
+    )
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if not host:
+        host = request.url.netloc
+    return f"{proto}://{host}"
+
+
 def _collect_media_urls(
     files: list[File],
     *,
     target: str,
     requested_count: int,
     result_url: str | None,
+    base_url: str,
 ) -> tuple[list[str], list[str]]:
     """Split files by mime + cap the count returned to what the partner asked.
 
@@ -131,7 +206,14 @@ def _collect_media_urls(
             image_files.append(f)
 
     def _url(f: File) -> str:
-        return f.public_url or f"/api/files/{f.id}/download"
+        # Absolutize: partners pasted relative URLs into curl/fetch and
+        # hit 'invalid URL' errors. Public CDN URLs (f.public_url) stay
+        # absolute as-is; backend-served downloads get prefixed with the
+        # request's origin.
+        raw = f.public_url or f"/api/files/{f.id}/download"
+        if raw.startswith("http://") or raw.startswith("https://"):
+            return raw
+        return f"{base_url}{raw}"
 
     n = max(1, requested_count)
 
@@ -178,45 +260,27 @@ def _requested_count(job: Job) -> int:
 async def generate(
     payload: ClientGenerateIn, principal: ApiKeyPrincipal, db: DbSession,
 ) -> ClientGenerateOut:
-    api_key, user = principal
-    _check_perm(api_key, payload.target)
-    await enforce_api_key_rate_limit(api_key)
-
-    job = await job_service.create_job(
-        db,
-        user_id=user.id,
-        provider="grok",
-        job_type=payload.target,
-        prompt=payload.prompt,
-        profile_id=payload.profile_id,
+    """Legacy gated endpoint. Prefer /generate-image or /generate-video."""
+    return await _submit_job(
+        target=payload.target,
+        payload_dict=payload.model_dump(),
         options=_build_options(payload),
-        api_key_id=api_key.id,
-    )
-    api_key.last_used_at = datetime.now(timezone.utc)
-    api_key.used_today += 1
-    await audit.log_action(
-        db,
-        user_id=user.id,
-        action="create_job",
-        target_type="job",
-        target_id=job.id,
-        metadata={
-            "provider": "grok",
-            "job_type": payload.target,
-            "via": "client_api",
-        },
-    )
-    await db.commit()
-    return ClientGenerateOut(
-        task_id=job.id, status=job.status, target=payload.target,
+        profile_id=payload.profile_id,
+        principal=principal,
+        db=db,
     )
 
 
-@router.get("/tasks/{task_id}/status", response_model=ClientTaskStatusOut)
-async def get_task_status(
-    task_id: uuid.UUID, principal: ApiKeyPrincipal, db: DbSession,
+_TERMINAL = {"success", "failed", "cancelled"}
+
+
+async def _build_status(
+    task_id: uuid.UUID,
+    user,
+    db,
+    request: Request,
 ) -> ClientTaskStatusOut:
-    _, user = principal
+    """Shared status builder for /status/{id} and /tasks/{id}/status."""
     job = await db.get(Job, task_id)
     if not job or job.user_id != user.id:
         raise NotFound("task")
@@ -234,6 +298,7 @@ async def get_task_status(
             target=job.job_type,
             requested_count=_requested_count(job),
             result_url=job.result_url,
+            base_url=_base_url(request),
         )
 
     result_blob: dict[str, Any] | None = None
@@ -243,6 +308,13 @@ async def get_task_status(
             "video_urls": video_urls,
         }
 
+    # Hide the error_message until status is terminal. While a job is
+    # in queued/processing_provider, error_message holds the LAST FAILED
+    # ATTEMPT's reason (e.g., "rate_limited — Rotating"). Partners were
+    # reading it mid-retry and assuming the job had failed when it was
+    # actually still trying. Only expose it when status is terminal.
+    err_msg = job.error_message if job.status in _TERMINAL else None
+
     return ClientTaskStatusOut(
         task_id=job.id,
         status=job.status,
@@ -250,7 +322,129 @@ async def get_task_status(
         image_urls=image_urls,
         video_urls=video_urls,
         result=result_blob,
-        error_message=job.error_message,
+        error_message=err_msg,
         created_at=job.created_at,
         completed_at=job.completed_at,
     )
+
+
+async def _submit_job(
+    *,
+    target: str,
+    payload_dict: dict[str, Any],
+    options: dict[str, Any] | None,
+    profile_id: uuid.UUID | None,
+    principal,
+    db,
+) -> ClientGenerateOut:
+    """Shared job-submission flow used by all 3 generate endpoints."""
+    api_key, user = principal
+    _check_perm(api_key, target)
+    await enforce_api_key_rate_limit(api_key)
+
+    job = await job_service.create_job(
+        db,
+        user_id=user.id,
+        provider="grok",
+        job_type=target,
+        prompt=payload_dict["prompt"],
+        profile_id=profile_id,
+        options=options,
+        api_key_id=api_key.id,
+    )
+    api_key.last_used_at = datetime.now(timezone.utc)
+    api_key.used_today += 1
+    await audit.log_action(
+        db,
+        user_id=user.id,
+        action="create_job",
+        target_type="job",
+        target_id=job.id,
+        metadata={
+            "provider": "grok",
+            "job_type": target,
+            "via": "client_api",
+        },
+    )
+    await db.commit()
+    return ClientGenerateOut(task_id=job.id, status=job.status, target=target)
+
+
+# ────────────────────────── NEW SIMPLE CONTRACT ──────────────────────────
+# 3 endpoints. Frozen. Don't change the request/response shape.
+
+@router.post("/generate-image", response_model=ClientGenerateOut, status_code=201)
+async def generate_image(
+    payload: ImageGenerateIn, principal: ApiKeyPrincipal, db: DbSession,
+) -> ClientGenerateOut:
+    """Generate image(s). Returns a task_id — poll /status/{task_id}."""
+    opts: dict[str, Any] = {}
+    if payload.ratio:
+        opts["ratio"] = payload.ratio
+        opts["aspect_ratio"] = payload.ratio
+    if payload.count != 1:
+        opts["n"] = payload.count
+    if payload.reference_images:
+        opts["reference_images"] = payload.reference_images
+        opts["reference_image_urls"] = payload.reference_images
+    return await _submit_job(
+        target="image",
+        payload_dict=payload.model_dump(),
+        options=opts or None,
+        profile_id=None,
+        principal=principal,
+        db=db,
+    )
+
+
+@router.post("/generate-video", response_model=ClientGenerateOut, status_code=201)
+async def generate_video(
+    payload: VideoGenerateIn, principal: ApiKeyPrincipal, db: DbSession,
+) -> ClientGenerateOut:
+    """Generate video(s). Returns a task_id — poll /status/{task_id}."""
+    opts: dict[str, Any] = {}
+    if payload.ratio:
+        opts["ratio"] = payload.ratio
+        opts["aspect_ratio"] = payload.ratio
+    if payload.duration is not None:
+        opts["duration"] = payload.duration
+    if payload.count != 1:
+        opts["n"] = payload.count
+    if payload.reference_images:
+        opts["reference_images"] = payload.reference_images
+        opts["reference_image_urls"] = payload.reference_images
+    return await _submit_job(
+        target="video",
+        payload_dict=payload.model_dump(),
+        options=opts or None,
+        profile_id=None,
+        principal=principal,
+        db=db,
+    )
+
+
+@router.get("/status/{task_id}", response_model=ClientTaskStatusOut)
+async def get_status(
+    task_id: uuid.UUID,
+    principal: ApiKeyPrincipal,
+    db: DbSession,
+    request: Request,
+) -> ClientTaskStatusOut:
+    """Check task status. Poll every 3-5s until status ∈
+    {success, failed, cancelled}. Image URLs / video URLs are absolute."""
+    _, user = principal
+    return await _build_status(task_id, user, db, request)
+
+
+# ───────────────────────── LEGACY CONTRACT (kept) ─────────────────────────
+# Existing integrations may already point at these. Don't break them.
+
+@router.get("/tasks/{task_id}/status", response_model=ClientTaskStatusOut)
+async def get_task_status(
+    task_id: uuid.UUID,
+    principal: ApiKeyPrincipal,
+    db: DbSession,
+    request: Request,
+) -> ClientTaskStatusOut:
+    _, user = principal
+    return await _build_status(task_id, user, db, request)
