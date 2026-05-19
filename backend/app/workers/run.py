@@ -303,12 +303,49 @@ async def process_one(db: AsyncSession, job: Job) -> None:
         # Look up the project slug (if scoped) so the worker hits
         # grok.com/project/<slug> instead of /imagine, keeping each
         # tenant's chat history separated.
+        #
+        # Cross-profile rotation guard: when an earlier retry rotated the
+        # job from profile A → B, `job.project_id` still references A's
+        # GrokProject row, whose `grok_project_id` slug exists only in
+        # A's Grok account. Passing it to B makes Grok's API return
+        # `404 Workspace not found` and forces the slower DOM fallback —
+        # which then often times out. Detect the mismatch and either
+        # pick a project that belongs to the current profile, or fall
+        # back to `None` (worker hits /imagine without a project pin,
+        # which is harmless — just loses per-tenant chat separation
+        # for this one job).
         grok_project_id: str | None = None
         if job.project_id:
             from app.models import GrokProject
             gp = await db.get(GrokProject, job.project_id)
-            if gp:
+            if gp and gp.profile_id == job.profile_id:
                 grok_project_id = gp.grok_project_id
+            elif gp:
+                # Mismatch — find ANY project on the current profile.
+                alt_gp = (await db.execute(
+                    select(GrokProject)
+                    .where(GrokProject.profile_id == job.profile_id)
+                    .limit(1)
+                )).scalar_one_or_none()
+                if alt_gp:
+                    grok_project_id = alt_gp.grok_project_id
+                    db.add(JobLog(
+                        job_id=job.id, level="info",
+                        message=(
+                            f"Project re-mapped after profile rotation: "
+                            f"{gp.grok_project_id[:8]}… (profile {str(gp.profile_id)[:8]}) "
+                            f"→ {alt_gp.grok_project_id[:8]}… (profile {str(job.profile_id)[:8]})"
+                        ),
+                    ))
+                else:
+                    db.add(JobLog(
+                        job_id=job.id, level="info",
+                        message=(
+                            f"Project {gp.grok_project_id[:8]}… doesn't belong to "
+                            f"rotated profile {str(job.profile_id)[:8]} and the "
+                            f"profile has no sibling project — falling back to /imagine"
+                        ),
+                    ))
 
         # Run provider as a task + watchdog that aborts on user cancel.
         provider_task = asyncio.create_task(provider.run(JobInput(
