@@ -18,7 +18,13 @@ param(
     [string]$Domain = "",
     [string]$ApiDomain = "",
     [string]$AdminEmail = "admin@local",
-    [string]$AdminPassword = ""
+    [string]$AdminPassword = "",
+    # Set when intentionally rotating secrets. Default = false → re-deploy
+    # reuses the existing .env.prod on the server so JWT_SECRET stays the
+    # same and users don't get logged out. Postgres password and Fernet key
+    # are likewise preserved (rotating them mid-life would lock users out
+    # of the DB and break encrypted-at-rest data).
+    [switch]$RegenSecrets
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,12 +76,41 @@ try {
 }
 
 Write-Host "==> Uploading to ${SshUser}@${SshHost}:${RemoteDir}" -ForegroundColor Cyan
-ssh -o StrictHostKeyChecking=accept-new "${SshUser}@${SshHost}" "mkdir -p $RemoteDir && cd $RemoteDir && rm -rf ./* ./.??*"
+# Wipe code dir but preserve persistent state: .env.prod (so secrets keep
+# their value — no mass logout on redeploy) and browser_profiles/ (Chrome
+# profile state for VNC sessions; bind-mounted into the backend container).
+$preserveScript = @"
+set -e
+mkdir -p $RemoteDir
+cd $RemoteDir
+mkdir -p /tmp/grokflow-keep
+[ -f .env.prod ] && cp .env.prod /tmp/grokflow-keep/.env.prod
+[ -d browser_profiles ] && mv browser_profiles /tmp/grokflow-keep/browser_profiles
+rm -rf ./* ./.??* 2>/dev/null || true
+"@
+ssh -o StrictHostKeyChecking=accept-new "${SshUser}@${SshHost}" "$preserveScript"
 scp $tar "${SshUser}@${SshHost}:$RemoteDir/deploy.tgz"
-ssh "${SshUser}@${SshHost}" "cd $RemoteDir && tar -xzf deploy.tgz && rm deploy.tgz"
+$restoreScript = @"
+set -e
+cd $RemoteDir
+tar -xzf deploy.tgz
+rm deploy.tgz
+[ -f /tmp/grokflow-keep/.env.prod ] && mv /tmp/grokflow-keep/.env.prod ./.env.prod
+[ -d /tmp/grokflow-keep/browser_profiles ] && mv /tmp/grokflow-keep/browser_profiles ./browser_profiles
+rmdir /tmp/grokflow-keep 2>/dev/null || true
+"@
+ssh "${SshUser}@${SshHost}" "$restoreScript"
 Remove-Item $tar -Force
 
-Write-Host "==> Generating .env.prod on server" -ForegroundColor Cyan
+# Whether to overwrite an existing .env.prod on the server. Default = keep
+# existing (preserves JWT_SECRET so users don't get logged out across
+# redeploys). Force-regenerate with -RegenSecrets.
+$forceWrite = if ($RegenSecrets) { "true" } else { "false" }
+if ($RegenSecrets) {
+    Write-Host "==> -RegenSecrets set: will overwrite .env.prod (all users get logged out)" -ForegroundColor Yellow
+}
+
+# Compose file is needed later for 'docker compose up' whether we regen env or not.
 $composeFile = if ($DeployMode -eq "cloudflare") { "docker-compose.cloudflare.yml" } else { "docker-compose.intranet.yml" }
 $publicApiUrl = if ($DeployMode -eq "cloudflare") { "https://$ApiDomain" } else { "http://${SshHost}:8000" }
 $corsOrigins = if ($DeployMode -eq "cloudflare") { "https://$Domain" } else { "http://${SshHost}:5173,http://localhost:5173" }
@@ -120,6 +155,10 @@ $genFernet = "docker run --rm python:3.11-slim sh -c 'pip install --quiet crypto
 $remoteScript = @"
 set -e
 cd $RemoteDir
+if [ -f .env.prod ] && [ "$forceWrite" != "true" ]; then
+  echo '.env.prod already exists on server — keeping it (preserves JWT_SECRET, no mass logout)'
+  exit 0
+fi
 echo '$envContent' > .env.prod
 ENC_KEY=\`$($genFernet)
 echo "ENCRYPTION_KEY=\`$ENC_KEY" >> .env.prod
@@ -127,6 +166,7 @@ chmod 600 .env.prod
 echo '.env.prod created'
 "@
 
+Write-Host "==> Ensuring .env.prod on server (keeps existing unless -RegenSecrets)" -ForegroundColor Cyan
 ssh "${SshUser}@${SshHost}" "$remoteScript"
 
 Write-Host "==> docker compose up --build (this takes 3-8 minutes first run)" -ForegroundColor Cyan
