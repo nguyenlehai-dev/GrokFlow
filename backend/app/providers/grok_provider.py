@@ -1801,18 +1801,26 @@ class GrokProvider(Provider):
                     await asyncio.wait_for(page.close(), timeout=3)
                 except Exception:  # noqa: BLE001
                     pass
-            # Also sweep any stray `/imagine/post/<id>` result tabs that this
-            # job's submit-then-result navigation may have spawned. Each
-            # lingering tab eats ~100MB Chromium RAM. We only touch tabs
-            # with this exact URL shape — sibling jobs' /imagine prompt tabs
-            # are NEVER on /post/ until they finish, so this is collision-safe.
+            # Also sweep any stray result tabs that this job's submit-then-
+            # result navigation may have spawned. Each lingering tab eats
+            # ~150-300MB Chromium RAM.
+            #
+            # Grok URL patterns we close:
+            #   /imagine/post/<id>         — legacy result URL (pre Q2 2026)
+            #   /project/<id>?chat=<id>    — current shape after a job
+            #   /chat/<id>, /share/<id>    — direct chat / share links
+            #
+            # Sibling jobs' /imagine prompt tabs DON'T match any of these
+            # until they themselves finish, so this is collision-safe with
+            # concurrent workers on the same profile.
+            _STALE = ("/imagine/post/", "?chat=", "/chat/", "/share/")
             try:
                 if 'context' in locals() and context is not None:
                     for p in list(context.pages):
                         if p is page:
                             continue
                         u = (p.url or "")
-                        if "/imagine/post/" in u:
+                        if any(s in u for s in _STALE):
                             try:
                                 await asyncio.wait_for(p.close(), timeout=2)
                                 self._log(tag, f"GC closed result tab: …{u[-40:]}")
