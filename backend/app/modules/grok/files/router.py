@@ -3,12 +3,13 @@ import uuid
 from fastapi import APIRouter, Header, Query
 from fastapi.responses import Response
 from jose import JWTError, jwt
+from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.deps import CurrentUser, DbSession
+from app.core.deps import DbSession
 from app.core.exceptions import NotFound, PermissionDenied
-from app.core.security import create_short_token
-from app.models import File, User
+from app.core.security import create_short_token, hash_api_key
+from app.models import ApiKey, File, User
 
 from . import service
 
@@ -25,12 +26,61 @@ def _can_read(user: User, file_owner_id: uuid.UUID) -> bool:
     return user.id == file_owner_id or user.role in _ADMIN_ROLES
 
 
+async def _resolve_bearer(db, bearer: str) -> User | None:
+    """Resolve a Bearer token to a User.
+
+    Accepts BOTH a GrokFlow session JWT (sub=<user_id>) AND a partner
+    API key (`uxpm_live_*`, sha256-hashed in api_keys table). Partners
+    using the /api/client/* contract get `image_urls: [/api/files/<id>/download]`
+    back; without API-key acceptance here they couldn't actually
+    download the results their own contract told them about. Now they
+    can pass the same Bearer header for both submit and download.
+    """
+    bearer = bearer.strip()
+    if not bearer:
+        return None
+    # Try JWT first — cheaper than a DB hit when the token is a session.
+    try:
+        payload = jwt.decode(bearer, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        sub = payload.get("sub")
+        if sub:
+            try:
+                u = await db.get(User, uuid.UUID(sub))
+                if u and u.status == "active":
+                    return u
+            except ValueError:
+                pass
+    except JWTError:
+        pass
+    # Fall back to API key: sha256 the raw string and look it up.
+    key_hash = hash_api_key(bearer)
+    api_key = (await db.execute(
+        select(ApiKey).where(ApiKey.key_hash == key_hash)
+    )).scalar_one_or_none()
+    if not api_key or api_key.status != "active":
+        return None
+    u = await db.get(User, api_key.user_id)
+    if not u or u.status != "active":
+        return None
+    return u
+
+
 @router.get("/{file_id}")
-async def get_file_meta(file_id: uuid.UUID, user: CurrentUser, db: DbSession) -> dict:
+async def get_file_meta(
+    file_id: uuid.UUID,
+    db: DbSession,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """File metadata. Auth via Bearer — accepts both GrokFlow JWT and
+    partner API key (uxpm_live_*), same as /download."""
     f = await db.get(File, file_id)
     if not f:
         raise NotFound("file")
-    if not _can_read(user, f.user_id):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise PermissionDenied()
+    bearer = authorization.split(" ", 1)[1]
+    user = await _resolve_bearer(db, bearer)
+    if not user or not _can_read(user, f.user_id):
         raise PermissionDenied()
     return {
         "id": str(f.id),
@@ -83,18 +133,10 @@ async def download_file(
     if token and _validate_share_token(token, file_id):
         authorized = True
     elif authorization and authorization.lower().startswith("bearer "):
-        # Resolve the JWT manually so we don't depend on the FastAPI dep
-        # wrapper (Bearer + share-token paths share one handler).
-        bearer = authorization.split(" ", 1)[1].strip()
-        try:
-            payload = jwt.decode(bearer, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-            sub = payload.get("sub")
-            if sub:
-                u = await db.get(User, uuid.UUID(sub))
-                if u and _can_read(u, f.user_id):
-                    authorized = True
-        except (JWTError, ValueError):
-            pass
+        bearer = authorization.split(" ", 1)[1]
+        u = await _resolve_bearer(db, bearer)
+        if u and _can_read(u, f.user_id):
+            authorized = True
 
     if not authorized:
         raise PermissionDenied()
