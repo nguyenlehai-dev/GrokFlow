@@ -20,6 +20,10 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 # different prefix so partners get a memorable, embeddable URL.
 short_router = APIRouter(prefix="/f", tags=["files"])
 
+# Singular-prefix alias — `/api/file/<id>`. Some partners prefer this
+# RESTful-ish shape over the `/f/` short link. Same handler.
+api_file_router = APIRouter(prefix="/api/file", tags=["files"])
+
 
 # Admin family: tenant admins and super_admin can read everyone's files
 # in their scope. The legacy check rejected super_admin (role != "admin")
@@ -130,6 +134,8 @@ _PUBLIC_FILE_TYPES = {"image", "video"}
 @router.head("/{file_id}/download")
 @short_router.get("/{file_id}")
 @short_router.head("/{file_id}")
+@api_file_router.get("/{file_id}")
+@api_file_router.head("/{file_id}")
 async def download_file(
     file_id: uuid.UUID,
     db: DbSession,
@@ -199,6 +205,7 @@ async def download_file(
 combined_router = APIRouter()
 combined_router.include_router(router)
 combined_router.include_router(short_router)
+combined_router.include_router(api_file_router)
 
 # What the module manifest mounts. `router` keeps its original name
 # for backward compat with any internal callers; `combined_router`
