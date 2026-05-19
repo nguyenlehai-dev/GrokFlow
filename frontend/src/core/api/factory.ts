@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from "axios";
 
 import { useAuthStore } from "@/core/auth/store";
 import { toast } from "@/components/ui/Toast";
+import { installRetryInterceptor } from "./retry";
 
 /** Build a fresh axios instance that:
  *   - prefixes every request with `baseURL` (empty = same-origin)
@@ -22,6 +23,11 @@ import { toast } from "@/components/ui/Toast";
  */
 export function createHttp(baseURL: string = ""): AxiosInstance {
   const http = axios.create({ baseURL });
+
+  // Install retry BEFORE the toast handler — same ordering rationale as
+  // in core/api/axios.ts. Without this, every transient 502 during a
+  // deploy fires a "Lỗi máy chủ" toast on every retry attempt.
+  installRetryInterceptor(http);
 
   http.interceptors.request.use((config) => {
     const token = useAuthStore.getState().token;

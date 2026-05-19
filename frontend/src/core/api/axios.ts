@@ -1,6 +1,7 @@
 import axios from "axios";
 import { useAuthStore } from "@/core/auth/store";
 import { toast } from "@/components/ui/Toast";
+import { installRetryInterceptor } from "./retry";
 
 // Note: do NOT pin Content-Type at the instance level. Axios sets it per
 // request based on the data type (JSON, FormData, URLSearchParams, etc.).
@@ -26,6 +27,13 @@ const baseURL = onLocalhost
 export const api = axios.create({
   baseURL,
 });
+
+// Install retry FIRST so it sees errors before the toast handler. Without
+// this ordering, every retry attempt would surface a "Lỗi máy chủ" toast
+// on the way to a successful retry. With retry first, intermediate 502s
+// are silently swallowed; only the final exhausted-retries error reaches
+// the toast handler below.
+installRetryInterceptor(api);
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
