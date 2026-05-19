@@ -43,7 +43,17 @@ WATCHDOG_BIN="/usr/local/bin/grokflow-warp-watchdog.sh"
 SERVICE_PATH="/etc/systemd/system/grokflow-warp-watchdog.service"
 TIMER_PATH="/etc/systemd/system/grokflow-warp-watchdog.timer"
 WARP_PORT="${WARP_PORT:-40000}"
-PROBE_URL="${PROBE_URL:-https://grok.com/}"
+# Probe an unprotected endpoint, NOT grok.com. Earlier version probed
+# grok.com directly — but grok.com always serves a Cloudflare Turnstile
+# challenge (HTTP 403 with `Just a moment...` HTML) for plain curl,
+# regardless of whether WARP itself is healthy. The challenge is
+# expected — Chromium-with-cookies inside our VNC containers passes it
+# normally. So a Turnstile 403 is NOT a signal to restart WARP; it's a
+# signal that "curl is not a real browser". Probe Cloudflare's
+# own trace endpoint instead: returns 200 with plain text, no
+# Turnstile, no DDoS protection. If WARP can't reach THIS, WARP is
+# truly broken.
+PROBE_URL="${PROBE_URL:-https://www.cloudflare.com/cdn-cgi/trace}"
 COOLDOWN_SEC="${COOLDOWN_SEC:-1800}"
 
 cat > "$WATCHDOG_BIN" <<EOF
@@ -61,8 +71,11 @@ STATE_FILE="/var/lib/grokflow-warp-watchdog.last_restart"
 CODE=\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 \\
     --socks5 127.0.0.1:\${WARP_PORT} "\${PROBE_URL}" 2>/dev/null || echo 000)
 
-if [[ "\$CODE" != "403" && "\$CODE" != "000" && "\$CODE" != "503" ]]; then
-    # 200/302/etc. — WARP egress is healthy.
+# Only restart when WARP itself can't reach the open internet — 000
+# (connect/timeout) or 5xx (gateway issue). 2xx/3xx/4xx all mean the
+# probe got an HTTP response → WARP socks5 → DNS → TLS → HTTP all
+# working → no reason to bounce the daemon.
+if [[ "\$CODE" != "000" && ! "\$CODE" =~ ^5 ]]; then
     logger -t grokflow-warp-watchdog "ok (code=\$CODE)"
     exit 0
 fi
