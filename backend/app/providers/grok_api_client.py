@@ -644,6 +644,11 @@ class GrokAPIClient:
                         )
 
                     buf = ""
+                    event_count = 0
+                    first_event_keys: list[str] = []
+                    last_error_keys: list[str] = []
+                    last_response_keys: list[str] = []
+                    last_response_message: str = ""
                     async for chunk in resp.aiter_text():
                         buf += chunk
                         last_end = 0
@@ -653,12 +658,31 @@ class GrokAPIClient:
                                 evt = json.loads(obj_text)
                             except json.JSONDecodeError:
                                 continue
+                            event_count += 1
+                            # Diagnostic: capture shape of first event + any
+                            # error / response keys we encounter. Without this
+                            # we can't tell if "stream ended without
+                            # image_chunk" means empty stream, error event,
+                            # text-only model reply, or extract-bug.
+                            if event_count == 1:
+                                first_event_keys = list(evt.keys())
+                            err = evt.get("error")
+                            if err:
+                                last_error_keys = list(err.keys()) if isinstance(err, dict) else ["<non-dict>"]
+                            resp_obj = (evt.get("result") or {}).get("response") or {}
+                            if resp_obj:
+                                last_response_keys = list(resp_obj.keys())
+                                # Capture model's textual answer (truncated) —
+                                # tells us if model refused / responded with
+                                # chat text instead of an image.
+                                token = resp_obj.get("token") or ""
+                                if token and len(last_response_message) < 200:
+                                    last_response_message += token
                             url = extract_asset(evt)
                             if url and url not in urls:
                                 urls.append(url)
                                 _emit(f"{asset_label} done: {url}")
-                            response = (evt.get("result") or {}).get("response") or {}
-                            if response.get("isSoftStop"):
+                            if resp_obj.get("isSoftStop"):
                                 soft_stopped = True
                         if last_end:
                             buf = buf[last_end:]
@@ -670,9 +694,25 @@ class GrokAPIClient:
                 ) from exc
 
             if not urls:
+                # Embed diagnostic context in the error message so we don't
+                # need to add a separate _emit() chain. event_count==0 →
+                # empty stream (CF cut, auth fail). event_count>0 + non-empty
+                # response.token → model returned text instead of image (free
+                # tier, moderation, prompt misunderstood).
+                diag = (
+                    f"events={event_count}"
+                    f" first_keys={first_event_keys}"
+                    f" resp_keys={last_response_keys}"
+                    + (f" err_keys={last_error_keys}" if last_error_keys else "")
+                    + (
+                        f" msg={last_response_message[:120]!r}"
+                        if last_response_message
+                        else ""
+                    )
+                )
                 raise GrokAPIError(
                     "unknown_error",
-                    f"stream ended without a completed {asset_label}",
+                    f"stream ended without a completed {asset_label} | {diag}",
                     retryable=True,
                 )
 
