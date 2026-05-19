@@ -624,6 +624,97 @@ async def disable_profile(profile_id: uuid.UUID, admin: AdminUser, db: DbSession
 _RUNNING_JOB_STATES = ("running", "processing_provider", "uploading_result")
 
 
+class ResetCdpOut(BaseModel):
+    profile_id: uuid.UUID
+    profile_status: str
+    container_was_removed: bool
+    map_refreshed: bool
+    next_action: str  # always "auto_login" — user clicks Auto-login next
+    message: str
+
+
+@router.post("/{profile_id}/reset-cdp", response_model=ResetCdpOut)
+async def reset_cdp(
+    profile_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> ResetCdpOut:
+    """One-click recovery for a broken VNC profile.
+
+    When Chromium crashes inside a VNC container but Docker still
+    reports the container as 'healthy' (kasmweb daemon up, browser
+    dead), every job assigned to that profile hits
+    `[network_error] CDP discovery: Expecting value` and gets
+    cancelled. Manual fix used to be SSH + `docker restart` —
+    this endpoint replaces that with one click.
+
+    What it does:
+      1. Tear down the VNC + Chromium container for this profile
+         (vnc_manager.stop_for_profile)
+      2. Refresh the nginx VNC short-id → IP map (so /vnc/<short>/
+         no longer routes to a ghost container)
+      3. Reset profile.status to 'need_login' so the worker pool
+         skips it until admin re-runs Auto-login
+
+    After this call, admin clicks 'Auto-login' on the row — that
+    spawns a fresh container with a clean Chromium, and the new
+    /vnc/<short>/ route is wired up by start-vnc-session as usual.
+
+    Safe to call at any time. Does NOT touch other profiles. Does
+    NOT touch host nginx config (use the system-level /heal for
+    that).
+    """
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "stop_vnc")
+
+    container_was_removed = False
+    try:
+        vnc_manager.stop_for_profile(str(profile.id))
+        container_was_removed = True
+    except Exception:  # noqa: BLE001
+        # Container may have already been gone — that's fine, the
+        # subsequent map-refresh will drop any stale entry anyway.
+        pass
+
+    map_refreshed = False
+    try:
+        map_refreshed = refresh_vnc_map()
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Clear active job counters too — if Chromium crashed mid-job,
+    # the slot was never released. Without this reset, the profile
+    # would refuse new jobs after Auto-login because active_jobs >=
+    # max_concurrent_jobs (sticky from the crashed run).
+    profile.active_jobs = 0
+    profile.active_video_jobs = 0
+    profile.status = "need_login"
+    profile.error_message = None
+
+    await audit.log_action(
+        db, user_id=admin.id, action="reset_cdp",
+        target_type="profile", target_id=profile.id,
+        metadata={
+            "container_was_removed": container_was_removed,
+            "map_refreshed": map_refreshed,
+        },
+    )
+    await db.commit()
+
+    return ResetCdpOut(
+        profile_id=profile.id,
+        profile_status=profile.status,
+        container_was_removed=container_was_removed,
+        map_refreshed=map_refreshed,
+        next_action="auto_login",
+        message=(
+            "VNC container đã bị xoá + map nginx được làm mới. "
+            "Click Auto-login để tạo phiên Chromium mới."
+        ),
+    )
+
+
 @router.post("/{profile_id}/reset-stuck", response_model=ProfileOut)
 async def reset_stuck_profile(
     profile_id: uuid.UUID, admin: AdminUser, db: DbSession,
