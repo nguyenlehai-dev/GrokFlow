@@ -229,7 +229,7 @@ def _collect_media_urls(
             f.public_url.startswith("http://") or f.public_url.startswith("https://")
         ):
             return f.public_url
-        return f"{base_url}/api/file/{f.id}"
+        return f"{base_url}/api/files/{f.id}"
 
     n = max(1, requested_count)
 
