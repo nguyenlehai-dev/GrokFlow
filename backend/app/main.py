@@ -51,12 +51,25 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         print(f"[startup] vnc event listener failed to start: {exc}", flush=True)
 
+    # Periodic Chromium-tab GC for VNC containers. After each Grok job
+    # the page navigates to /project/<id>?chat=<chat_id>; the per-job
+    # finally block closes the worker's tab, but manual VNC sessions
+    # leave tabs the worker never tracked. This loop sweeps every 5min.
+    tab_gc_task: asyncio.Task | None = None
+    try:
+        from app.services.vnc_tab_gc import tab_gc_loop
+        tab_gc_task = asyncio.create_task(tab_gc_loop())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] vnc tab gc failed to start: {exc}", flush=True)
+
     yield
-    # On shutdown: stop the listener + drain the shared httpx pool.
-    if vnc_events_task is not None:
-        vnc_events_task.cancel()
+    # On shutdown: stop background tasks + drain the shared httpx pool.
+    for t in (vnc_events_task, tab_gc_task):
+        if t is None:
+            continue
+        t.cancel()
         try:
-            await vnc_events_task
+            await t
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
     await close_http()
