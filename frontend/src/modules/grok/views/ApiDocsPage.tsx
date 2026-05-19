@@ -85,7 +85,10 @@ const GROUPS: EndpointGroup[] = [
           { name: "job_type", type: "string", required: true, description: "\"image\" hoặc \"video\"." },
           { name: "prompt", type: "string", required: true, description: "Mô tả bằng tiếng Anh, tối đa 2000 ký tự." },
           { name: "profile_id", type: "uuid | null", description: "Null = auto pick profile ít load nhất. Nếu profile được chỉ định ở chế độ image-only (allows_video=false) mà job_type=video → 422." },
+          { name: "project_id", type: "uuid | null", description: "Pin GrokProject cụ thể trên profile. Null = priority: per-user pin → domain assignment → first project." },
           { name: "model", type: "string", description: "Grok: aurora | grok-2-image | grok-3-image." },
+          { name: "size", type: "string", description: "Pixel size, vd \"1024x1024\". Optional — `options.aspect` được ưu tiên hơn." },
+          { name: "style", type: "string", description: "Style hint cho provider, vd \"cinematic\", \"anime\"." },
           { name: "n", type: "integer", description: "Số variant trả về (1-4). Mặc định 1." },
           { name: "seed", type: "integer | null", description: "Seed cố định nếu cần deterministic." },
           { name: "input_image_file_id", type: "uuid | null", description: "File_id từ /api/jobs/upload-input (image-to-X)." },
@@ -282,13 +285,15 @@ const GROUPS: EndpointGroup[] = [
           { name: "max_concurrent_jobs", type: "integer", description: "1-16. Mỗi tab ~150MB RAM." },
           { name: "max_concurrent_video", type: "integer", description: "1-12. Cap riêng cho video tabs (Playwright). Mặc định 4." },
           { name: "allows_video", type: "boolean", description: "True (mặc định) = nhận cả image + video. False = profile chỉ ảnh, resolver bỏ qua khi pick job video." },
+          { name: "tier", type: "string", description: "free | plus | super_grok | super_grok_heavy. Map plan của Grok account; resolver dùng để filter khi job yêu cầu tier tối thiểu (vd Spicy mode cần super_grok_heavy)." },
         ],
         request: `{
   "name": "menu-types",
   "provider": "grok",
   "max_concurrent_jobs": 3,
   "max_concurrent_video": 4,
-  "allows_video": true
+  "allows_video": true,
+  "tier": "super_grok"
 }`,
         response: "<ProfileOut>",
       },
@@ -657,22 +662,60 @@ file: <binary>`,
     title: "Webhooks",
     endpoints: [
       {
-        title: "Set Webhook URL",
-        method: "PATCH",
-        path: "/api/auth/me/webhook",
+        title: "Get Webhook Config",
+        method: "GET",
+        path: "/api/settings/webhook",
         auth: "jwt",
-        summary: "Set webhook URL nhận event job.success / job.failed / job.cancelled.",
-        parameters: [
-          { name: "webhook_url", type: "string", required: true, description: "HTTPS URL nhận POST." },
-          { name: "webhook_secret", type: "string", required: true, description: "Secret để verify HMAC-SHA256." },
-        ],
-        request: `{
+        summary: "Lấy webhook config hiện tại của user. `has_secret=true` nếu đã có secret được mint.",
+        response: `{
   "webhook_url": "https://your.app/grokflow-callback",
-  "webhook_secret": "your-shared-secret"
+  "has_secret": true,
+  "new_secret": null
 }`,
-        response: "<UserResponse>",
+      },
+      {
+        title: "Set / Rotate Webhook",
+        method: "PUT",
+        path: "/api/settings/webhook",
+        auth: "jwt",
+        summary: "Set webhook URL (server tự mint secret) hoặc rotate secret. Secret CHỈ trả 1 lần duy nhất khi mint/rotate — lưu ngay.",
+        parameters: [
+          { name: "webhook_url", type: "string | null", required: true, description: "HTTPS URL nhận POST event. Pass null để xoá webhook." },
+          { name: "rotate_secret", type: "boolean", description: "true = mint secret mới (cũ vô hiệu). Lần set URL đầu tiên tự mint secret kể cả không pass rotate_secret. Mặc định false." },
+        ],
+        request: `# Lần đầu set URL — server tự mint secret
+{
+  "webhook_url": "https://your.app/grokflow-callback"
+}
+
+# Đổi URL, giữ secret cũ
+{
+  "webhook_url": "https://your.app/new-callback"
+}
+
+# Rotate secret (URL không đổi cũng được)
+{
+  "webhook_url": "https://your.app/grokflow-callback",
+  "rotate_secret": true
+}
+
+# Xoá webhook
+{ "webhook_url": null }`,
+        response: `# Khi mint hoặc rotate — new_secret trả về MỘT LẦN
+{
+  "webhook_url": "https://your.app/grokflow-callback",
+  "has_secret": true,
+  "new_secret": "whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}
+
+# Khi chỉ đổi URL, không rotate
+{
+  "webhook_url": "https://your.app/new-callback",
+  "has_secret": true,
+  "new_secret": null
+}`,
         notes:
-          "Payload: { event, job_id, user_id, status, result_url, error_message, signature }. Verify HMAC-SHA256 với webhook_secret.",
+          "Payload server bắn về URL: { event, job_id, user_id, status, result_url, error_message, signature }. Verify HMAC-SHA256(payload_body, your_secret) === signature. Secret lưu HỆ chỉ 1 lần — đánh mất → phải rotate.",
       },
     ],
   },
