@@ -218,18 +218,18 @@ def _collect_media_urls(
             image_files.append(f)
 
     def _url(f: File) -> str:
-        # Short public URL — `/f/<id>` instead of `/api/files/<id>/download`.
-        # Same Replicate / OpenAI pattern: the file_id IS the secret
-        # (UUIDv4 = 122 bits of entropy → effectively unguessable). Partners
-        # paste directly into browsers, HTML <img src>, messaging apps, CDN
-        # caches, link-unfurl bots — all work without an Authorization
-        # header. Output file_types ('image', 'video') are publicly served.
-        # Public CDN URLs (f.public_url, when configured) stay absolute as-is.
+        # Public URL `/api/file/<id>` — RESTful-ish singular shape that
+        # partners requested. Same Replicate / OpenAI pattern: the file_id
+        # IS the secret (UUIDv4 = 122 bits of entropy → unguessable).
+        # Partners paste directly into browsers, HTML <img src>, messaging
+        # apps, CDN caches, link-unfurl bots — all work without an
+        # Authorization header. Public CDN URLs (f.public_url, when
+        # configured) stay absolute as-is.
         if f.public_url and (
             f.public_url.startswith("http://") or f.public_url.startswith("https://")
         ):
             return f.public_url
-        return f"{base_url}/f/{f.id}"
+        return f"{base_url}/api/file/{f.id}"
 
     n = max(1, requested_count)
 
