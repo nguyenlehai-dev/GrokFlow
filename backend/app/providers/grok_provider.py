@@ -133,6 +133,43 @@ PRO_REQUIRED_HINTS = [
 ]
 
 
+async def _cdp_discover(cdp_endpoint: str, *, attempts: int = 4, delay: float = 0.5) -> tuple[str, str]:
+    """Fetch /json/version with retry. Returns (ws_url_rewritten, user_agent).
+
+    Chromium sometimes briefly returns an empty body or 500 from
+    /json/version when DevTools is mid-handshake (workers spawning tabs,
+    GC running, page navigating away). A single GET-and-decode fails
+    JSON parse — observed as `[network_error] CDP discovery: Expecting
+    value: line 1 column 1 (char 0)` cancelling jobs that would have
+    worked 200ms later.
+
+    Retry up to `attempts` times with `delay` between, then bubble the
+    last error. The total budget (4×0.5s = 2s) is small compared to a
+    job's hard cap (5-8 min), so the cost of a bad cycle is negligible.
+    """
+    import asyncio as _asyncio
+    last_err: Exception | None = None
+    for i in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=10) as cli:
+                resp = await cli.get(f"{cdp_endpoint}/json/version")
+                # Treat 5xx + empty body + non-JSON all as transient.
+                if resp.status_code >= 500 or not resp.text.strip():
+                    raise RuntimeError(f"transient: status={resp.status_code} body_len={len(resp.text)}")
+                version = resp.json()
+            ws_url = version.get("webSocketDebuggerUrl", "")
+            ua = version.get("User-Agent", "")
+            if not ws_url:
+                raise RuntimeError("no webSocketDebuggerUrl in response")
+            host = cdp_endpoint.replace("http://", "").rstrip("/")
+            return re.sub(r"ws://[^/]+", f"ws://{host}", ws_url), ua
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            if i < attempts - 1:
+                await _asyncio.sleep(delay)
+    raise last_err or RuntimeError("CDP discovery: unknown")
+
+
 class GrokProvider(Provider):
     name = "grok"
 
@@ -355,18 +392,10 @@ class GrokProvider(Provider):
             return None
         cdp_endpoint = info["cdp_endpoint"]
 
-        # Same CDP discovery dance as the other paths — devtools reports
-        # ws://localhost:9222 even though we reach it via container:9223.
+        # Retry-with-backoff helper handles the transient empty-body case
+        # we used to fail on. See `_cdp_discover` docstring.
         try:
-            async with httpx.AsyncClient(timeout=10) as cli:
-                resp = await cli.get(f"{cdp_endpoint}/json/version")
-                version = resp.json()
-                ws_url = version.get("webSocketDebuggerUrl", "")
-                browser_ua = version.get("User-Agent", "")
-            if not ws_url:
-                return None
-            host = cdp_endpoint.replace("http://", "").rstrip("/")
-            ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+            ws_url, browser_ua = await _cdp_discover(cdp_endpoint)
         except Exception as exc:  # noqa: BLE001
             self._log(tag, f"CDP discovery error: {exc}")
             return None
@@ -720,15 +749,8 @@ class GrokProvider(Provider):
             return None
         cdp_endpoint = info["cdp_endpoint"]
 
-        # Same CDP WS-URL rewrite as the legacy flow uses.
         try:
-            async with httpx.AsyncClient(timeout=10) as cli:
-                resp = await cli.get(f"{cdp_endpoint}/json/version")
-                ws_url = resp.json().get("webSocketDebuggerUrl", "")
-            if not ws_url:
-                return None
-            host = cdp_endpoint.replace("http://", "").rstrip("/")
-            ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+            ws_url, _ = await _cdp_discover(cdp_endpoint)
         except Exception as exc:  # noqa: BLE001
             self._log(tag, f"CDP discovery error: {exc}")
             return None
@@ -996,20 +1018,10 @@ class GrokProvider(Provider):
         cdp_endpoint = info["cdp_endpoint"]  # e.g. http://grokflow-vnc-xxx:9223
         prompt_text = self._compose_prompt(job)
 
-        # Chrome's /json/version returns wsEndpoint with Host we sent (localhost:9222
-        # because nginx proxy rewrites Host to satisfy Chrome). Playwright would try
-        # to connect to that literal URL and fail (ECONNREFUSED). Fetch + rewrite
-        # the ws URL to point at our reverse proxy host:port.
+        # _cdp_discover retries up to 4× with 500ms backoff to ride out
+        # transient empty-body / 5xx responses from a busy Chromium.
         try:
-            async with httpx.AsyncClient(timeout=10) as c:
-                resp = await c.get(f"{cdp_endpoint}/json/version")
-                ws_url = resp.json().get("webSocketDebuggerUrl", "")
-            if not ws_url:
-                return JobResult(success=False, error_code="browser_crashed",
-                                 error_message="No wsEndpoint from /json/version", retryable=True)
-            # ws://localhost:9222/devtools/browser/<id> → ws://<container>:9223/devtools/browser/<id>
-            host = cdp_endpoint.replace("http://", "").rstrip("/")
-            ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+            ws_url, _ = await _cdp_discover(cdp_endpoint)
         except Exception as exc:  # noqa: BLE001
             return JobResult(success=False, error_code="network_error",
                              error_message=f"CDP discovery: {exc}", retryable=True)
