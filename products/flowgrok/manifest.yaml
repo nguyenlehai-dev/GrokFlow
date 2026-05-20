@@ -170,10 +170,14 @@ patches:
     replace: "# Gateway models dropped from flowgrok."
 
   # flowgrok has no FlowJob model — replace the Flow video-tools section
-  # of the dashboard with an empty list. Same trick as Gateway above.
+  # of the dashboard with an empty list. Same trick as Gateway below.
   - file: backend/app/modules/admin/dashboard/router.py
     regex_find: '    # -+ Flow video tools.*?flow_items = \[.*?\]'
     regex_replace: '    flow_items: list[AppItem] = []  # FlowJob dropped from flowgrok'
+
+  - file: backend/app/modules/admin/dashboard/router.py
+    regex_find: '    # -+ Gateway LLM.*?gw_items = \[.*?\]'
+    regex_replace: '    gw_items: list[AppItem] = []  # Gateway dropped from flowgrok'
 
   - file: frontend/src/components/layout/AppShell.tsx
     regex_find: 'import \{ useQuery \}.*?\n'

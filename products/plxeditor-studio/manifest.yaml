@@ -141,26 +141,13 @@ patches:
 
   - file: backend/app/modules/admin/gallery/router.py
     find: "from app.models.gateway import GwRequest, GwVendor"
-    replace: "GwRequest = None  # type: ignore[assignment]\nGwVendor = None   # type: ignore[assignment]"
+    replace: "# Gateway models dropped from plxeditor-studio"
 
-  # Replace gallery /gateway endpoint body — always returns empty since
-  # plxeditor-studio doesn't ship the gateway product.
+  # /gateway endpoint body stub. Anchor by the known query prefix +
+  # final return statement.
   - file: backend/app/modules/admin/gallery/router.py
-    regex_find: '@router\.get\("/gateway", response_model=GatewayGalleryPage\)\nasync def list_gateway_gallery\([^)]*\) -> GatewayGalleryPage:\n.*?return GatewayGalleryPage[^)]*\)'
-    regex_replace: |
-      @router.get("/gateway", response_model=GatewayGalleryPage)
-      async def list_gateway_gallery(
-          user: CurrentUser, db: DbSession,
-          vendor_code: str | None = Query(default=None),
-          function_code: str | None = Query(default=None),
-          domain_id: uuid.UUID | None = Query(default=None),
-          date_from: datetime | None = Query(default=None),
-          date_to: datetime | None = Query(default=None),
-          offset: int = Query(default=0, ge=0),
-          limit: int = Query(default=30, ge=1, le=100),
-      ) -> GatewayGalleryPage:
-          # plxeditor-studio doesn't ship the gateway product — always empty.
-          return GatewayGalleryPage(items=[], total=0, offset=offset, limit=limit)
+    regex_find: '    base = \(\n        select\(GwRequest, GwVendor, Domain\).*?return GatewayGalleryPage\(items=items, total=int\(total\), offset=offset, limit=limit\)'
+    regex_replace: '    return GatewayGalleryPage(items=[], total=0, offset=offset, limit=limit)'
 
   # plxeditor-studio has FlowJob + Job but NOT GwRequest/GwVendor —
   # replace the Gateway section in the dashboard with an empty list.
