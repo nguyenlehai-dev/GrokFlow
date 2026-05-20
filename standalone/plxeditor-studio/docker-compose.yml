@@ -65,6 +65,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
+    ports:
+      - "${BACKEND_HOST_PORT:-8000}:8000"
     volumes:
       - storage_data:/app/storage
       - ./browser_profiles:/app/browser_profiles
