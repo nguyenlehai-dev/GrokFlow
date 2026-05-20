@@ -92,11 +92,9 @@ def _load_modules() -> list[ModuleManifest]:
     from app.modules.admin.audit import manifest as audit
     from app.modules.admin.dashboard import manifest as dashboard
     from app.modules.admin.domains import manifest as domains
-    from app.modules.admin.gallery import manifest as gallery
     from app.modules.admin.notifications import manifest as notifications
     from app.modules.admin.roles import manifest as roles
     from app.modules.admin.settings import manifest as settings
-    from app.modules.admin.tools import manifest as admin_tools
     from app.modules.grok.files import manifest as grok_files
     from app.modules.grok.jobs import manifest as grok_jobs
     from app.modules.grok.profiles import manifest as grok_profiles
@@ -113,8 +111,8 @@ def _load_modules() -> list[ModuleManifest]:
         # Grok product (profiles / jobs / files)
         grok_profiles, grok_jobs, grok_files, grok_projects,
         # Admin & back-office
-        admin, dashboard, audit, gallery, notifications,
-        domains, roles, settings, admin_tools,
+        admin, dashboard, audit, notifications,
+        domains, roles, settings,
         # Partner-facing & landing
         billing, plans_public, public_v1, client_api,
     ]

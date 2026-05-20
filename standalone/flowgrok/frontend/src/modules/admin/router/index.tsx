@@ -49,9 +49,10 @@ export const moduleManifest: FrontendModule = {
     { path: "admin/domains",   element: lazyPage(() => import("../views/AdminDomainsPage"), "AdminDomainsPage") },
     { path: "admin/tool-installs", element: lazyPage(() => import("../views/AdminToolInstallsPage"), "AdminToolInstallsPage") },
     { path: "admin/login-templates", element: lazyPage(() => import("../views/AdminLoginTemplatesPage"), "AdminLoginTemplatesPage") },
-    { path: "admin/git",       element: lazyPage(() => import("../views/AdminGitPage"), "AdminGitPage") },
-    { path: "admin/modules",         element: lazyPage(() => import("../views/AdminModulesPage"), "AdminModulesPage") },
-    { path: "admin/modules/:slug",   element: lazyPage(() => import("../views/AdminModuleIframePage"), "AdminModuleIframePage") },
+    // git / modules / module-iframe pages dropped — depended on host-SSH
+    // + Module Marketplace stack that doesn't apply to a single-tenant
+    // flowgrok deploy. Restore from the monorepo if a customer wants
+    // self-hosted plugins later.
     { path: "admin/legacy",          element: lazyPage(() => import("../views/AdminPage"), "AdminPage") },
   ],
   nav: [

@@ -22,7 +22,7 @@ import uuid
 
 from app.core.deps import AdminUser, CurrentUser, DbSession
 from app.models import (
-    ApiKey, Domain, FlowJob, GwRequest, GwVendor, Job, Payment, Profile, User,
+    ApiKey, Domain, Job, Payment, Profile, User,
 )
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -39,7 +39,7 @@ class AppGroup(BaseModel):
     # Codes match Lucide icons on the FE side. New 'flow' + 'gateway' rows
     # reflect the project's two non-Grok feature areas; without them the
     # dashboard was Grok-only despite Flow + Gateway being live in prod.
-    code: Literal["image", "video", "flow", "gateway", "mini_app"]
+    code: Literal["image", "video", "mini_app"]
     label: str
     items: list[AppItem]
     total: int = 0   # convenience sum so FE doesn't re-iterate
@@ -274,58 +274,8 @@ async def _build(
     ]
     miniapps.sort(key=lambda x: x.count, reverse=True)
 
-    # ------------------ Flow video tools (per-operation breakdown) ------------------
-    flow_filters = [] if is_admin else [FlowJob.user_id == user_id]
-    if bound is not None:
-        flow_filters.append(FlowJob.created_at >= bound)
-    if domain_user_ids is not None:
-        flow_filters.append(FlowJob.user_id.in_(domain_user_ids))
-    flow_q = (
-        select(FlowJob.operation, func.count(FlowJob.id))
-        .where(*flow_filters)
-        .group_by(FlowJob.operation)
-    )
-    flow_items_raw = (await db.execute(flow_q)).all()
-    # Pretty labels for the FE — slug → user-facing name.
-    FLOW_LABEL = {
-        "cut": "Cut Video", "merge": "Merge Videos",
-        "extract-audio": "Extract Audio", "add-audio": "Merge/Replace Audio",
-        "speed": "Change Speed", "resize": "Resize",
-        "crop": "Crop Video", "extract-frames": "Extract Frames",
-    }
-    flow_items = [
-        AppItem(name=FLOW_LABEL.get(op, op or "unknown"), count=int(n or 0))
-        for op, n in flow_items_raw if n
-    ]
-
-    # ------------------ Gateway LLM (per-vendor breakdown) ------------------
-    gw_filters = []
-    if bound is not None:
-        gw_filters.append(GwRequest.created_at >= bound)
-    if is_admin:
-        # Gateway requests carry their own domain_id (copied from the gateway
-        # key at request time) — filter directly without a JOIN.
-        if domain_filter is not None:
-            gw_filters.append(GwRequest.domain_id == domain_filter)
-    else:
-        # Customer view: no per-user gateway scope yet (gateway is admin-only
-        # surface). Return empty for /me to avoid leaking other tenants.
-        gw_filters.append(GwRequest.id == None)  # noqa: E711  — force-empty
-    gw_q = (
-        select(GwVendor.name, func.count(GwRequest.id))
-        .select_from(GwRequest)
-        .outerjoin(GwVendor, GwVendor.id == GwRequest.vendor_id)
-        .where(*gw_filters)
-        .group_by(GwVendor.id, GwVendor.name)
-    )
-    try:
-        gw_rows = (await db.execute(gw_q)).all()
-    except Exception:
-        gw_rows = []
-    gw_items = [
-        AppItem(name=name or "Unknown vendor", count=int(n or 0))
-        for name, n in gw_rows if n
-    ]
+    # flowgrok standalone: Flow + Gateway groups dropped (those products
+    # live in their own standalone repos). Keep only image/video/mini_app.
 
     def _grp(code, label, items):
         sorted_items = sorted(items, key=lambda x: x.count, reverse=True)
@@ -339,8 +289,6 @@ async def _build(
              [AppItem(name=k, count=v) for k, v in image_apps.items()]),
         _grp("video", "Video (Grok)",
              [AppItem(name=k, count=v) for k, v in video_apps.items()]),
-        _grp("flow", "Flow Tools (FFmpeg)", flow_items),
-        _grp("gateway", "Gateway LLM", gw_items),
         _grp("mini_app", "API Keys (integrations)", miniapps),
     ]
 

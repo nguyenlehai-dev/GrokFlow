@@ -1,41 +1,25 @@
-"""SQLAlchemy model registry.
+"""SQLAlchemy model registry — flowgrok standalone.
 
-Phase 3 of the BE reorg split the original 765-LOC `models/__init__.py`
-into per-domain files:
+Keeps the FULL set of models from the GrokFlow monorepo even though
+this product's surface only uses the Grok subset. Reason: the
+existing multi-tenant code (domain quotas, tool-install scoping,
+admin module marketplace) references these tables via FK joins. We
+keep the schema so migrations + cross-table queries don't break,
+but skip the corresponding admin UI and worker logic that exposes
+them. The standalone customer will never see Flow/Gateway/Tool
+features but their tables stay empty.
 
-  _base.py    — shared infra (Base, TimestampMixin, JSONType, UUIDType)
-  auth.py     — User, ApiKey
-  billing.py  — Plan, Subscription, Payment, Invoice
-  admin.py    — Domain, Role, AuditLog, Notification, GitRepo
-  grok.py     — Profile, GrokProject, ProjectUserAssignment,
-                ProjectDomainAssignment, Job, JobLog, File
-  flow.py     — FlowJob
-  gateway.py  — GwVendor, GwApiFunction, GwPool, GwPoolApiKey,
-                GwGatewayKey, GwRequest
-
-This file is the public surface — `from app.models import User` still
-works. It also guarantees every model gets imported (so SQLAlchemy's
-`Base.metadata` is fully populated before alembic introspects it).
-
-When adding a new model, drop it into the appropriate per-domain file
-and add it to that file's local namespace; this `__init__` re-export
-list is the only place that needs updating to expose it package-wide.
+If you're packaging a stricter product (no idle tables), the
+follow-up step is to refactor the references in
+`app/services/domain_quota.py` + `app/modules/grok/{jobs,projects}`
+to make ToolInstall lookups optional.
 """
 
 from ._base import Base, JSONType, TimestampMixin, UUIDType, _uuid
 
-from .admin import AdminModule, AuditLog, Domain, DomainQuotaPeriod, GitRepo, Notification, Role, TenantModule
+from .admin import AuditLog, Domain, DomainQuotaPeriod, Notification, Role
 from .auth import ApiKey, User
 from .billing import Invoice, Payment, Plan, Subscription
-from .flow import FlowJob
-from .gateway import (
-    GwApiFunction,
-    GwGatewayKey,
-    GwPool,
-    GwPoolApiKey,
-    GwRequest,
-    GwVendor,
-)
 from .grok import (
     File,
     GrokProject,
@@ -46,39 +30,21 @@ from .grok import (
     ProjectToolInstallAssignment,
     ProjectUserAssignment,
 )
-from .servers import (
-    Server,
-    ServerAlert,
-    ServerBackupHistory,
-    ServerMetricHistory,
-    ServerRebootHistory,
-)
-from .tool import ChatSession, PromptTemplate
-from .tool_distribution import Tool, ToolAsset
 from .tool_install import ToolInstall, ToolInstallQuotaPeriod
 
 __all__ = [
     # Infrastructure
     "Base", "JSONType", "TimestampMixin", "UUIDType", "_uuid",
     # Admin / tenancy
-    "AdminModule", "AuditLog", "Domain", "DomainQuotaPeriod", "GitRepo", "Notification", "Role", "TenantModule",
+    "AuditLog", "Domain", "DomainQuotaPeriod", "Notification", "Role",
     # Auth
     "ApiKey", "User",
     # Billing
     "Invoice", "Payment", "Plan", "Subscription",
-    # Flow
-    "FlowJob",
-    # Gateway
-    "GwApiFunction", "GwGatewayKey", "GwPool", "GwPoolApiKey", "GwRequest", "GwVendor",
     # Grok
     "File", "GrokProject", "Job", "JobLog", "Profile",
-    "ProjectDomainAssignment", "ProjectToolInstallAssignment", "ProjectUserAssignment",
-    # Servers + monitoring
-    "Server", "ServerAlert", "ServerBackupHistory", "ServerMetricHistory", "ServerRebootHistory",
-    # Tool module
-    "ChatSession", "PromptTemplate",
-    # Tool distribution (admin-uploaded installer files + docs)
-    "Tool", "ToolAsset",
-    # Tool installs (desktop client registrations)
+    "ProjectDomainAssignment", "ProjectToolInstallAssignment",
+    "ProjectUserAssignment",
+    # Tool-install (FK target for tenant scoping — UI hidden)
     "ToolInstall", "ToolInstallQuotaPeriod",
 ]
