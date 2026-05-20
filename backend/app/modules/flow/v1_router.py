@@ -48,7 +48,12 @@ from fastapi import (
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from fastapi.responses import FileResponse
+from jose import JWTError, jwt
+
+from app.core.config import settings
 from app.core.deps import ApiKeyPrincipal, DbSession
+from app.core.security import create_short_token
 from app.models import FlowJob
 from app.modules.admin.audit import service as audit
 
@@ -372,6 +377,256 @@ async def get_job(
         has_audio=None,
         output_duration=float(job.duration) if job.duration is not None else None,
     )
+
+
+# ---------------------------------------------------------------- aliases + chunked-upload
+
+@router.get("/status/{job_id}", response_model=V1JobOut)
+async def get_status(
+    job_id: uuid.UUID,
+    principal: ApiKeyPrincipal,
+    db: DbSession,
+) -> V1JobOut:
+    """Alias for /jobs/{job_id} — matches plxeditor.com's separate status surface."""
+    return await get_job(job_id, principal, db)
+
+
+@router.post("/jobs/{job_id}/retry", response_model=V1JobOut)
+async def retry_job(
+    job_id: uuid.UUID,
+    principal: ApiKeyPrincipal,
+    db: DbSession,
+    background: BackgroundTasks,
+) -> V1JobOut:
+    """Re-spawn the background processor for a failed/completed job with
+    the same params. Mirrors /api/flow/jobs/{id}/retry (v0) under the
+    public v1 namespace."""
+    _, user = principal
+    job = await service.get_user_job(db, user.id, job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    params = dict(job.params or {})
+    job.status = "pending"
+    job.progress = Decimal("0")
+    job.error_message = None
+    job.output_url = None
+    job.output_filename = None
+    job.file_size = None
+    job.duration = None
+    job.started_at = None
+    job.completed_at = None
+    await audit.log_action(
+        db, user_id=user.id, action="flow_v1_retry",
+        target_type="flow_job", target_id=job.id,
+        metadata={"tool": job.operation},
+    )
+    await db.commit()
+    await db.refresh(job)
+    _spawn_task(background, job.operation, job.id, params)
+    return _to_v1(job, message="Retrying job.")
+
+
+@router.get("/download/{filename}")
+async def download_output(filename: str, token: str | None = Query(default=None)) -> FileResponse:
+    """Download a Flow output file. The output filename is itself an
+    unguessable artefact key (`output/<job_id>_<op>_<rand>.mp4`) — token
+    is accepted as belt-and-suspenders but not required if you already
+    know the filename.
+
+    Mirrors plxeditor.com's /api/v1/video/download/{filename}.
+    """
+    # service.output_file_path handles traversal sanity (rejects anything
+    # without the <uuid>_<orig> naming convention).
+    output_path = service.output_file_path(filename)
+    if output_path is None:
+        raise HTTPException(404, "file not found")
+    # Token validation is optional (filename already secret) but accepted
+    # for clients that want explicit auth check.
+    if token:
+        try:
+            jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        except JWTError:
+            raise HTTPException(401, "invalid token")
+    return FileResponse(
+        output_path,
+        filename=filename,
+        media_type="application/octet-stream",
+    )
+
+
+class JobsInitIn(BaseModel):
+    tool_name: str
+    filenames: list[str]
+
+
+class JobsInitOut(BaseModel):
+    job_id: uuid.UUID
+    upload_urls: list[str]
+    object_keys: list[str]
+
+
+def _make_upload_token(job_id: uuid.UUID, input_index: int) -> str:
+    """Per-input upload token. Short-lived (60min) so a leaked URL
+    can't be used to overwrite the input forever."""
+    return create_short_token(
+        subject=f"flow_upload:{job_id}:{input_index}",
+        extra={
+            "scope": "flow_upload",
+            "job_id": str(job_id),
+            "input_index": input_index,
+        },
+        minutes=60,
+    )
+
+
+def _validate_upload_token(token: str, job_id: uuid.UUID, input_index: int) -> bool:
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    except JWTError:
+        return False
+    return (
+        payload.get("scope") == "flow_upload"
+        and payload.get("job_id") == str(job_id)
+        and payload.get("input_index") == input_index
+    )
+
+
+@router.post("/jobs/init", response_model=JobsInitOut)
+async def init_job(
+    payload: JobsInitIn,
+    principal: ApiKeyPrincipal,
+    db: DbSession,
+) -> JobsInitOut:
+    """Pre-create an empty job + return per-input upload URLs. Use for
+    chunked / parallel uploads (large files, multiple inputs) — clients
+    then PUT each file to /upload/{index}, optionally poll progress, and
+    finally trigger processing via the op endpoint with job_id."""
+    _, user = principal
+    if payload.tool_name not in KNOWN_TOOLS:
+        raise HTTPException(400, f"unknown tool: {payload.tool_name}")
+    if not payload.filenames:
+        raise HTTPException(400, "filenames is required")
+
+    job_id = uuid.uuid4()
+    input_files: list[dict] = []
+    for i, fname in enumerate(payload.filenames):
+        safe = _sanitize_filename(fname or f"input_{i}")
+        input_files.append({
+            "filename": safe,
+            "object_key": f"{job_id}/{safe}",
+            "uploaded": False,
+        })
+    # Pre-allocate dest dir so /upload/{idx} can write into it
+    service.input_dir(job_id)
+    job = FlowJob(
+        id=job_id,
+        user_id=user.id,
+        operation=payload.tool_name,
+        status="uploading",
+        progress=Decimal("0"),
+        input_files=input_files,
+    )
+    db.add(job)
+    await audit.log_action(
+        db, user_id=user.id, action="flow_v1_init",
+        target_type="flow_job", target_id=job_id,
+        metadata={"tool": payload.tool_name, "files": len(input_files)},
+    )
+    await db.commit()
+
+    base = "/api/v1/video"
+    upload_urls = [
+        f"{base}/jobs/{job_id}/upload/{i}?token={_make_upload_token(job_id, i)}"
+        for i in range(len(payload.filenames))
+    ]
+    return JobsInitOut(
+        job_id=job_id,
+        upload_urls=upload_urls,
+        object_keys=[f["object_key"] for f in input_files],
+    )
+
+
+@router.put("/jobs/{job_id}/upload/{input_index}", response_model=V1JobOut)
+async def upload_input(
+    job_id: uuid.UUID,
+    input_index: int,
+    db: DbSession,
+    file: UploadFile = File(...),
+    token: str = Query(...),
+) -> V1JobOut:
+    """Upload a single input file to a pre-init'd job. Auth via per-input
+    token (returned by /jobs/init) — does NOT require X-API-Key so the
+    client can fan-out PUTs from a worker / browser without leaking the
+    main key.
+    """
+    if not _validate_upload_token(token, job_id, input_index):
+        raise HTTPException(401, "invalid upload token")
+    job = (await db.execute(
+        select(FlowJob).where(FlowJob.id == job_id)
+    )).scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, "job not found")
+    if input_index >= len(job.input_files or []):
+        raise HTTPException(400, "input_index out of range")
+
+    slot = job.input_files[input_index]
+    dest = service.input_dir(job_id) / slot["filename"]
+    with dest.open("wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            out.write(chunk)
+
+    # Mark slot uploaded — replace whole list so SQLAlchemy detects JSON change
+    new_inputs = list(job.input_files)
+    new_inputs[input_index] = {**slot, "uploaded": True}
+    job.input_files = new_inputs
+    if all(s.get("uploaded") for s in new_inputs):
+        job.status = "pending"  # client can now trigger processing
+    await db.commit()
+    await db.refresh(job)
+    return _to_v1(job, message=f"input {input_index} uploaded")
+
+
+class UploadProgressIn(BaseModel):
+    progress: int
+
+
+@router.get("/jobs/{job_id}/upload-progress")
+async def get_upload_progress(
+    job_id: uuid.UUID,
+    principal: ApiKeyPrincipal,
+    db: DbSession,
+) -> dict:
+    """Aggregate progress across all input slots — % of slots that have
+    been marked uploaded. Returns 100 when all uploads are done and the
+    job is ready for processing."""
+    _, user = principal
+    job = await service.get_user_job(db, user.id, job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    inputs = job.input_files or []
+    if not inputs:
+        return {"job_id": str(job_id), "progress": 0}
+    uploaded = sum(1 for s in inputs if s.get("uploaded"))
+    return {"job_id": str(job_id), "progress": int(uploaded * 100 / len(inputs))}
+
+
+@router.put("/jobs/{job_id}/upload-progress")
+async def set_upload_progress(
+    job_id: uuid.UUID,
+    payload: UploadProgressIn,
+    principal: ApiKeyPrincipal,
+    db: DbSession,
+) -> dict:
+    """Client-reported progress hint. Stored on FlowJob.progress so the
+    /jobs list reflects current upload state for big files where the
+    server-side `uploaded` flag only flips when a slot finishes."""
+    _, user = principal
+    job = await service.get_user_job(db, user.id, job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    job.progress = Decimal(str(max(0, min(100, payload.progress))))
+    await db.commit()
+    return {"job_id": str(job_id), "progress": payload.progress}
 
 
 @router.get("/jobs", response_model=list[V1JobListItem])
