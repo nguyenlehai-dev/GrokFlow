@@ -143,6 +143,7 @@ module_registry:
     - app.modules.admin
     - app.modules.admin.dashboard
     - app.modules.admin.audit
+    - app.modules.admin.gallery
     - app.modules.admin.notifications
     - app.modules.admin.domains
     - app.modules.admin.roles
