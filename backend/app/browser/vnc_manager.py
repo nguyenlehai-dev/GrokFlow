@@ -165,14 +165,34 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         environment={
             "STARTUP_URL": provider_url,
             "TZ": "Asia/Ho_Chi_Minh",
-            # Propagate the host's GROK_HTTP_PROXY (typically a Cloudflare
-            # WARP SOCKS endpoint set up by deploy/install_warp_proxy.sh)
-            # so chromium inside the VNC container routes its traffic
-            # through it. Empty/unset = direct connection.
+            # Proxy strategy for the spawned VNC's Chromium:
+            #
+            # Default (no env override): the kasmweb base image runs
+            # `warp-svc` via supervisord, baking GROK_HTTP_PROXY=
+            # socks5://127.0.0.1:40000 into the container so Chromium
+            # routes through Cloudflare WARP. In practice WARP exits are
+            # 104.x.x.x/172.x.x.x IPs which Grok now 403-blocks +
+            # bursty connections through warp-svc see
+            # ERR_PROXY_CONNECTION_FAILED in Chromium.
+            #
+            # 2 escape hatches via backend env:
+            #
+            #   GROK_VNC_DISABLE_PROXY=1 — explicitly set
+            #     GROK_HTTP_PROXY="" inside the container so Chromium
+            #     bypasses the image-baked default and uses the VPS's
+            #     direct IP. Best when VPS IP isn't yet Grok-flagged.
+            #
+            #   GROK_HTTP_PROXY=<scheme>://… — pass any other proxy URL
+            #     (residential / mobile) the operator stood up. Wins
+            #     over both the image default and the disable flag.
             **(
                 {"GROK_HTTP_PROXY": os.environ["GROK_HTTP_PROXY"]}
                 if os.environ.get("GROK_HTTP_PROXY")
-                else {}
+                else (
+                    {"GROK_HTTP_PROXY": ""}
+                    if os.environ.get("GROK_VNC_DISABLE_PROXY") == "1"
+                    else {}
+                )
             ),
         },
         volumes={
