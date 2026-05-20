@@ -225,6 +225,16 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         devices=["/dev/net/tun:/dev/net/tun:rwm"],
     )
 
+    # Diagnostic: log the env dict actually being handed to docker-py so we
+    # can see whether the WARP-disable / custom-proxy override is winning
+    # the merge. Kept lightweight — only logs the proxy-relevant keys.
+    print(
+        f"[vnc] spawn name={name} env_proxy={run_kwargs['environment'].get('GROK_HTTP_PROXY', '<unset>')} "
+        f"(backend GROK_HTTP_PROXY={os.environ.get('GROK_HTTP_PROXY', '<unset>')}, "
+        f"GROK_VNC_DISABLE_PROXY={os.environ.get('GROK_VNC_DISABLE_PROXY', '<unset>')})",
+        flush=True,
+    )
+
     # 409 on create means a container with that name already exists. With
     # the per-profile lock this should be rare — but pre-cleanup can race
     # with `removing` state. Strategy: re-fetch the container; if it's
