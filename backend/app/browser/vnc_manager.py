@@ -189,7 +189,12 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
                 {"GROK_HTTP_PROXY": os.environ["GROK_HTTP_PROXY"]}
                 if os.environ.get("GROK_HTTP_PROXY")
                 else (
-                    {"GROK_HTTP_PROXY": ""}
+                    # 'direct://' is the Chromium syntax for "no proxy".
+                    # The image's /launch-chromium.sh tests `[[ -n "$GROK_HTTP_PROXY" ]]`
+                    # so passing "" falls through to the WARP fallback (bug).
+                    # A non-empty 'direct://' wins the test and Chromium
+                    # interprets the flag as bypass.
+                    {"GROK_HTTP_PROXY": "direct://"}
                     if os.environ.get("GROK_VNC_DISABLE_PROXY") == "1"
                     else {}
                 )
