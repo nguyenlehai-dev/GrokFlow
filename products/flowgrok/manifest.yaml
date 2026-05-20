@@ -170,6 +170,19 @@ patches:
     find: "from app.models.gateway import GwRequest, GwVendor"
     replace: "# Gateway models dropped from flowgrok."
 
+  - file: backend/app/modules/admin/gallery/router.py
+    find: "from app.models import Domain, FlowJob, Job, Profile, User"
+    replace: "from app.models import Domain, Job, Profile, User\nFlowJob = None  # type: ignore[assignment]"
+
+  # /flow gallery endpoint queries FlowJob — stub it to empty for flowgrok.
+  - file: backend/app/modules/admin/gallery/router.py
+    regex_find: '    base = select\(FlowJob.*?return FlowGalleryPage\(items=items, total=int\(total\), offset=offset, limit=limit\)'
+    regex_replace: '    return FlowGalleryPage(items=[], total=0, offset=offset, limit=limit)'
+
+  - file: backend/app/modules/admin/gallery/router.py
+    regex_find: '    base = \(\n        select\(GwRequest, GwVendor, Domain\).*?return GatewayGalleryPage\(items=items, total=int\(total\), offset=offset, limit=limit\)'
+    regex_replace: '    return GatewayGalleryPage(items=[], total=0, offset=offset, limit=limit)'
+
   # flowgrok has no FlowJob model — replace the Flow video-tools section
   # of the dashboard with an empty list. Same trick as Gateway below.
   - file: backend/app/modules/admin/dashboard/router.py
