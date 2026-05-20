@@ -1,0 +1,7 @@
+@layer utilities {
+  .skeleton {
+    @apply bg-slate-100 rounded animate-shimmer;
+    background-image: linear-gradient(90deg, #1e293b 0%, #334155 50%, #1e293b 100%);
+    background-size: 200% 100%;
+  }
+}

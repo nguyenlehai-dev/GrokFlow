@@ -1,0 +1,23 @@
+@use "abstracts/variables";
+@use "abstracts/mixins";
+@use "base/typography";
+@use "base/reset";
+@use "components/buttons";
+@use "components/inputs";
+@use "components/cards";
+@use "components/badges";
+@use "components/tables";
+@use "components/alerts";
+@use "components/page";
+@use "components/albums";
+@use "utilities/gradients";
+@use "utilities/glass";
+@use "utilities/skeleton";
+@use "utilities/tabs";
+@use "utilities/equalizer";
+@use "utilities/tool";
+@use "utilities/create_video_pro";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

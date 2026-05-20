@@ -100,6 +100,9 @@ FRONTEND_KEEP = [
     "index.html",
     "nginx.conf",
     "Dockerfile.prod",
+    "src/main.tsx",
+    "src/vite-env.d.ts",
+    "src/assets",
     "src/core",
     "src/app",
     "src/components",
@@ -107,6 +110,7 @@ FRONTEND_KEEP = [
     "src/modules/admin",
     "src/modules/grok",
     "src/modules/landing",
+    "helper",
 ]
 
 # Skip patterns — drop from the matches above too
