@@ -162,15 +162,8 @@ module_registry:
 # routers also reference FlowJob / Gw* — strip those at export time.
 patches:
   - file: backend/app/modules/admin/dashboard/router.py
-    find: |
-      from app.models import (
-          ApiKey, Domain, FlowJob, GwRequest, GwVendor, Job, Payment, Profile, User,
-      )
-    replace: |
-      from app.models import ApiKey, Domain, Job, Payment, Profile, User
-      FlowJob = None    # type: ignore[assignment]
-      GwRequest = None  # type: ignore[assignment]
-      GwVendor = None   # type: ignore[assignment]
+    regex_find: 'from app\.models import \(\n    ApiKey, Domain, FlowJob, GwRequest, GwVendor, Job, Payment, Profile, User,\n\)'
+    regex_replace: "from app.models import ApiKey, Domain, Job, Payment, Profile, User\nFlowJob = None    # type: ignore[assignment]\nGwRequest = None  # type: ignore[assignment]\nGwVendor = None   # type: ignore[assignment]"
 
   - file: backend/app/modules/admin/gallery/router.py
     find: "from app.models.gateway import GwRequest, GwVendor"

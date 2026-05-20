@@ -133,24 +133,12 @@ module_registry:
 # GwRequest instead of Job/Profile.
 patches:
   - file: backend/app/models/auth.py
-    find: |
-      api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-      profiles: Mapped[list["Profile"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
-      jobs: Mapped[list["Job"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
-    replace: |
-      api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-      # ai-gateway: User has no Grok profiles/jobs — those models live in
-      # flowgrok / plxeditor-studio. Restore from monorepo if needed.
+    regex_find: '    profiles: Mapped\[list\["Profile"\]\] = relationship.*?\n    jobs: Mapped\[list\["Job"\]\] = relationship.*?\n'
+    regex_replace: "    # ai-gateway: User has no Grok profiles/jobs — those\n    # models live in flowgrok / plxeditor-studio.\n"
 
   - file: backend/app/modules/entitlements/service.py
-    find: |
-      from app.models import Job, Plan, Subscription, User
-    replace: |
-      from app.models import Plan, Subscription, User
-      try:
-          from app.models import Job  # type: ignore[attr-defined]
-      except ImportError:
-          Job = None  # type: ignore[assignment]
+    find: "from app.models import Job, Plan, Subscription, User"
+    replace: "from app.models import Plan, Subscription, User"
 
   - file: frontend/src/components/layout/AppShell.tsx
     regex_find: 'import \{ useQuery \}.*?\n'
