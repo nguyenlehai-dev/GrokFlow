@@ -42,11 +42,20 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
         return None
 
 
-def generate_api_key() -> tuple[str, str, str]:
-    """Return (full_key, prefix, hash). Full key is shown once to the user."""
+def generate_api_key(prefix_override: str | None = None) -> tuple[str, str, str]:
+    """Return (full_key, prefix, hash). Full key is shown once to the user.
+
+    Default prefix is `settings.API_KEY_PREFIX` (`uxpm_live`). Pass
+    `prefix_override="gg"` (or any short string) to mint a legacy-style
+    `gg_xxxxxx` key — useful when a customer's integration was built
+    against an external service that used a different prefix. Auth still
+    works regardless of prefix because validation hashes the FULL key,
+    not the prefix portion.
+    """
+    prefix_root = prefix_override or settings.API_KEY_PREFIX
     raw = secrets.token_urlsafe(32)
-    full = f"{settings.API_KEY_PREFIX}_{raw}"
-    prefix = full[: len(settings.API_KEY_PREFIX) + 9]  # prefix + "_" + 8 chars
+    full = f"{prefix_root}_{raw}"
+    prefix = full[: len(prefix_root) + 9]  # prefix + "_" + 8 chars
     key_hash = sha256(full.encode()).hexdigest()
     return full, prefix, key_hash
 

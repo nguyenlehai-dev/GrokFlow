@@ -124,7 +124,7 @@ async def create_key(payload: ApiKeyCreate, user: CurrentUser, db: DbSession) ->
     if invalid_j:
         raise InvalidPayload(f"Unknown job_types: {invalid_j}")
 
-    full_key, prefix, key_hash = generate_api_key()
+    full_key, prefix, key_hash = generate_api_key(prefix_override=payload.key_prefix or None)
     api_key = ApiKey(
         user_id=user.id,
         name=payload.name,
