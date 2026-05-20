@@ -520,7 +520,16 @@ async def get_task_status(
 # ─────────────────────────────────────────────────────────────────────
 
 def _job_to_full(job: Job, files: list[File], request: Request) -> ClientTaskFullOut:
-    """Map internal Job + Files to the legacy ClientTaskFullOut shape."""
+    """Map internal Job + Files to the legacy ClientTaskFullOut shape.
+
+    Job storage shape (from job_service.create_job):
+      - job.prompt (column)            ← prompt text
+      - job.input_payload (JSON)       ← options dict: ratio/quality/duration/...
+                                          + optionally negative_prompt,
+                                          reference_images, video_mode, image_mode
+    Legacy ClientTaskFullOut wants both fields split out, plus a
+    provider_payload mirroring what was sent to Grok.
+    """
     base_url = _base_url(request)
     image_urls, video_urls = _collect_media_urls(
         files, target=job.job_type,
@@ -529,27 +538,38 @@ def _job_to_full(job: Job, files: list[File], request: Request) -> ClientTaskFul
     )
     media_urls = (video_urls or []) + (image_urls or [])
 
-    payload = job.input_payload or {}
+    opts = job.input_payload or {}
+    # Infer image_mode / video_mode if the original request specified it
+    # via provider_payload override OR a reference_images list.
+    has_reference = bool(opts.get("reference_images"))
+    inferred_image_mode = (
+        opts.get("image_mode")
+        or ("image_to_image" if has_reference and job.job_type == "image" else "text_to_image" if job.job_type == "image" else None)
+    )
+    inferred_video_mode = (
+        opts.get("video_mode")
+        or ("image_to_video" if has_reference and job.job_type == "video" else "text_to_video" if job.job_type == "video" else None)
+    )
+
     provider_payload = {
-        "video_mode": payload.get("video_mode"),
-        "image_mode": payload.get("image_mode"),
-        "aspect_ratio": payload.get("ratio"),
-        "quality": payload.get("quality"),
-        "duration": payload.get("duration"),
-        "source_asset_path": (payload.get("reference_images") or [None])[0],
+        "video_mode": inferred_video_mode,
+        "image_mode": inferred_image_mode,
+        "aspect_ratio": opts.get("ratio"),
+        "quality": opts.get("quality"),
+        "duration": opts.get("duration"),
+        "source_asset_path": (opts.get("reference_images") or [None])[0],
     }
-    # Strip None for cleanness
     provider_payload = {k: v for k, v in provider_payload.items() if v is not None}
 
     result_payload: dict[str, Any] | None = None
     if job.status == "success" and media_urls:
         result_payload = {
             "target": job.job_type,
-            "image_mode": payload.get("image_mode"),
-            "video_mode": payload.get("video_mode"),
+            "image_mode": inferred_image_mode,
+            "video_mode": inferred_video_mode,
             "media_urls": media_urls,
-            "applied_options": payload.get("applied_options") or {},
-            "unapplied_options": payload.get("unapplied_options") or {},
+            "applied_options": opts.get("applied_options") or {},
+            "unapplied_options": opts.get("unapplied_options") or {},
             "provider": job.provider or "grok",
             "page_url": f"https://grok.com/{'video' if job.job_type=='video' else 'imagine'}",
             "used_live_browser": True,
@@ -562,8 +582,8 @@ def _job_to_full(job: Job, files: list[File], request: Request) -> ClientTaskFul
         profile_id=job.profile_id,
         target=job.job_type,
         status=job.status,
-        prompt=payload.get("prompt") or "",
-        negative_prompt=payload.get("negative_prompt"),
+        prompt=job.prompt or "",
+        negative_prompt=opts.get("negative_prompt"),
         count=_requested_count(job),
         provider_payload=provider_payload or None,
         result_payload=result_payload,
