@@ -1,0 +1,15 @@
+@layer components {
+  // Light-theme badges: solid-ish tinted background + matching dark text.
+  // ring opacity dropped so the chip sits flat on the slate-50 page bg.
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
+           text-xs font-medium ring-1 ring-inset;
+  }
+  .badge-brand   { @apply badge bg-blue-50    text-blue-700    ring-blue-200; }
+  .badge-emerald { @apply badge bg-emerald-50 text-emerald-700 ring-emerald-200; }
+  .badge-amber   { @apply badge bg-amber-50   text-amber-700   ring-amber-200; }
+  .badge-rose    { @apply badge bg-rose-50    text-rose-700    ring-rose-200; }
+  .badge-cyan    { @apply badge bg-cyan-50    text-cyan-700    ring-cyan-200; }
+  .badge-slate   { @apply badge bg-slate-100  text-slate-700   ring-slate-200; }
+  .badge-pink    { @apply badge bg-pink-50    text-pink-700    ring-pink-200; }
+}

@@ -1,0 +1,38 @@
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2
+           text-sm font-semibold transition-all duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-offset-2 focus-visible:ring-blue-500
+           focus-visible:ring-offset-white;
+  }
+
+  // Primary CTA — solid blue, matches the landing v2 Get-Started button.
+  .btn-primary {
+    @apply btn bg-blue-600 text-white shadow-sm
+           hover:bg-blue-700 hover:shadow-md
+           active:bg-blue-800;
+  }
+
+  // Secondary — outlined blue on light bg.
+  .btn-secondary {
+    @apply btn bg-white text-blue-600 border border-blue-200
+           hover:border-blue-400 hover:bg-blue-50;
+  }
+
+  // Ghost — transparent, slate hover. Used in toolbars, cards, etc.
+  .btn-ghost {
+    @apply btn bg-transparent text-slate-600
+           hover:bg-slate-100 hover:text-slate-800;
+  }
+
+  .btn-danger {
+    @apply btn text-white shadow-sm
+           bg-gradient-to-br from-rose-500 to-rose-600
+           hover:from-rose-600 hover:to-rose-700;
+  }
+
+  .btn-sm { @apply px-3 py-1.5 text-xs; }
+  .btn-lg { @apply px-6 py-3 text-base; }
+}

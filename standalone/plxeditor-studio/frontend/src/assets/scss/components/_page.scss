@@ -1,0 +1,15 @@
+@layer components {
+  .page-header   { @apply flex items-start justify-between gap-4 flex-wrap; }
+  .page-title    { @apply text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight; }
+  .page-subtitle { @apply text-sm text-slate-500 mt-1.5 max-w-2xl; }
+
+  // KPI tile — sits inside a card surface, so label + big number + icon
+  // all inherit the light palette without re-declaring it.
+  .stat        { @apply card flex items-start justify-between gap-3; }
+  .stat-label  { @apply text-xs uppercase tracking-wider text-slate-500 font-medium; }
+  .stat-value  { @apply text-2xl font-bold text-slate-800 mt-1; }
+  .stat-icon   {
+    @apply w-10 h-10 rounded-xl flex items-center justify-center
+           bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-sm;
+  }
+}

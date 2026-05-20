@@ -1,0 +1,29 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.5.2
+sqlalchemy==2.0.35
+asyncpg==0.29.0
+# Sync driver — needed by Flow module's BackgroundTask DB updates
+# (create_engine defaults to psycopg2). Without this the Flow worker
+# never marks jobs as processing/completed and they hang at 'pending'.
+psycopg2-binary==2.9.9
+alembic==1.13.3
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.0
+cryptography==43.0.1
+redis==5.0.8
+rq==1.16.2
+httpx[socks]==0.27.2
+python-multipart==0.0.10
+email-validator==2.2.0
+playwright==1.49.1
+sentry-sdk[fastapi]==2.18.0
+docker==7.1.0
+paramiko==3.5.0
+# Cron-string evaluator used by server-monitor's reboot scheduler.
+croniter==3.0.3
+pytest==8.3.3
+pytest-asyncio==0.24.0
+aiosqlite==0.20.0

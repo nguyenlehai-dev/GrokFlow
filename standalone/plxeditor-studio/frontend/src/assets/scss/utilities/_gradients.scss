@@ -1,0 +1,4 @@
+@layer utilities {
+  .text-gradient      { @apply bg-clip-text text-transparent bg-gradient-album; }
+  .text-gradient-cyan { @apply bg-clip-text text-transparent bg-gradient-brand-cyan; }
+}

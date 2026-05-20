@@ -1,0 +1,18 @@
+@layer components {
+  .table-scroll {
+    @apply -mx-3 sm:mx-0 overflow-x-auto rounded-xl border border-slate-200 bg-white;
+
+    > table { @apply min-w-[640px] w-full text-sm; }
+
+    thead {
+      @apply bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500;
+
+      th { @apply px-4 py-3 font-semibold; }
+    }
+
+    tbody {
+      tr { @apply border-t border-slate-100 transition-colors hover:bg-slate-50; }
+      td { @apply px-4 py-3 text-slate-700; }
+    }
+  }
+}

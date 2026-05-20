@@ -1,0 +1,17 @@
+// SCSS-level constants. Use SPARINGLY — design tokens live in
+// tailwind.config.js so utility classes stay in sync. Reserve this file for
+// values SCSS needs at compile time (breakpoints in @media, math helpers).
+
+$breakpoint-sm: 640px;
+$breakpoint-md: 768px;
+$breakpoint-lg: 1024px;
+$breakpoint-xl: 1280px;
+$breakpoint-2xl: 1536px;
+
+$z-dropdown: 1000;
+$z-sticky: 1020;
+$z-fixed: 1030;
+$z-modal-backdrop: 1040;
+$z-modal: 1050;
+$z-popover: 1060;
+$z-toast: 1080;

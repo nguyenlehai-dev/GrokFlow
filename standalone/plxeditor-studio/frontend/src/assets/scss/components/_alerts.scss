@@ -1,0 +1,7 @@
+@layer components {
+  .alert { @apply rounded-xl p-4 text-sm flex gap-3 items-start; }
+  .alert-info    { @apply alert bg-blue-50    text-blue-800    border border-blue-200; }
+  .alert-warning { @apply alert bg-amber-50   text-amber-800   border border-amber-200; }
+  .alert-danger  { @apply alert bg-rose-50    text-rose-800    border border-rose-200; }
+  .alert-success { @apply alert bg-emerald-50 text-emerald-800 border border-emerald-200; }
+}

@@ -1,0 +1,6 @@
+@layer components {
+  .album-card {
+    @apply relative overflow-hidden rounded-xl bg-white p-4
+           transition-all hover:bg-slate-100;
+  }
+}

@@ -1,0 +1,16 @@
+@layer components {
+  // Light-theme inputs — white surface, slate border, blue focus ring.
+  // Matches the search bar in landing v2.
+  .input,
+  .select,
+  .textarea {
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5
+           text-sm text-slate-800 placeholder:text-slate-400 shadow-sm
+           transition-all
+           focus:outline-none focus:border-blue-500
+           focus:ring-4 focus:ring-blue-500/15
+           disabled:bg-slate-100 disabled:text-slate-400;
+  }
+
+  .input-sm { @apply px-2.5 py-1.5 text-xs; }
+}
