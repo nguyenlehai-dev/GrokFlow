@@ -1,9 +1,11 @@
 """GET /api/admin/stats — admin dashboard counters.
 
-ai-gateway override: the monorepo version reads Job + Profile (Grok),
-which don't exist in this product. We report users + API keys + gateway
-requests in their place. Schema name kept as AdminStats for FE compat;
-total_profiles is hardcoded to 0.
+ai-gateway override: monorepo version reads Job + Profile (Grok) which
+don't exist here. We count Users + API keys + gateway requests. Schema
+name kept as AdminStats for FE compat; total_profiles always 0.
+
+GwRequest scopes by `domain_id` (not user_id — gateway is per-tenant,
+not per-user).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -21,42 +23,41 @@ router = APIRouter()
 @router.get("/stats", response_model=AdminStats)
 async def stats(admin: AdminUser, db: DbSession) -> AdminStats:
     is_super = admin.role == "super_admin"
-    domain_user_ids = (
-        select(User.id).where(User.domain_id == admin.domain_id)
-        if not is_super else None
-    )
+    dom_id = None if is_super else admin.domain_id
 
-    def maybe_scope(q, fk_col):
-        return q if is_super else q.where(fk_col.in_(domain_user_ids))
+    total_users_q = select(func.count(User.id))
+    if dom_id is not None:
+        total_users_q = total_users_q.where(User.domain_id == dom_id)
+    total_users = (await db.execute(total_users_q)).scalar_one() or 0
 
-    total_users = (await db.execute(
-        select(func.count(User.id)) if is_super
-        else select(func.count(User.id)).where(User.domain_id == admin.domain_id)
-    )).scalar_one()
-    total_keys = (await db.execute(
-        maybe_scope(select(func.count(ApiKey.id)), ApiKey.user_id)
-    )).scalar_one()
-    # In ai-gateway "jobs" == gateway requests.
-    total_jobs = (await db.execute(
-        maybe_scope(select(func.count(GwRequest.id)), GwRequest.user_id)
-    )).scalar_one()
+    total_keys_q = select(func.count(ApiKey.id))
+    if dom_id is not None:
+        total_keys_q = total_keys_q.where(
+            ApiKey.user_id.in_(select(User.id).where(User.domain_id == dom_id))
+        )
+    total_keys = (await db.execute(total_keys_q)).scalar_one() or 0
+
+    base_gw = select(func.count(GwRequest.id))
+    if dom_id is not None:
+        base_gw = base_gw.where(GwRequest.domain_id == dom_id)
+    total_jobs = (await db.execute(base_gw)).scalar_one() or 0
+
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    succ = (await db.execute(
-        maybe_scope(
-            select(func.count(GwRequest.id)).where(
-                GwRequest.status == "success", GwRequest.created_at >= cutoff,
-            ),
-            GwRequest.user_id,
-        )
-    )).scalar_one()
-    fail = (await db.execute(
-        maybe_scope(
-            select(func.count(GwRequest.id)).where(
-                GwRequest.status == "error", GwRequest.created_at >= cutoff,
-            ),
-            GwRequest.user_id,
-        )
-    )).scalar_one()
+
+    succ_q = select(func.count(GwRequest.id)).where(
+        GwRequest.status == "success", GwRequest.created_at >= cutoff,
+    )
+    if dom_id is not None:
+        succ_q = succ_q.where(GwRequest.domain_id == dom_id)
+    succ = (await db.execute(succ_q)).scalar_one() or 0
+
+    fail_q = select(func.count(GwRequest.id)).where(
+        GwRequest.status == "error", GwRequest.created_at >= cutoff,
+    )
+    if dom_id is not None:
+        fail_q = fail_q.where(GwRequest.domain_id == dom_id)
+    fail = (await db.execute(fail_q)).scalar_one() or 0
+
     return AdminStats(
         total_users=total_users,
         total_api_keys=total_keys,

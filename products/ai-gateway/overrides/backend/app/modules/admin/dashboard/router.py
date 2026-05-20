@@ -121,11 +121,19 @@ async def _build(
         else None
     )
 
+    # GwRequest scopes by domain_id (not user_id — gateway calls are per
+    # tenant, not per user). /me view returns the caller's domain's rows;
+    # if the caller has no domain (super_admin unscoped) the filter is
+    # an impossible predicate so /me returns empty.
     req_filters = []
+    user_domain_id = domain_id  # closure
     if scope == "me":
-        req_filters.append(GwRequest.user_id == user_id)
-    elif domain_user_ids is not None:
-        req_filters.append(GwRequest.user_id.in_(domain_user_ids))
+        if user_domain_id is None:
+            req_filters.append(GwRequest.id == None)  # noqa: E711 — force-empty
+        else:
+            req_filters.append(GwRequest.domain_id == user_domain_id)
+    elif domain_id is not None:
+        req_filters.append(GwRequest.domain_id == domain_id)
     if bound is not None:
         req_filters.append(GwRequest.created_at >= bound)
 
@@ -256,7 +264,8 @@ async def _build_per_domain(db, bound: datetime | None) -> list[DomainStats]:
         users_count = (await db.execute(
             select(func.count()).select_from(User).where(User.domain_id == d.id)
         )).scalar_one() or 0
-        req_filter = [GwRequest.user_id.in_(user_ids_q)]
+        # GwRequest carries domain_id directly (denormalised at request time).
+        req_filter = [GwRequest.domain_id == d.id]
         if bound is not None:
             req_filter.append(GwRequest.created_at >= bound)
         jobs_total = (await db.execute(
@@ -276,7 +285,7 @@ async def _build_per_domain(db, bound: datetime | None) -> list[DomainStats]:
             select(func.count()).select_from(ApiKey).where(ApiKey.user_id.in_(user_ids_q))
         )).scalar_one() or 0
         last_q = select(func.max(GwRequest.created_at)).where(
-            GwRequest.user_id.in_(user_ids_q)
+            GwRequest.domain_id == d.id
         )
         last = (await db.execute(last_q)).scalar_one()
         out.append(DomainStats(

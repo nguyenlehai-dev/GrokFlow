@@ -141,7 +141,32 @@ patches:
 
   - file: backend/app/modules/admin/gallery/router.py
     find: "from app.models.gateway import GwRequest, GwVendor"
-    replace: "# Gateway models dropped from plxeditor-studio."
+    replace: "GwRequest = None  # type: ignore[assignment]\nGwVendor = None   # type: ignore[assignment]"
+
+  # Replace gallery /gateway endpoint body — always returns empty since
+  # plxeditor-studio doesn't ship the gateway product.
+  - file: backend/app/modules/admin/gallery/router.py
+    regex_find: '@router\.get\("/gateway", response_model=GatewayGalleryPage\)\nasync def list_gateway_gallery\([^)]*\) -> GatewayGalleryPage:\n.*?return GatewayGalleryPage[^)]*\)'
+    regex_replace: |
+      @router.get("/gateway", response_model=GatewayGalleryPage)
+      async def list_gateway_gallery(
+          user: CurrentUser, db: DbSession,
+          vendor_code: str | None = Query(default=None),
+          function_code: str | None = Query(default=None),
+          domain_id: uuid.UUID | None = Query(default=None),
+          date_from: datetime | None = Query(default=None),
+          date_to: datetime | None = Query(default=None),
+          offset: int = Query(default=0, ge=0),
+          limit: int = Query(default=30, ge=1, le=100),
+      ) -> GatewayGalleryPage:
+          # plxeditor-studio doesn't ship the gateway product — always empty.
+          return GatewayGalleryPage(items=[], total=0, offset=offset, limit=limit)
+
+  # plxeditor-studio has FlowJob + Job but NOT GwRequest/GwVendor —
+  # replace the Gateway section in the dashboard with an empty list.
+  - file: backend/app/modules/admin/dashboard/router.py
+    regex_find: '    # -+ Gateway LLM \(per-vendor breakdown\).*?gw_items = \[[^\]]*\]'
+    regex_replace: '    gw_items: list[AppItem] = []  # Gateway dropped from plxeditor-studio'
 
   - file: frontend/src/components/layout/AppShell.tsx
     regex_find: 'import \{ useQuery \}.*?\n'
