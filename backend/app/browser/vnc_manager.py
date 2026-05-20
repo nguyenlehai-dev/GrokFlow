@@ -175,27 +175,31 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
             # bursty connections through warp-svc see
             # ERR_PROXY_CONNECTION_FAILED in Chromium.
             #
-            # 2 escape hatches via backend env:
+            # 2 escape hatches via backend env. DISABLE is checked first
+            # because backend's own entrypoint.sh also auto-exports
+            # GROK_HTTP_PROXY=socks5://… when its WARP daemon comes up
+            # — so if we honored that variable first the disable flag
+            # would never win in practice.
             #
-            #   GROK_VNC_DISABLE_PROXY=1 — explicitly set
-            #     GROK_HTTP_PROXY="" inside the container so Chromium
-            #     bypasses the image-baked default and uses the VPS's
-            #     direct IP. Best when VPS IP isn't yet Grok-flagged.
+            #   GROK_VNC_DISABLE_PROXY=1 — force Chromium direct (no
+            #     proxy). Beats any GROK_HTTP_PROXY value also present
+            #     in the parent env. Best when the VPS IP isn't yet
+            #     Grok-flagged and WARP IPs are blocked.
             #
-            #   GROK_HTTP_PROXY=<scheme>://… — pass any other proxy URL
-            #     (residential / mobile) the operator stood up. Wins
-            #     over both the image default and the disable flag.
+            #   GROK_HTTP_PROXY=<scheme>://… — pass an explicit proxy
+            #     URL (residential / mobile). Only takes effect when
+            #     DISABLE is NOT set.
             **(
-                {"GROK_HTTP_PROXY": os.environ["GROK_HTTP_PROXY"]}
-                if os.environ.get("GROK_HTTP_PROXY")
+                # 'direct://' is Chromium syntax for "no proxy".
+                # /launch-chromium.sh tests `[[ -n "$GROK_HTTP_PROXY" ]]`
+                # so passing "" would fall through to the WARP fallback;
+                # 'direct://' is non-empty so the test passes and
+                # Chromium interprets the flag as bypass.
+                {"GROK_HTTP_PROXY": "direct://"}
+                if os.environ.get("GROK_VNC_DISABLE_PROXY") == "1"
                 else (
-                    # 'direct://' is the Chromium syntax for "no proxy".
-                    # The image's /launch-chromium.sh tests `[[ -n "$GROK_HTTP_PROXY" ]]`
-                    # so passing "" falls through to the WARP fallback (bug).
-                    # A non-empty 'direct://' wins the test and Chromium
-                    # interprets the flag as bypass.
-                    {"GROK_HTTP_PROXY": "direct://"}
-                    if os.environ.get("GROK_VNC_DISABLE_PROXY") == "1"
+                    {"GROK_HTTP_PROXY": os.environ["GROK_HTTP_PROXY"]}
+                    if os.environ.get("GROK_HTTP_PROXY")
                     else {}
                 )
             ),
