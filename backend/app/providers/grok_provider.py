@@ -1144,30 +1144,46 @@ class GrokProvider(Provider):
                         )
                     raise
 
+                # Cheap pre-checks BEFORE the 30s prompt-bar wait — fail
+                # fast on the known non-recoverable states (Cloudflare /
+                # login redirect) instead of burning the full wait window.
+                title_pre = await page.title()
+                if "Just a moment" in title_pre or "Cloudflare" in title_pre:
+                    return JobResult(success=False, error_code="cookie_expired",
+                                     error_message="Cloudflare challenge — re-login via Auto login")
+                if any(kw in page.url.lower() for kw in ("login", "sign-in", "signin", "auth")):
+                    return JobResult(success=False, error_code="cookie_expired",
+                                     error_message=f"Redirected to login: {page.url}")
+
                 # Wait for the prompt-bar to actually render before any radio
                 # click attempts. Without this, on a busy Chromium the React
                 # tree isn't mounted yet → the Image/Video radios + duration
                 # buttons don't exist → all our clicks no-op silently.
+                #
+                # 30s (was 15s): production Grok pages occasionally take
+                # 20-25s to hydrate when the VPS is under load OR Grok's CDN
+                # is slow. A 15s ceiling tripped legit jobs into a fake
+                # rate_limited rotation → profile churn for no reason.
+                # Configurable via PROMPT_BAR_TIMEOUT_MS env for ops tuning.
+                _bar_timeout_ms = int(os.getenv("PROMPT_BAR_TIMEOUT_MS", "30000"))
                 try:
                     await page.wait_for_selector(
                         "[role=radio], button[aria-label='Submit']",
-                        timeout=15000, state="visible",
+                        timeout=_bar_timeout_ms, state="visible",
                     )
                 except PWTimeout:
+                    # One last CF / login redirect probe — Grok sometimes
+                    # injects the challenge mid-load, so the title check
+                    # earlier missed it.
+                    title_late = await page.title()
+                    if "Just a moment" in title_late or "Cloudflare" in title_late:
+                        return JobResult(success=False, error_code="cookie_expired",
+                                         error_message="Cloudflare challenge — re-login via Auto login")
                     return JobResult(
                         success=False, error_code="rate_limited",
-                        error_message="Prompt bar didn't render in 15s — Chromium overloaded.",
+                        error_message=f"Prompt bar didn't render in {_bar_timeout_ms // 1000}s — Chromium overloaded.",
                         retryable=True,
                     )
-
-                title = await page.title()
-                if "Just a moment" in title or "Cloudflare" in title:
-                    return JobResult(success=False, error_code="cookie_expired",
-                                     error_message="Cloudflare challenge — re-login via Auto login")
-                cur_url = page.url
-                if any(kw in cur_url.lower() for kw in ("login", "sign-in", "signin", "auth")):
-                    return JobResult(success=False, error_code="cookie_expired",
-                                     error_message=f"Redirected to login: {cur_url}")
 
                 content = (await page.content()).lower()
                 if "captcha" in content:
