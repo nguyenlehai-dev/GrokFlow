@@ -74,9 +74,20 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         print(f"[startup] vnc cdp watchdog failed to start: {exc}", flush=True)
 
+    # Profile re-login watchdog — periodically probes profiles stuck in
+    # `need_login` with a headless Playwright visit. If Grok still loads
+    # cleanly (cookies live, no CF challenge), promote back to logged_in
+    # so the pool can use it without an admin manually clicking Auto-login.
+    relogin_watchdog_task: asyncio.Task | None = None
+    try:
+        from app.services.profile_relogin_watchdog import relogin_watchdog_loop
+        relogin_watchdog_task = asyncio.create_task(relogin_watchdog_loop())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] profile relogin watchdog failed to start: {exc}", flush=True)
+
     yield
     # On shutdown: stop background tasks + drain the shared httpx pool.
-    for t in (vnc_events_task, tab_gc_task, cdp_watchdog_task):
+    for t in (vnc_events_task, tab_gc_task, cdp_watchdog_task, relogin_watchdog_task):
         if t is None:
             continue
         t.cancel()
