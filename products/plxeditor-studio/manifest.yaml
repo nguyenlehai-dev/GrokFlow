@@ -167,6 +167,20 @@ patches:
     regex_find: '  // Pull installed modules.*?const NAV: NavEntry\[\] = useMemo\(\(\) => \{.*?\}, \[baseNav, isSuperUser, installedModules\]\);'
     regex_replace: '  const NAV: NavEntry[] = baseNav;'
 
+  - file: frontend/nginx.conf
+    find: |2
+              location /flow-output/ {
+                  rewrite ^/flow-output/(.*)$ /api/flow/download/$1 break;
+                  proxy_pass http://backend:8000;
+    replace: |2
+              location /flow-output/ {
+                  rewrite ^/flow-output/(.*)$ /api/flow/download/$1 break;
+                  set $flow_backend "http://backend:8000";
+                  proxy_pass $flow_backend;
+  - file: frontend/nginx.conf
+    regex_find: '    # gatewaygrok-backend reverse proxy.*?location /gateway-api/ \{.*?\n    \}\n'
+    regex_replace: ''
+
   - file: frontend/src/modules/admin/router/index.tsx
     regex_find: '\s*\{ path: "admin/(git|modules|modules/:slug)".*?\},'
     regex_replace: ''
