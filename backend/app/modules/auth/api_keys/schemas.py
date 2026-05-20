@@ -14,6 +14,12 @@ class ApiKeyCreate(BaseModel):
     daily_limit: int = Field(default=1000, ge=1, le=1000000)
     rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
     expires_at: datetime | None = None
+    # Optional legacy-prefix override. `"gg"` mints a `gg_xxx` key
+    # matching flowgrok.plxeditor.com's contract; leave empty for the
+    # default `uxpm_live_xxx`. Hashing + auth are prefix-agnostic — this
+    # is cosmetic for partners that have integration code looking at
+    # the prefix.
+    key_prefix: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_]{2,16}$|^$")
 
 
 class ApiKeyOut(BaseModel):

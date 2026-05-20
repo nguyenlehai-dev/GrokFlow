@@ -117,6 +117,43 @@ class ClientTaskStatusOut(BaseModel):
     completed_at: datetime | None
 
 
+# ───────────── legacy-compatible shapes (matches flowgrok.plxeditor.com)
+
+class ClientLiteStatusOut(BaseModel):
+    """Lite poll envelope — matches flowgrok.plxeditor.com /api/client
+    /tasks/{id}/status and /generate/status response."""
+    task_id: uuid.UUID
+    status: str
+    success: bool
+    message: str
+    url: str | None = None
+
+
+class ClientTaskFullOut(BaseModel):
+    """Full Job shape — matches flowgrok.plxeditor.com /api/client
+    /tasks/{id} response (12 fields with provider_payload + result_payload)."""
+    id: uuid.UUID
+    profile_id: uuid.UUID | None = None
+    target: str
+    status: str
+    prompt: str
+    negative_prompt: str | None = None
+    count: int
+    provider_payload: dict[str, Any] | None = None
+    result_payload: dict[str, Any] | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClientVerifyOut(BaseModel):
+    """Health-check envelope — partner pings /verify on boot to fail
+    fast on bad/revoked keys."""
+    status: str
+    name: str
+    key_prefix: str
+
+
 def _check_perm(api_key, target: str) -> None:
     if api_key.allowed_providers and "grok" not in api_key.allowed_providers:
         raise PermissionDenied("API key not allowed for provider 'grok'")
@@ -455,12 +492,189 @@ async def get_status(
 # ───────────────────────── LEGACY CONTRACT (kept) ─────────────────────────
 # Existing integrations may already point at these. Don't break them.
 
-@router.get("/tasks/{task_id}/status", response_model=ClientTaskStatusOut)
+@router.get("/tasks/{task_id}/status", response_model=ClientLiteStatusOut)
 async def get_task_status(
     task_id: uuid.UUID,
     principal: ApiKeyPrincipal,
     db: DbSession,
     request: Request,
-) -> ClientTaskStatusOut:
+) -> ClientLiteStatusOut:
+    """Lite poll envelope — matches flowgrok.plxeditor.com.
+
+    NOTE shape change (2026-05): previously returned the full
+    ClientTaskStatusOut with image_urls/video_urls; now returns the lite
+    {task_id,status,success,message,url} envelope per the legacy spec.
+    If your integration needs the full list of media URLs, call
+    /api/client/tasks/{task_id} (full) or /api/client/status/{task_id}
+    (kept as ClientTaskStatusOut for backwards compat).
+    """
     _, user = principal
-    return await _build_status(task_id, user, db, request)
+    return await _build_lite(task_id, user, db, request)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Legacy plxeditor flowgrok contract — full parity surface.
+# Existing /generate + /status/{id} + /tasks/{id}/status above stay as
+# they were for backwards-compat. The endpoints below add the
+# legacy-shaped responses partners expect.
+# ─────────────────────────────────────────────────────────────────────
+
+def _job_to_full(job: Job, files: list[File], request: Request) -> ClientTaskFullOut:
+    """Map internal Job + Files to the legacy ClientTaskFullOut shape."""
+    base_url = _base_url(request)
+    image_urls, video_urls = _collect_media_urls(
+        files, target=job.job_type,
+        requested_count=_requested_count(job),
+        result_url=job.result_url, base_url=base_url,
+    )
+    media_urls = (video_urls or []) + (image_urls or [])
+
+    payload = job.input_payload or {}
+    provider_payload = {
+        "video_mode": payload.get("video_mode"),
+        "image_mode": payload.get("image_mode"),
+        "aspect_ratio": payload.get("ratio"),
+        "quality": payload.get("quality"),
+        "duration": payload.get("duration"),
+        "source_asset_path": (payload.get("reference_images") or [None])[0],
+    }
+    # Strip None for cleanness
+    provider_payload = {k: v for k, v in provider_payload.items() if v is not None}
+
+    result_payload: dict[str, Any] | None = None
+    if job.status == "success" and media_urls:
+        result_payload = {
+            "target": job.job_type,
+            "image_mode": payload.get("image_mode"),
+            "video_mode": payload.get("video_mode"),
+            "media_urls": media_urls,
+            "applied_options": payload.get("applied_options") or {},
+            "unapplied_options": payload.get("unapplied_options") or {},
+            "provider": job.provider or "grok",
+            "page_url": f"https://grok.com/{'video' if job.job_type=='video' else 'imagine'}",
+            "used_live_browser": True,
+        }
+
+    err_msg = job.error_message if job.status in _TERMINAL else None
+
+    return ClientTaskFullOut(
+        id=job.id,
+        profile_id=job.profile_id,
+        target=job.job_type,
+        status=job.status,
+        prompt=payload.get("prompt") or "",
+        negative_prompt=payload.get("negative_prompt"),
+        count=_requested_count(job),
+        provider_payload=provider_payload or None,
+        result_payload=result_payload,
+        error_message=err_msg,
+        created_at=job.created_at,
+        updated_at=job.completed_at or job.updated_at or job.created_at,
+    )
+
+
+async def _build_lite(task_id: uuid.UUID, user, db, request: Request) -> ClientLiteStatusOut:
+    """Compute the lite poll envelope. First media URL only — clients
+    needing the full list call /tasks/{id} instead."""
+    job = await db.get(Job, task_id)
+    if not job or job.user_id != user.id:
+        raise NotFound("task")
+    url = None
+    if job.status == "success":
+        files = list((await db.execute(
+            select(File).where(File.job_id == job.id, File.file_type != "input")
+            .order_by(File.created_at)
+        )).scalars().all())
+        image_urls, video_urls = _collect_media_urls(
+            files, target=job.job_type,
+            requested_count=_requested_count(job),
+            result_url=job.result_url, base_url=_base_url(request),
+        )
+        url = (video_urls + image_urls)[0] if (video_urls or image_urls) else None
+    msg = job.error_message if job.status == "failed" else job.status
+    return ClientLiteStatusOut(
+        task_id=job.id, status=job.status,
+        success=(job.status == "success"),
+        message=msg or job.status, url=url,
+    )
+
+
+@router.get("/verify", response_model=ClientVerifyOut)
+async def verify_key(principal: ApiKeyPrincipal) -> ClientVerifyOut:
+    """Partner ping — verify the API key is alive + readable without
+    burning quota. Matches flowgrok.plxeditor.com /api/client/verify."""
+    api_key, _ = principal
+    return ClientVerifyOut(
+        status="ok",
+        name=api_key.name,
+        key_prefix=api_key.key_prefix,
+    )
+
+
+@router.post("/generate/status", response_model=ClientLiteStatusOut, status_code=201)
+async def generate_lite(
+    payload: ClientGenerateIn, principal: ApiKeyPrincipal,
+    db: DbSession, request: Request,
+) -> ClientLiteStatusOut:
+    """Same as /generate but returns the lite envelope ({task_id, status,
+    success, message, url}). Convenient for clients that only need the
+    task_id back and poll /tasks/{id}/status afterwards."""
+    full = await _submit_job(
+        target=payload.target,
+        payload_dict=payload.model_dump(),
+        options=_build_options(payload),
+        profile_id=payload.profile_id,
+        principal=principal, db=db,
+    )
+    return ClientLiteStatusOut(
+        task_id=full.task_id, status=full.status,
+        success=False, message="pending", url=None,
+    )
+
+
+@router.get("/tasks/{task_id}", response_model=ClientTaskFullOut)
+async def get_task_full(
+    task_id: uuid.UUID, principal: ApiKeyPrincipal,
+    db: DbSession, request: Request,
+) -> ClientTaskFullOut:
+    """Full Job record — includes provider_payload (raw options sent to
+    Grok) and result_payload (media_urls + applied_options + ...).
+    Use this when you need everything; otherwise /tasks/{id}/status."""
+    _, user = principal
+    job = await db.get(Job, task_id)
+    if not job or job.user_id != user.id:
+        raise NotFound("task")
+    files = list((await db.execute(
+        select(File).where(File.job_id == job.id, File.file_type != "input")
+        .order_by(File.created_at)
+    )).scalars().all())
+    return _job_to_full(job, files, request)
+
+
+# Aliases — /jobs/* mirrors /tasks/* for clients on the legacy URL.
+
+@router.post("/jobs", response_model=ClientGenerateOut, status_code=201)
+async def generate_alias(
+    payload: ClientGenerateIn, principal: ApiKeyPrincipal, db: DbSession,
+) -> ClientGenerateOut:
+    """Legacy alias of /generate. Returns the same compact response."""
+    return await generate(payload, principal, db)
+
+
+@router.get("/jobs/{task_id}", response_model=ClientTaskFullOut)
+async def get_job_full_alias(
+    task_id: uuid.UUID, principal: ApiKeyPrincipal,
+    db: DbSession, request: Request,
+) -> ClientTaskFullOut:
+    """Legacy alias of /tasks/{task_id}."""
+    return await get_task_full(task_id, principal, db, request)
+
+
+@router.get("/jobs/{task_id}/status", response_model=ClientLiteStatusOut)
+async def get_job_status_alias(
+    task_id: uuid.UUID, principal: ApiKeyPrincipal,
+    db: DbSession, request: Request,
+) -> ClientLiteStatusOut:
+    """Legacy alias of /tasks/{task_id}/status (lite envelope)."""
+    _, user = principal
+    return await _build_lite(task_id, user, db, request)
