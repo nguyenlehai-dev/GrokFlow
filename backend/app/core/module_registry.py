@@ -98,7 +98,7 @@ def _load_modules() -> list[ModuleManifest]:
     from app.modules.admin.tools import manifest as admin_tools
     from app.modules.admin_modules import manifest as admin_modules
     from app.modules.sdk import manifest as sdk
-    from app.modules.flow import manifest as flow
+    from app.modules.flow import manifest as flow, manifest_v1 as flow_v1
     from app.modules.gateway import manifest as gateway
     from app.modules.grok.files import manifest as grok_files
     from app.modules.grok.jobs import manifest as grok_jobs
@@ -138,6 +138,7 @@ def _load_modules() -> list[ModuleManifest]:
         git_admin,
         # Other products
         flow,
+        flow_v1,
         gateway,
         # Server management (super_admin)
         servers,

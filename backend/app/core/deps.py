@@ -119,10 +119,21 @@ SuperAdminUser = Annotated[User, Depends(require_super_admin)]
 async def get_api_key_principal(
     db: DbSession,
     authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> tuple[ApiKey, User]:
-    if not authorization or not authorization.lower().startswith("bearer "):
+    """Accept either ``Authorization: Bearer <key>`` or ``X-API-Key: <key>``.
+
+    Grok partner API has used Bearer since v1. Flow v1 API + future
+    integrations prefer X-API-Key (industry-standard for non-OAuth APIs:
+    Stripe, OpenAI, Resend, Replicate all use it). Supporting both keeps
+    backwards compat without forking the dependency.
+    """
+    if x_api_key:
+        raw = x_api_key.strip()
+    elif authorization and authorization.lower().startswith("bearer "):
+        raw = authorization.split(" ", 1)[1]
+    else:
         raise InvalidApiKey()
-    raw = authorization.split(" ", 1)[1]
     key_hash = hash_api_key(raw)
     result = await db.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
     api_key = result.scalar_one_or_none()
