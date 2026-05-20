@@ -36,8 +36,21 @@ from collections import defaultdict
 
 
 _PROBE_INTERVAL_SEC = int(os.environ.get("VNC_CDP_PROBE_SEC", "60"))
-_FAILS_BEFORE_RESTART = int(os.environ.get("VNC_CDP_FAILS_BEFORE_RESTART", "3"))
+# Bumped from 3 → 15 default: 3 probes (3 min) was killing VNCs through
+# transient blips (page navigation between tabs, Cloudflare interstitial
+# JS pegging Chromium for 60-90s, etc.). 15 = 15 min tolerance before we
+# restart, which is long enough that a real renderer crash still gets
+# recovered but a healthy-but-busy Chromium isn't bounced.
+_FAILS_BEFORE_RESTART = int(os.environ.get("VNC_CDP_FAILS_BEFORE_RESTART", "15"))
 _PROBE_TIMEOUT_SEC = int(os.environ.get("VNC_CDP_PROBE_TIMEOUT_SEC", "5"))
+# When True, restarting a VNC also flips its profile to need_login.
+# Default False now: profile.error_message changing under the admin's
+# feet (from "logged_in" → "CDP watchdog: container restarted") was
+# pulling the profile out of the pool even when cookies on the /config
+# volume were still valid — the auto-relogin watchdog (10-min loop)
+# was then having to flip it back, leaving a window where jobs failed.
+# Operators can re-enable by setting VNC_CDP_FLIP_STATUS=1.
+_FLIP_STATUS_ON_RESTART = os.environ.get("VNC_CDP_FLIP_STATUS", "0") == "1"
 
 
 async def cdp_watchdog_loop() -> None:
@@ -105,7 +118,11 @@ def _one_cycle(
             fail_count[c.name] = 0
             # Reset profile.status so worker pool stops picking this
             # container until admin / next Auto-login marks it logged_in.
-            _reset_profile_status_for(c.name)
+            # Skipped by default — see _FLIP_STATUS_ON_RESTART above.
+            # The auto-relogin watchdog will probe the restarted container
+            # within 10 min and either confirm logged_in or stamp need_login.
+            if _FLIP_STATUS_ON_RESTART:
+                _reset_profile_status_for(c.name)
             # Drop stale entry from the nginx map.
             try:
                 from app.services.nginx_sync import refresh_vnc_map

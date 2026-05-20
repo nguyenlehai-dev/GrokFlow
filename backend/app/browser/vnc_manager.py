@@ -137,10 +137,29 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         c = cli.containers.get(name)
         c.reload()
         # Anything that's running, just-created, restarting, or paused is
-        # something the caller should reuse — don't tear it down. Only
-        # "exited" / "dead" / "removing" warrant a fresh spawn.
+        # something the caller should reuse — don't tear it down.
         if c.status in ("running", "created", "restarting", "paused"):
             return _reuse_info(c)
+        # "exited" / "dead": try RESTART before destroy+recreate. The /config
+        # volume holds cookies + cf_clearance — restarting Chromium against
+        # the same volume resumes the logged-in Grok session instead of
+        # forcing the admin to Auto-login again. Only fall through to
+        # remove+create if restart itself fails (image gone, network
+        # removed, kernel oom-killed the container shell etc.).
+        try:
+            print(f"[vnc] {name} status={c.status} — restarting in place to preserve session", flush=True)
+            c.restart(timeout=5)
+            # Give Chromium a moment to come back up before reporting reuse.
+            for _ in range(15):
+                c.reload()
+                if c.status == "running":
+                    break
+                time.sleep(1)
+            if c.status == "running":
+                return _reuse_info(c)
+            print(f"[vnc] {name} restart yielded status={c.status} — falling back to recreate", flush=True)
+        except APIError as exc:
+            print(f"[vnc] {name} restart failed: {exc} — falling back to recreate", flush=True)
         try:
             c.remove(force=True)
         except (APIError, NotFound) as exc:
