@@ -240,8 +240,8 @@ const SPECS: ToolSpec[] = [
       { name: "skip", type: "Integer", desc: "Pagination offset" },
       { name: "limit", type: "Integer", desc: "Pagination limit (default 50, max 200)" },
     ],
-    requestExample: `curl -X GET '${BASE}/api/v1/video/jobs' \
-  -H 'X-API-Key: YOUR_API_KEY' \`,
+    requestExample: `curl -X GET '${BASE}/api/v1/video/jobs?skip=0&limit=50' \
+  -H 'X-API-Key: YOUR_API_KEY'`,
     responseExample: `[
   {
     "id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
@@ -260,11 +260,9 @@ const SPECS: ToolSpec[] = [
     endpoint: "/api/v1/video/jobs/{job_id}",
     title: "Check Job Status (Polling)",
     description: "Check the status of a scheduled processing job. Returns status (pending, processing, completed, failed) and output URL.",
-    params: [
-      ,
-    ],
-    requestExample: `curl -X GET '${BASE}/api/v1/video/jobs/{job_id}' \
-  -H 'X-API-Key: YOUR_API_KEY' \`,
+    params: [],
+    requestExample: `curl -X GET '${BASE}/api/v1/video/jobs/YOUR_JOB_ID' \
+  -H 'X-API-Key: YOUR_API_KEY'`,
     responseExample: `{
   "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
   "status": "completed",
