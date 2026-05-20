@@ -65,6 +65,11 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
+    ports:
+      # Host port overridable via .env so multiple flowgrok instances
+      # (prod / staging) can coexist on the same host. Default 8000 —
+      # nginx vhost in deploy/install_nginx.sh proxies to this port.
+      - "${BACKEND_HOST_PORT:-8000}:8000"
     volumes:
       - storage_data:/app/storage
       - ./browser_profiles:/app/browser_profiles
