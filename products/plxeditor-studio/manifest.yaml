@@ -160,5 +160,5 @@ patches:
     regex_replace: ''
 
   - file: frontend/src/app/router.tsx
-    regex_find: '\s*\{\n\s*path: "/create-video-pro",.*?errorElement: <RouteErrorBoundary />,\s*\},\s*\n'
+    regex_find: '\{\n\s*path: "/create-video-pro",.*?errorElement: <RouteErrorBoundary />,\s*\},'
     regex_replace: ''
