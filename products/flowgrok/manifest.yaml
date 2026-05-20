@@ -177,8 +177,20 @@ patches:
     replace: "# Gateway models dropped from flowgrok."
 
   - file: frontend/src/components/layout/AppShell.tsx
+    regex_find: 'import \{ useQuery \}.*?\n'
+    regex_replace: ''
+  - file: frontend/src/components/layout/AppShell.tsx
+    regex_find: ', Boxes \}'
+    regex_replace: ' }'
+  - file: frontend/src/components/layout/AppShell.tsx
+    regex_find: 'import \* as LucideIcons.*?\n'
+    regex_replace: ''
+  - file: frontend/src/components/layout/AppShell.tsx
     regex_find: 'import \{ adminModulesService \}.*?\n'
     regex_replace: ''
+  - file: frontend/src/components/layout/AppShell.tsx
+    regex_find: '  // Pull installed modules.*?const NAV: NavEntry\[\] = useMemo\(\(\) => \{.*?\}, \[baseNav, isSuperUser, installedModules\]\);'
+    regex_replace: '  const NAV: NavEntry[] = baseNav;'
 
   - file: frontend/src/modules/admin/router/index.tsx
     regex_find: '\s*\{ path: "admin/(git|modules|modules/:slug)".*?\},'
