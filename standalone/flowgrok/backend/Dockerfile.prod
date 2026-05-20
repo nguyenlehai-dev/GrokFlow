@@ -1,0 +1,74 @@
+FROM python:3.11-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev curl gosu \
+    gnupg lsb-release ca-certificates iproute2 \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libasound2 libnspr4 \
+    fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cloudflare WARP — runs as a SOCKS5 proxy at 127.0.0.1:40000 inside this
+# container. The backend + worker make httpx calls to grok.com; without
+# WARP the VPS IP gets gradually flagged by Cloudflare and image-API
+# requests start returning 403 (provider_blocked), forcing the slow
+# Playwright DOM fallback. WARP makes the requests look like they're
+# coming from inside Cloudflare's own network, which their bot wall
+# trusts. iproute2 (above) is needed by warp-svc's tunnel init.
+RUN curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+        | gpg --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ bookworm main" \
+        > /etc/apt/sources.list.d/cloudflare-client.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends cloudflare-warp \
+    && rm -rf /var/lib/apt/lists/*
+
+# ffmpeg in its own RUN layer so the big graphics-stack layer above stays
+# cacheable across rebuilds — needed for the native Flow video-processing
+# module (app.modules.flow.*).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt && pip install gunicorn==23.0.0
+
+RUN python -m playwright install chromium
+
+COPY . .
+RUN chmod +x entrypoint.sh
+
+RUN useradd -m -u 10001 grokflow && \
+    chown -R grokflow:grokflow /app /ms-playwright && \
+    mkdir -p /app/storage /app/browser_profiles && \
+    chown grokflow:grokflow /app/storage /app/browser_profiles
+
+# Stay as root so entrypoint can chown mounted volumes, then drop via gosu.
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s \
+  CMD curl -fsS http://localhost:8000/health || exit 1
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+# Workers configurable via GUNICORN_WORKERS env so we can tune per VPS
+# without rebuilding the image. Async uvicorn workers don't follow the
+# old (2*CPU+1) rule — 1 per vCPU + 1 buffer is plenty since each worker
+# itself handles many concurrent requests. Default 4 matches a 4-vCPU VPS.
+CMD ["sh", "-c", \
+     "exec gunicorn app.main:app \
+        --bind 0.0.0.0:8000 \
+        --worker-class uvicorn.workers.UvicornWorker \
+        --workers ${GUNICORN_WORKERS:-4} \
+        --access-logfile - \
+        --error-logfile - \
+        --timeout 120 \
+        --graceful-timeout 30 \
+        --keep-alive 5"]
