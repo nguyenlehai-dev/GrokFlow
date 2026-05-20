@@ -84,50 +84,10 @@ services:
         limits:
           memory: 1536m
 
-  worker:
-    image: ai-gateway/backend:${TAG:-latest}
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-flowgrok}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-flowgrok}
-      REDIS_URL: redis://redis:6379/0
-      LOCAL_STORAGE_PATH: /app/storage
-      PROFILE_BASE_PATH: /app/browser_profiles
-      PROFILE_BASE_PATH_HOST: ${PWD}/browser_profiles
-    depends_on:
-      postgres: { condition: service_healthy }
-    volumes:
-      - storage_data:/app/storage
-      - ./browser_profiles:/app/browser_profiles
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: ["python", "-m", "app.workers.run"]
-    healthcheck:
-      test: ["NONE"]
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-
-  idle-cleanup:
-    image: ai-gateway/backend:${TAG:-latest}
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-flowgrok}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-flowgrok}
-      LOCAL_STORAGE_PATH: /app/storage
-      PROFILE_BASE_PATH: /app/browser_profiles
-      PROFILE_BASE_PATH_HOST: ${PWD}/browser_profiles
-      IDLE_CLEANUP_HOURS: ${IDLE_CLEANUP_HOURS:-2}
-      IDLE_CLEANUP_INTERVAL: ${IDLE_CLEANUP_INTERVAL:-900}
-    depends_on:
-      postgres: { condition: service_healthy }
-    volumes:
-      - ./browser_profiles:/app/browser_profiles
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /etc/nginx/grokflow-vhosts:/host_nginx_vhosts
-    command: ["python", "-m", "app.workers.idle_cleanup"]
-    healthcheck:
-      test: ["NONE"]
+  # ai-gateway has no Grok-style job queue + no idle Chromium containers
+  # to clean up — worker + idle-cleanup services are dropped here.
+  # If you bolt Grok onto ai-gateway later, restore them from
+  # products/flowgrok/docker-compose.yml.
 
   frontend:
     build:
