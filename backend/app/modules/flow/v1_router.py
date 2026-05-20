@@ -86,6 +86,40 @@ class V1JobListItem(BaseModel):
     completed_at: str | None
 
 
+class V1JobsListResponse(BaseModel):
+    """Wrapper for GET /jobs — matches plxeditor.com contract.
+
+    plxeditor returns ``{jobs, total}`` so partners can paginate without
+    a second count() call. studio-v2 mirrors that shape verbatim."""
+    jobs: list[V1JobListItem]
+    total: int
+
+
+class V1JobDetail(BaseModel):
+    """Full FlowJob shape for GET /jobs/{id} — matches plxeditor.com.
+
+    Fields ordered to match the upstream OpenAPI schema exactly so
+    partner integrations expecting a specific field set don't break."""
+    id: uuid.UUID
+    job_id: uuid.UUID  # duplicate of id, for clients that read either
+    operation: str
+    status: str
+    progress: float
+    error_message: str | None
+    output_url: str | None
+    output_filename: str | None
+    output_duration: float | None
+    file_size: int | None
+    duration: float | None
+    input_files: list | None
+    params: dict | None
+    has_audio: bool | None
+    thumbnail_url: str | None
+    message: str
+    created_at: str | None
+    completed_at: str | None
+
+
 def _to_v1(job: FlowJob, *, message: str = "Processing job queued.") -> V1JobOut:
     return V1JobOut(
         job_id=job.id,
@@ -359,34 +393,49 @@ async def extract_frames(
 
 # ---------------------------------------------------------------- reads
 
-@router.get("/jobs/{job_id}", response_model=V1JobOut)
+@router.get("/jobs/{job_id}", response_model=V1JobDetail)
 async def get_job(
     job_id: uuid.UUID,
     principal: ApiKeyPrincipal,
     db: DbSession,
-) -> V1JobOut:
+) -> V1JobDetail:
+    """Full job detail — matches plxeditor.com /api/v1/video/jobs/{job_id}
+    shape (15 fields including output_url, progress, input_files, params)."""
     _, user = principal
     job = await service.get_user_job(db, user.id, job_id)
     if not job:
         raise HTTPException(404, "job not found")
-    return V1JobOut(
+    duration_f = float(job.duration) if job.duration is not None else None
+    return V1JobDetail(
+        id=job.id,
         job_id=job.id,
+        operation=job.operation,
         status=job.status,
-        message=job.error_message or f"job {job.status}",
-        thumbnail_url=None,
+        progress=float(job.progress) if job.progress is not None else 0.0,
+        error_message=job.error_message,
+        output_url=job.output_url,
+        output_filename=job.output_filename,
+        output_duration=duration_f,
+        file_size=job.file_size,
+        duration=duration_f,
+        input_files=job.input_files,
+        params=job.params,
         has_audio=None,
-        output_duration=float(job.duration) if job.duration is not None else None,
+        thumbnail_url=None,
+        message=job.error_message or f"job {job.status}",
+        created_at=job.created_at.isoformat() if job.created_at else None,
+        completed_at=job.completed_at.isoformat() if job.completed_at else None,
     )
 
 
 # ---------------------------------------------------------------- aliases + chunked-upload
 
-@router.get("/status/{job_id}", response_model=V1JobOut)
+@router.get("/status/{job_id}", response_model=V1JobDetail)
 async def get_status(
     job_id: uuid.UUID,
     principal: ApiKeyPrincipal,
     db: DbSession,
-) -> V1JobOut:
+) -> V1JobDetail:
     """Alias for /jobs/{job_id} — matches plxeditor.com's separate status surface."""
     return await get_job(job_id, principal, db)
 
@@ -629,29 +678,42 @@ async def set_upload_progress(
     return {"job_id": str(job_id), "progress": payload.progress}
 
 
-@router.get("/jobs", response_model=list[V1JobListItem])
+@router.get("/jobs", response_model=V1JobsListResponse)
 async def list_jobs(
     principal: ApiKeyPrincipal,
     db: DbSession,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-) -> list[V1JobListItem]:
+) -> V1JobsListResponse:
+    """Paginated job list — matches plxeditor.com ``{jobs[], total}`` shape.
+
+    `total` is the count of ALL jobs for the caller, regardless of
+    skip/limit — clients use it to render "page N of M" without an
+    extra count() round-trip.
+    """
+    from sqlalchemy import func
     _, user = principal
+    total = (await db.execute(
+        select(func.count(FlowJob.id)).where(FlowJob.user_id == user.id)
+    )).scalar_one() or 0
     rows = (await db.execute(
         select(FlowJob).where(FlowJob.user_id == user.id)
         .order_by(FlowJob.created_at.desc())
         .offset(skip).limit(limit)
     )).scalars().all()
-    return [
-        V1JobListItem(
-            id=j.id,
-            operation=j.operation,
-            status=j.status,
-            progress=float(j.progress) if j.progress is not None else 0.0,
-            error_message=j.error_message,
-            output_url=j.output_url,
-            created_at=j.created_at.isoformat() if j.created_at else "",
-            completed_at=j.completed_at.isoformat() if j.completed_at else None,
-        )
-        for j in rows
-    ]
+    return V1JobsListResponse(
+        jobs=[
+            V1JobListItem(
+                id=j.id,
+                operation=j.operation,
+                status=j.status,
+                progress=float(j.progress) if j.progress is not None else 0.0,
+                error_message=j.error_message,
+                output_url=j.output_url,
+                created_at=j.created_at.isoformat() if j.created_at else "",
+                completed_at=j.completed_at.isoformat() if j.completed_at else None,
+            )
+            for j in rows
+        ],
+        total=int(total),
+    )
