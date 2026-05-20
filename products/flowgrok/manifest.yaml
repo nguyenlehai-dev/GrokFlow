@@ -176,7 +176,7 @@ patches:
 
   # /flow gallery endpoint queries FlowJob — stub it to empty for flowgrok.
   - file: backend/app/modules/admin/gallery/router.py
-    regex_find: '    base = select\(FlowJob.*?return FlowGalleryPage\(items=items, total=int\(total\), offset=offset, limit=limit\)'
+    regex_find: '    base = \(\n        select\(FlowJob, User, Domain\).*?return FlowGalleryPage\(items=items, total=int\(total\), offset=offset, limit=limit\)'
     regex_replace: '    return FlowGalleryPage(items=[], total=0, offset=offset, limit=limit)'
 
   - file: backend/app/modules/admin/gallery/router.py
