@@ -109,28 +109,36 @@ async def verify_gateway_key(
     payload: s.GatewayKeyVerifyRequest, db: DbSession,
 ) -> s.GatewayKeyVerifyResponse:
     """Verify a gateway API key — used by Playground + partner sanity
-    checks. Public on purpose: a wrong key returns verified=False rather
-    than 401, so a misconfigured partner sees the no-op instead of
-    leaking auth state.
+    checks. Public; no Authorization header required.
 
     Legacy gateway.plxeditor.com clients post `{"gateway_api_key": "..."}`,
     v2 clients post `{"key": "..."}` — schema accepts both via
     effective_key.
+
+    On success: 200 with `{verified: true, label, allowed_functions}`.
+    On failure: 401 with `{"detail": "Invalid gateway API key"}` — same
+    shape as the legacy product so customer code that branches on
+    status code or `detail` string keeps working.
     """
     key_value = payload.effective_key
-    if not key_value:
-        return s.GatewayKeyVerifyResponse(verified=False)
-    prefix = key_value[:12]
-    rows = (await db.execute(
-        select(GwGatewayKey).where(GwGatewayKey.prefix == prefix, GwGatewayKey.status == "active")
-    )).scalars().all()
-    for k in rows:
-        try:
-            if verify_password(key_value, k.key_hash):
-                return s.GatewayKeyVerifyResponse(
-                    verified=True, label=k.label,
-                    allowed_functions=k.allowed_functions,
-                )
-        except Exception:  # noqa: BLE001
-            continue
-    return s.GatewayKeyVerifyResponse(verified=False)
+    if key_value:
+        prefix = key_value[:12]
+        rows = (await db.execute(
+            select(GwGatewayKey).where(GwGatewayKey.prefix == prefix, GwGatewayKey.status == "active")
+        )).scalars().all()
+        for k in rows:
+            try:
+                if verify_password(key_value, k.key_hash):
+                    return s.GatewayKeyVerifyResponse(
+                        verified=True, label=k.label,
+                        allowed_functions=k.allowed_functions,
+                    )
+            except Exception:  # noqa: BLE001
+                continue
+    # Match legacy: invalid (or empty) keys → 401 with string detail.
+    from fastapi import HTTPException, status as http_status
+    raise HTTPException(
+        status_code=http_status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid gateway API key",
+        headers={"X-Error-Code": "invalid_gateway_key"},
+    )
