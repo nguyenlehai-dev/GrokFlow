@@ -400,6 +400,47 @@ async def retry_job(
     return FlowJobOut.model_validate(job)
 
 
+@router.delete("/jobs/{job_id}", status_code=204)
+async def delete_job(job_id: uuid.UUID, user: CurrentUser, db: DbSession) -> None:
+    """Remove a Flow job record + best-effort wipe of its on-disk files.
+
+    Lets operators clean up the Requests list — failed jobs from before a
+    fix shipped (eg the dummy.txt ffmpeg dumps) pile up otherwise. The
+    background task can't be cancelled mid-run, so we refuse to delete a
+    row whose status is still 'processing' / 'pending' — caller should
+    wait or use the cancel flow first.
+    """
+    import shutil
+
+    job = await service.get_user_job(db, user.id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status in {"pending", "processing", "uploading"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"cannot delete a {job.status} job — wait for it to finish first",
+        )
+
+    # Best-effort filesystem wipe. The service is the source of truth for
+    # where files live (input_dir / output_dir return Path objects).
+    for path_fn in (service.input_dir, service.output_dir):
+        try:
+            d = path_fn(job_id)
+            if d.exists():
+                shutil.rmtree(d, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            logger.exception("flow delete: cleanup failed for %s", job_id)
+
+    await db.delete(job)
+    await audit.log_action(
+        db, user_id=user.id, action="flow_delete",
+        target_type="flow_job", target_id=job_id,
+        metadata={"operation": job.operation, "status_at_delete": job.status},
+    )
+    await db.commit()
+    return None
+
+
 # ---------------------------------------------------------------------------
 # File download (used by /flow-output/<name> nginx alias too)
 # ---------------------------------------------------------------------------
