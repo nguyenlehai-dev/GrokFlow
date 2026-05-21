@@ -9,7 +9,7 @@ What it does:
   1. create_all() — skip alembic, just stamp every model's CREATE TABLE
   2. seed the default Plan (so login + entitlements work)
   3. seed a super_admin user (admin@local / Admin@123456)
-  4. seed one Server row pointing at 192.168.1.16 with the prod password
+  4. seed one Server row pointing at 192.168.1.11 with the prod password
      (only meaningful when the local network can reach that IP)
 
 Idempotent — safe to re-run.

@@ -253,6 +253,28 @@ class AdminModule(Base, TimestampMixin):
     )
 
 
+class GitHubPAT(Base):
+    """A GitHub Personal Access Token saved by an admin for reuse.
+
+    The plaintext value is never returned through any API. Install /
+    Create flows resolve the saved row by id and decrypt internally so
+    admins don't have to re-paste the same token.
+    """
+    __tablename__ = "github_pats"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    github_user: Mapped[str | None] = mapped_column(String(120))
+    token_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class TenantModule(Base):
     """Many-to-many: which tenants (domains) have a module enabled.
 

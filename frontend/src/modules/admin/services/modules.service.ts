@@ -39,6 +39,9 @@ export interface ModuleInstallPayload {
   git_url: string;
   git_ref: string;
   github_pat?: string | null;
+  saved_pat_id?: string | null;
+  save_pat?: boolean;
+  save_pat_label?: string | null;
   auto_scaffold?: boolean;
   module_label?: string | null;
 }
@@ -46,9 +49,20 @@ export interface ModuleInstallPayload {
 export interface CreateModulePayload {
   github_owner: string;
   github_repo: string;
-  github_pat: string;
+  github_pat?: string | null;
+  saved_pat_id?: string | null;
+  save_pat?: boolean;
+  save_pat_label?: string | null;
   private?: boolean;
   module_label?: string | null;
+}
+
+export interface GitHubPATRow {
+  id: string;
+  label: string;
+  github_user: string | null;
+  created_at: string;
+  last_used_at: string | null;
 }
 
 const BASE = "/api/admin/modules";
@@ -76,4 +90,12 @@ export const adminModulesService = {
   toggleTenant: (id: string, domainId: string, enabled: boolean) =>
     api.post<TenantModuleRow>(`${BASE}/${id}/tenants`, { domain_id: domainId, enabled })
       .then((r) => r.data),
+};
+
+const PATS = "/api/admin/github-pats";
+export const githubPatsService = {
+  list: () => api.get<GitHubPATRow[]>(PATS).then((r) => r.data),
+  save: (label: string, token: string) =>
+    api.post<GitHubPATRow>(PATS, { label, token }).then((r) => r.data),
+  remove: (id: string) => api.delete(`${PATS}/${id}`),
 };

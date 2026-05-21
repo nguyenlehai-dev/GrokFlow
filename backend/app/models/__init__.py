@@ -24,7 +24,7 @@ list is the only place that needs updating to expose it package-wide.
 
 from ._base import Base, JSONType, TimestampMixin, UUIDType, _uuid
 
-from .admin import AdminModule, AuditLog, Domain, DomainQuotaPeriod, GitRepo, Notification, Role, TenantModule
+from .admin import AdminModule, AuditLog, Domain, DomainQuotaPeriod, GitHubPAT, GitRepo, Notification, Role, TenantModule
 from .auth import ApiKey, User
 from .billing import Invoice, Payment, Plan, Subscription
 from .flow import FlowJob
@@ -61,7 +61,7 @@ __all__ = [
     # Infrastructure
     "Base", "JSONType", "TimestampMixin", "UUIDType", "_uuid",
     # Admin / tenancy
-    "AdminModule", "AuditLog", "Domain", "DomainQuotaPeriod", "GitRepo", "Notification", "Role", "TenantModule",
+    "AdminModule", "AuditLog", "Domain", "DomainQuotaPeriod", "GitHubPAT", "GitRepo", "Notification", "Role", "TenantModule",
     # Auth
     "ApiKey", "User",
     # Billing

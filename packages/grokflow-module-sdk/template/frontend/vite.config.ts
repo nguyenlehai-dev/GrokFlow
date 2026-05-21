@@ -3,6 +3,11 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  // Relative asset paths so the bundle works whether served at /
+  // (standalone dev) or /m/<slug>/ (under the GrokFlow shell iframe).
+  // Without this, vite emits `/assets/...` (absolute) and the iframe
+  // tries to load assets from the parent shell's origin → 404.
+  base: "./",
   server: {
     port: 5173,
     proxy: {

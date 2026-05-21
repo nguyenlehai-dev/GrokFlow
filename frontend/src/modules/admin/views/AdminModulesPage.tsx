@@ -6,8 +6,87 @@ import { toast } from "@/components/ui/Toast";
 import { AdminGuard } from "../components/AdminGuard";
 import {
   adminModulesService,
+  githubPatsService,
   type AdminModuleRow,
+  type GitHubPATRow,
 } from "../services/modules.service";
+
+
+/** Compact PAT picker used by both Install + Create modals.
+ *  Renders: dropdown (saved tokens) + "Or paste new" input + optional
+ *  "Save this token" toggle. Returns the chosen value as either
+ *  { saved_pat_id } or { github_pat, save_pat, save_pat_label }.
+ *
+ *  Component is uncontrolled-ish — parent passes setters; we own the UI. */
+function PatPicker({
+  pats, inlinePat, setInlinePat, savedPatId, setSavedPatId,
+  savePat, setSavePat, savePatLabel, setSavePatLabel,
+  required,
+}: {
+  pats: GitHubPATRow[];
+  inlinePat: string; setInlinePat: (v: string) => void;
+  savedPatId: string | null; setSavedPatId: (v: string | null) => void;
+  savePat: boolean; setSavePat: (v: boolean) => void;
+  savePatLabel: string; setSavePatLabel: (v: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      {pats.length > 0 && (
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">
+            Saved PATs ({pats.length})
+          </span>
+          <select
+            value={savedPatId ?? ""}
+            onChange={(e) => {
+              const v = e.target.value || null;
+              setSavedPatId(v);
+              if (v) setInlinePat("");
+            }}
+            className="input mt-1 w-full text-sm"
+          >
+            <option value="">— Paste new PAT below —</option>
+            {pats.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label} {p.github_user ? `(@${p.github_user})` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {!savedPatId && (
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">
+            GitHub PAT {required && "*"}
+          </span>
+          <input
+            type="password"
+            value={inlinePat}
+            onChange={(e) => setInlinePat(e.target.value)}
+            placeholder="ghp_…"
+            className="input mt-1 w-full font-mono text-sm"
+          />
+          <label className="flex items-center gap-2 mt-1.5 text-xs text-slate-600 cursor-pointer">
+            <input
+              type="checkbox" checked={savePat}
+              onChange={(e) => setSavePat(e.target.checked)}
+            />
+            <span>Save token for reuse</span>
+            {savePat && (
+              <input
+                value={savePatLabel}
+                onChange={(e) => setSavePatLabel(e.target.value)}
+                placeholder="Label (vd: 'My main PAT')"
+                className="input ml-2 text-xs py-0.5 flex-1"
+              />
+            )}
+          </label>
+        </label>
+      )}
+    </div>
+  );
+}
 
 export function AdminModulesPage() {
   return (
@@ -318,14 +397,25 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
   const [gitUrl, setGitUrl] = useState("");
   const [gitRef, setGitRef] = useState("main");
   const [pat, setPat] = useState("");
+  const [savedPatId, setSavedPatId] = useState<string | null>(null);
+  const [savePat, setSavePat] = useState(false);
+  const [savePatLabel, setSavePatLabel] = useState("");
   const [autoScaffold, setAutoScaffold] = useState(false);
   const [moduleLabel, setModuleLabel] = useState("");
+
+  const { data: pats = [] } = useQuery({
+    queryKey: ["github-pats"],
+    queryFn: () => githubPatsService.list(),
+  });
 
   const install = useMutation({
     mutationFn: () => adminModulesService.install({
       git_url: gitUrl.trim(),
       git_ref: gitRef.trim() || "main",
       github_pat: pat.trim() || null,
+      saved_pat_id: savedPatId,
+      save_pat: savePat,
+      save_pat_label: savePatLabel.trim() || null,
       auto_scaffold: autoScaffold,
       module_label: moduleLabel.trim() || null,
     }),
@@ -356,17 +446,16 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
           />
         </label>
 
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">GitHub PAT (nếu repo private hoặc cần auto-scaffold)</span>
-          <input
-            type="password" value={pat} onChange={(e) => setPat(e.target.value)}
-            placeholder="ghp_…"
-            className="input mt-1 w-full font-mono text-sm"
-          />
-          <p className="text-xs text-slate-500 mt-1">
-            Token mã hoá Fernet trước khi lưu. Scope <code>repo</code> (read) cho clone, scope <code>repo</code> (write) nếu bật scaffold.
-          </p>
-        </label>
+        <PatPicker
+          pats={pats}
+          inlinePat={pat} setInlinePat={setPat}
+          savedPatId={savedPatId} setSavedPatId={setSavedPatId}
+          savePat={savePat} setSavePat={setSavePat}
+          savePatLabel={savePatLabel} setSavePatLabel={setSavePatLabel}
+        />
+        <p className="text-xs text-slate-500 -mt-1">
+          Scope <code>repo</code> (read) cho clone, scope <code>repo</code> (write) nếu bật scaffold.
+        </p>
 
         <div className="rounded-md border border-violet-200 bg-violet-50 p-3 space-y-2">
           <label className="flex items-start gap-2 cursor-pointer">
@@ -416,14 +505,25 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
   const [pat, setPat] = useState("");
+  const [savedPatId, setSavedPatId] = useState<string | null>(null);
+  const [savePat, setSavePat] = useState(false);
+  const [savePatLabel, setSavePatLabel] = useState("");
   const [label, setLabel] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
+
+  const { data: pats = [] } = useQuery({
+    queryKey: ["github-pats"],
+    queryFn: () => githubPatsService.list(),
+  });
 
   const create = useMutation({
     mutationFn: () => adminModulesService.createAndInstall({
       github_owner: owner.trim(),
       github_repo: repo.trim(),
-      github_pat: pat.trim(),
+      github_pat: pat.trim() || null,
+      saved_pat_id: savedPatId,
+      save_pat: savePat,
+      save_pat_label: savePatLabel.trim() || null,
       private: isPrivate,
       module_label: label.trim() || null,
     }),
@@ -464,14 +564,14 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
           </label>
         </div>
 
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">GitHub PAT (write scope)</span>
-          <input
-            type="password" value={pat} onChange={(e) => setPat(e.target.value)}
-            placeholder="ghp_…"
-            className="input mt-1 w-full font-mono text-sm"
-          />
-        </label>
+        <PatPicker
+          pats={pats}
+          inlinePat={pat} setInlinePat={setPat}
+          savedPatId={savedPatId} setSavedPatId={setSavedPatId}
+          savePat={savePat} setSavePat={setSavePat}
+          savePatLabel={savePatLabel} setSavePatLabel={setSavePatLabel}
+          required
+        />
 
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Sidebar label</span>

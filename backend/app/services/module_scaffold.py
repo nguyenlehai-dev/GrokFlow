@@ -18,6 +18,7 @@ manifest from disk, but the repo on GitHub remains empty.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -29,17 +30,18 @@ import httpx
 from app.core.exceptions import InvalidPayload
 
 
-# Where the built-in templates live in the GrokFlow tree. Mounted into
-# the backend container via the standard /app code mount.
-TEMPLATE_ROOT = Path(__file__).resolve().parents[2] / ".." / "packages" / "grokflow-module-sdk" / "template"
-# When running inside the docker container the path resolution above
-# walks out of /app — fall back to the absolute path inside the repo
-# bind-mount.
-if not TEMPLATE_ROOT.exists():
-    TEMPLATE_ROOT = Path("/app/../packages/grokflow-module-sdk/template").resolve()
-if not TEMPLATE_ROOT.exists():
-    # Last-resort: look for it sibling to the backend dir.
-    TEMPLATE_ROOT = Path("/packages/grokflow-module-sdk/template")
+# Where the built-in templates live. Production deployments bake the
+# SDK into the backend image at /app/_sdk; dev runs mount it via
+# docker-compose.yml. Honour an env override for one-off deploys that
+# stash the SDK somewhere else.
+_TEMPLATE_CANDIDATES = [
+    Path(os.environ["GROKFLOW_SDK_PATH"]) if os.environ.get("GROKFLOW_SDK_PATH") else None,
+    Path("/app/_sdk/template"),
+    Path(__file__).resolve().parents[3] / "packages" / "grokflow-module-sdk" / "template",
+    Path("/packages/grokflow-module-sdk/template"),
+]
+TEMPLATE_ROOT = next((p for p in _TEMPLATE_CANDIDATES if p and p.exists()),
+                    Path("/app/_sdk/template"))
 
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{2,30}$")
@@ -157,8 +159,14 @@ async def github_create_repo(*, owner: str, name: str, pat: str,
         "X-GitHub-Api-Version": "2022-11-28",
     }
     async with httpx.AsyncClient(base_url="https://api.github.com", timeout=15.0) as client:
-        # Who is the PAT for?
-        me = (await client.get("/user", headers=headers)).json()
+        # Who is the PAT for? Used to pick /user/repos vs /orgs/<o>/repos.
+        me_resp = await client.get("/user", headers=headers)
+        if me_resp.status_code == 401:
+            raise InvalidPayload(
+                "GitHub PAT is invalid or expired. Create a new classic token "
+                "with `repo` scope at https://github.com/settings/tokens."
+            )
+        me = me_resp.json()
         endpoint = "/user/repos" if me.get("login") == owner else f"/orgs/{owner}/repos"
         body = {
             "name": name,
@@ -168,8 +176,23 @@ async def github_create_repo(*, owner: str, name: str, pat: str,
         }
         r = await client.post(endpoint, headers=headers, json=body)
         if r.status_code >= 400:
+            try:
+                err = r.json()
+            except Exception:
+                err = {"message": r.text[:200]}
+            # Surface the most specific error GitHub gave us. 422 usually
+            # has an `errors[].message` like "name already exists on this account".
+            details: list[str] = []
+            if isinstance(err.get("errors"), list):
+                for e in err["errors"]:
+                    if isinstance(e, dict) and e.get("message"):
+                        details.append(e["message"])
+            top = err.get("message", "Repository creation failed")
+            doc = err.get("documentation_url", "")
+            detail_str = "; ".join(details) if details else ""
             raise InvalidPayload(
-                f"GitHub repo create failed ({r.status_code}): "
-                f"{r.json().get('message', r.text)[:200]}"
+                f"GitHub {r.status_code}: {top}"
+                + (f" — {detail_str}" if detail_str else "")
+                + (f"  ({doc})" if doc else "")
             )
         return r.json()

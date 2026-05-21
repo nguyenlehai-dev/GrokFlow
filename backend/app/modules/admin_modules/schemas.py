@@ -68,11 +68,17 @@ class ModuleManifestSchema(BaseModel):
 class ModuleInstallRequest(BaseModel):
     git_url: str
     git_ref: str = "main"
+    # Either inline a PAT…
     github_pat: str | None = None
+    # …or reference a saved one. Mutually exclusive — inline wins if both set.
+    saved_pat_id: UUID | None = None
     # When set, an empty repo (no module.manifest.json) is auto-populated
     # from the bundled SDK template and pushed back before install
     # proceeds. Requires a PAT with `repo` write scope.
     auto_scaffold: bool = False
+    # Save the inline PAT for reuse on future installs.
+    save_pat: bool = False
+    save_pat_label: str | None = None
     # Optional human-friendly module label — used as the sidebar entry
     # text when auto-scaffolding, otherwise derived from the slug.
     module_label: str | None = None
@@ -82,8 +88,11 @@ class CreateModuleRequest(BaseModel):
     """Wizard flow: create a brand-new GitHub repo + scaffold + install."""
     github_owner: str             # user or org login
     github_repo: str              # new repo name to create
-    github_pat: str               # required — needs `repo` scope
+    github_pat: str | None = None # inline PAT…
+    saved_pat_id: UUID | None = None  # …or saved
     private: bool = False
+    save_pat: bool = False
+    save_pat_label: str | None = None
     module_label: str | None = None    # defaults to repo name
 
 

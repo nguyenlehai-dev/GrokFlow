@@ -43,6 +43,9 @@ services:
       - storage_data:/app/storage
       - profile_data:/app/browser_profiles
       - modules_data:/app/modules-data
+      # Module marketplace SDK template — installer copies from here into
+      # cloned repos when auto_scaffold=true. Read-only mount.
+      - ./packages/grokflow-module-sdk:/app/_sdk:ro
 
   worker:
     build: ./backend

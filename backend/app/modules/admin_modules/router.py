@@ -18,11 +18,12 @@ from sqlalchemy import select
 from app.core.deps import DbSession, SuperAdminUser
 from app.core.encryption import encrypt
 from app.core.exceptions import InvalidPayload, NotFound
-from app.models import AdminModule, TenantModule
+from app.models import AdminModule, GitHubPAT, TenantModule
 from app.modules.admin.audit import service as audit
 from app.services import module_runtime as rt
 from app.services import module_scaffold
 
+from . import github_pats as github_pats_mod
 from . import installer
 from .schemas import (
     CreateModuleRequest,
@@ -57,6 +58,24 @@ async def install_module(
     this endpoint returns in < 3s. Frontend polls the list endpoint
     until the row's status transitions out of `installing`.
     """
+    # Resolve PAT: saved_pat_id wins over inline if both set is impossible
+    # (UI radio); inline wins as the explicit case.
+    resolved_pat = await github_pats_mod.resolve_pat(
+        db, saved_pat_id=req.saved_pat_id, inline_pat=req.github_pat,
+    )
+    req.github_pat = resolved_pat
+
+    # Persist inline PAT if user opted in.
+    if req.save_pat and req.github_pat and not req.saved_pat_id:
+        gh_user = await github_pats_mod._probe_github_user(req.github_pat)
+        from app.core.encryption import encrypt as _enc
+        db.add(GitHubPAT(
+            label=(req.save_pat_label or gh_user or "Saved PAT"),
+            github_user=gh_user,
+            token_enc=_enc(req.github_pat),
+            created_by=admin.id,
+        ))
+
     # Generate the module's DB password and service token here so we can
     # both encrypt them into the row AND hand the raw values to the
     # background task without round-tripping through the DB.
@@ -225,8 +244,27 @@ async def create_and_install(
     Requires a PAT with `repo` scope (write) for both the create-repo
     call and the subsequent push of scaffolded files.
     """
+    resolved_pat = await github_pats_mod.resolve_pat(
+        db, saved_pat_id=req.saved_pat_id, inline_pat=req.github_pat,
+    )
+    if not resolved_pat:
+        from app.core.exceptions import InvalidPayload as _IP
+        raise _IP("GitHub PAT required (inline or saved_pat_id)")
+
+    # Persist inline PAT if user opted in.
+    if req.save_pat and not req.saved_pat_id:
+        gh_user = await github_pats_mod._probe_github_user(resolved_pat)
+        from app.core.encryption import encrypt as _enc
+        db.add(GitHubPAT(
+            label=(req.save_pat_label or gh_user or "Saved PAT"),
+            github_user=gh_user,
+            token_enc=_enc(resolved_pat),
+            created_by=admin.id,
+        ))
+        await db.commit()
+
     repo = await module_scaffold.github_create_repo(
-        owner=req.github_owner, name=req.github_repo, pat=req.github_pat,
+        owner=req.github_owner, name=req.github_repo, pat=resolved_pat,
         private=req.private,
     )
     clone_url = repo.get("clone_url") or f"https://github.com/{req.github_owner}/{req.github_repo}.git"
@@ -234,7 +272,7 @@ async def create_and_install(
     install_req = ModuleInstallRequest(
         git_url=clone_url,
         git_ref="main",
-        github_pat=req.github_pat,
+        github_pat=resolved_pat,
         auto_scaffold=True,
         module_label=req.module_label or req.github_repo,
     )

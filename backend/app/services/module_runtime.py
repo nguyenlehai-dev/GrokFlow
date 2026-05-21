@@ -181,6 +181,12 @@ def _build_image(work_dir: Path, dockerfile_rel: str, tag: str,
                  build_args: dict[str, str] | None = None) -> str:
     """Build a docker image from work_dir / dockerfile_rel.
 
+    Build context = the *directory containing the Dockerfile* (subdir of
+    work_dir), not work_dir itself. Module Dockerfiles typically do
+    `COPY package.json ./` expecting the context to be e.g. `frontend/`;
+    using work_dir as context would make those COPYs look for the file
+    at the repo root and fail.
+
     Returns the resulting image tag. Streams build logs to stdout so they
     appear in `docker logs grokflow-backend-1` (useful for debugging
     install failures via the container log).
@@ -190,21 +196,41 @@ def _build_image(work_dir: Path, dockerfile_rel: str, tag: str,
     if not dockerfile_path.exists():
         raise FileNotFoundError(f"dockerfile not found: {dockerfile_rel}")
 
-    print(f"[module-install] docker build → {tag}", flush=True)
-    image, build_logs = client.images.build(
-        path=str(work_dir),
-        dockerfile=str(dockerfile_path.relative_to(work_dir)),
+    # Use the Dockerfile's parent dir as the build context so its COPY
+    # paths resolve naturally. Modules that want a wider context can
+    # set `frontend.dockerfile = "Dockerfile"` and put it at the repo
+    # root (then context = work_dir).
+    context_dir = dockerfile_path.parent
+    print(f"[module-install] docker build → {tag} (context={context_dir})", flush=True)
+    # Use the low-level api.build() so we can stream + capture the
+    # output BEFORE a BuildError swallows it. The high-level
+    # images.build() raises a BuildError without the prior stream
+    # logs, which makes "Why did npm install fail?" guesswork.
+    accumulated: list[str] = []
+    last_error: str | None = None
+    for chunk in client.api.build(
+        path=str(context_dir),
+        dockerfile=dockerfile_path.name,
         tag=tag,
         buildargs=build_args or {},
         rm=True,
         forcerm=True,
         pull=False,
-    )
-    for chunk in build_logs:
-        msg = chunk.get("stream") or chunk.get("error")
+        decode=True,
+    ):
+        msg = chunk.get("stream") or chunk.get("errorDetail", {}).get("message") or chunk.get("error")
         if msg:
-            print(f"[module-build][{tag}] {msg.strip()}", flush=True)
-    return image.tags[0] if image.tags else tag
+            text = msg.strip()
+            accumulated.append(text)
+            print(f"[module-build][{tag}] {text}", flush=True)
+        if chunk.get("error"):
+            last_error = chunk["error"]
+    if last_error:
+        # Surface the last ~10 build lines so the admin UI's `last_error`
+        # field actually says WHAT broke, not just the exit code.
+        tail = "\n".join(accumulated[-10:])
+        raise RuntimeError(f"docker build failed: {last_error}\n--- tail ---\n{tail}")
+    return tag
 
 
 def build_images(work_dir: Path, manifest: dict[str, Any], slug: str) -> tuple[str, str]:
@@ -252,9 +278,25 @@ def _common_security_kwargs(manifest: dict[str, Any]) -> dict[str, Any]:
     cpus = min(float(res.get("cpus", 0.5)), HARD_CAP_CPUS)
     return {
         "cap_drop": ["ALL"],
+        # nginx and uvicorn need a tiny set of caps for their normal
+        # startup (chown cache dir, drop to non-root worker, bind <1024
+        # port). Without these the FE nginx crash-loops on
+        # "chown(/var/cache/nginx/client_temp) failed: Operation not
+        # permitted". The set below is the standard "non-root daemon"
+        # minimum — still no NET_RAW / SYS_ADMIN / etc.
+        "cap_add": ["CHOWN", "SETUID", "SETGID", "NET_BIND_SERVICE", "DAC_OVERRIDE"],
         "security_opt": ["no-new-privileges:true"],
         "read_only": True,
-        "tmpfs": {"/tmp": "rw,size=128m"},
+        # nginx (in module FE images) writes to /var/cache/nginx and a
+        # pid file at startup; uvicorn/python may write pyc to /tmp;
+        # nginx entrypoints touch /run + /var/run. Give each its own
+        # tiny tmpfs so the rest of the filesystem stays read-only.
+        "tmpfs": {
+            "/tmp": "rw,size=128m",
+            "/var/cache/nginx": "rw,size=32m",
+            "/var/run": "rw,size=8m",
+            "/run": "rw,size=8m",
+        },
         "mem_limit": mem_bytes,
         "memswap_limit": mem_bytes,    # disallow swap
         "cpu_period": 100000,
