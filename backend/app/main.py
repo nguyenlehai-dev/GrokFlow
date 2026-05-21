@@ -85,9 +85,21 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         print(f"[startup] profile relogin watchdog failed to start: {exc}", flush=True)
 
+    # VNC pool keeper — every 60s respawn missing/dead VNC containers
+    # for profiles that should be logged_in. Defence in depth against
+    # the still-unsolved 'container silently vanishes' bug — instead of
+    # chasing every disappearance, keep the pool topped up so the
+    # worker never starves.
+    pool_keeper_task: asyncio.Task | None = None
+    try:
+        from app.services.vnc_pool_keeper import keeper_loop
+        pool_keeper_task = asyncio.create_task(keeper_loop())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] vnc pool keeper failed to start: {exc}", flush=True)
+
     yield
     # On shutdown: stop background tasks + drain the shared httpx pool.
-    for t in (vnc_events_task, tab_gc_task, cdp_watchdog_task, relogin_watchdog_task):
+    for t in (vnc_events_task, tab_gc_task, cdp_watchdog_task, relogin_watchdog_task, pool_keeper_task):
         if t is None:
             continue
         t.cancel()
