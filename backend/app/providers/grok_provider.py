@@ -1398,27 +1398,73 @@ class GrokProvider(Provider):
                         pass
                 await asyncio.sleep(0.15)
 
-                # Slow type: each character → keydown/press/up events that
-                # ProseMirror's plugin chain handles and updates state for.
-                # Per-tab CDP target — concurrent tabs each get their own
-                # event stream, no focus contention.
                 pm_text = ""
-                try:
-                    await page.keyboard.type(prompt_text, delay=12)
-                    await asyncio.sleep(0.3)
-                    pm_text = await page.evaluate(
-                        """() => {
-                            const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
-                            return pm ? (pm.innerText || '').trim() : '';
-                        }"""
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    self._log(tag, f"keyboard.type failed: {exc}")
+                # Strategy split by length:
+                #   • >= 500 chars → PASTE first. keyboard.type at 12ms/char
+                #     takes 55s for a 4.6k-char director-style prompt, and
+                #     ProseMirror's IME composer fires onChange after every
+                #     single key — by the time the loop ends, React's render
+                #     queue is way behind and the Submit handler reads
+                #     stale state, causing the "click registered but no
+                #     /api/imagine call" symptom.
+                #   • < 500 chars → keep keyboard.type. Short prompts are
+                #     ~5s of typing and behave more naturally for Grok's
+                #     anti-bot heuristics.
+                # Both paths still run a paste-event fallback if the first
+                # method left PM empty (e.g. paste blocked by CSP).
+                use_paste_first = len(prompt_text) >= 500
 
-                self._log(tag, f"prompt typed via keyboard.type (len={len(prompt_text)}, pm_filled={bool(pm_text)})")
+                if use_paste_first:
+                    # Single clipboard paste — one onChange in React,
+                    # one transaction in ProseMirror. PM's clipboard
+                    # plugin runs its own parser so the text shows up
+                    # natively in the editor.
+                    try:
+                        await page.evaluate(
+                            """(args) => {
+                                const [el, text] = args;
+                                if (!el) return false;
+                                const dt = new DataTransfer();
+                                dt.setData('text/plain', text);
+                                const ev = new ClipboardEvent('paste', {
+                                    bubbles: true, cancelable: true, clipboardData: dt,
+                                });
+                                try { el.focus(); } catch (e) {}
+                                el.dispatchEvent(ev);
+                                const inner = el.querySelector('[contenteditable="true"]') || el;
+                                if (inner !== el) inner.dispatchEvent(ev);
+                                return true;
+                            }""",
+                            [prompt_el, prompt_text],
+                        )
+                        await asyncio.sleep(0.4)
+                        pm_text = await page.evaluate(
+                            """() => {
+                                const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
+                                return pm ? (pm.innerText || '').trim() : '';
+                            }"""
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self._log(tag, f"paste-first failed: {exc}")
+                    self._log(tag, f"prompt pasted (len={len(prompt_text)}, pm_filled={bool(pm_text)})")
 
-                # Fallback paste-event if typing somehow produced nothing.
                 if not pm_text:
+                    # Either short prompt path, or paste-first didn't fill PM.
+                    try:
+                        await page.keyboard.type(prompt_text, delay=12)
+                        await asyncio.sleep(0.3)
+                        pm_text = await page.evaluate(
+                            """() => {
+                                const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
+                                return pm ? (pm.innerText || '').trim() : '';
+                            }"""
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self._log(tag, f"keyboard.type failed: {exc}")
+                    self._log(tag, f"prompt typed via keyboard.type (len={len(prompt_text)}, pm_filled={bool(pm_text)})")
+
+                # Fallback paste-event if BOTH paths above left PM empty.
+                if not pm_text and not use_paste_first:
                     self._log(tag, "keyboard.type produced empty PM, trying paste event")
                     injected = await page.evaluate(
                         """(args) => {
@@ -1467,18 +1513,47 @@ class GrokProvider(Provider):
                 # short debounce (~150-300ms); without this wait the submit
                 # handler may read an empty React state even when the DOM
                 # has the typed text.
-                await asyncio.sleep(0.6)
+                #
+                # Scale the initial wait with prompt length. Long prompts
+                # (3000+ chars) saw React's controlled-input reconcilation
+                # take 1-2s on slow VNCs; the old fixed 0.6s slept past
+                # the DOM update but BEFORE React's onChange landed, so
+                # the subsequent click fired with React state still empty.
+                # Grok's onSubmit reads from React state, treats it as
+                # blank, and silently no-ops the API call — manifesting
+                # as the "submit clicked but generate_api_called=False"
+                # symptom that fast-fails our worker.
+                #
+                # Heuristic: 0.6s baseline + 1 extra second per 2000 chars.
+                # 4500-char prompts get ~3s, short prompts stay snappy.
+                prompt_len = len(job.prompt or "")
+                react_settle = 0.6 + min(4.0, prompt_len / 2000.0)
+                await asyncio.sleep(react_settle)
                 btn_enabled = False
-                for _ in range(20):
+                pm_state_ok = False
+                for _ in range(40):
+                    pm_state_ok = await page.evaluate(
+                        f"""() => {{
+                            // Check the actual PM textContent matches what
+                            // we typed. If it does, React's state has the
+                            // value too (PM mirrors state on every keystroke).
+                            const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror, [contenteditable="true"]');
+                            if (!pm) return false;
+                            const txt = (pm.textContent || '').trim();
+                            return txt.length >= {max(1, prompt_len - 10)};
+                        }}"""
+                    )
                     btn_enabled = await page.evaluate(
                         """() => {
                             const b = document.querySelector("button[aria-label='Submit']");
                             return !!b && !b.disabled && b.offsetParent !== null;
                         }"""
                     )
-                    if btn_enabled:
+                    if btn_enabled and pm_state_ok:
                         break
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.25)
+                if btn_enabled and not pm_state_ok:
+                    self._log(tag, f"warn: btn enabled but PM textContent shorter than prompt ({prompt_len} chars expected)")
 
                 # Submit chain ordered by trustedness — Grok's anti-bot
                 # likely checks event.isTrusted in the React onSubmit:
