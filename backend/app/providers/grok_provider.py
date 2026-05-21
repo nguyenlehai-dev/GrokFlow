@@ -863,10 +863,36 @@ class GrokProvider(Provider):
                 # project sidebar icon) and download THAT instead of the
                 # actual generated image, producing tiny WebP files
                 # totally unrelated to the prompt.
+                # Grok renders in TWO phases at the same chat bubble:
+                #   1. Within ~3-5s an /generated/ URL appears holding a
+                #      low-res placeholder (~24 KB JPEG, smeared mosaic).
+                #   2. 20-45s later the bubble's <img src> swaps to a
+                #      different /generated/ URL holding the final
+                #      ~200 KB-1 MB image.
+                # Old code broke on the FIRST /generated/ match — it
+                # downloaded the phase-1 mosaic, marked the job success,
+                # and partners got blur as their result. Fix: collect
+                # URLs over a settling window and only return the URL
+                # that's been the LATEST observed for STABLE_WINDOW_SEC.
                 timeout_s = self.IMAGE_TIMEOUT_MS / 1000
+                # How long the same final-URL must remain "latest" before
+                # we commit. 12s is enough to clear the phase-1→phase-2
+                # swap in practice; shorter and we still catch the blur.
+                STABLE_WINDOW_SEC = float(os.environ.get(
+                    "GROK_IMAGE_STABLE_WINDOW_SEC", "12",
+                ))
+                # Floor on total wait — Grok almost never finishes in <15s
+                # even when the phase-1 URL is up. Don't even consider a
+                # match before this so we never short-circuit out of the
+                # phase-2 swap.
+                MIN_WAIT_SEC = float(os.environ.get(
+                    "GROK_IMAGE_MIN_WAIT_SEC", "20",
+                ))
                 start = time.monotonic()
                 found_url: str | None = None
                 last_log = -30
+                latest_url: str | None = None
+                latest_seen_at: float | None = None
                 while time.monotonic() - start < timeout_s:
                     elapsed = int(time.monotonic() - start)
                     try:
@@ -888,12 +914,39 @@ class GrokProvider(Provider):
                         urls = []
                         all_grok_urls = []
                     if urls:
-                        # Use LAST match — chat appends new bubbles to
-                        # the bottom, so the freshest generated image is
-                        # at the end of the list.
-                        found_url = urls[-1]
-                        self._log(tag, f"image url after {elapsed}s: {found_url[:80]}…")
-                        break
+                        # Track the LAST URL in DOM order — chat appends
+                        # new bubbles to the bottom, so the freshest
+                        # render is at the end of the list.
+                        current_last = urls[-1]
+                        now = time.monotonic()
+                        if current_last != latest_url:
+                            # URL just changed — phase-2 swap just happened,
+                            # or we just saw phase-1. Restart the stability
+                            # timer on this new URL.
+                            if latest_url is not None:
+                                self._log(
+                                    tag,
+                                    f"image url swapped after {elapsed}s: "
+                                    f"…{latest_url[-40:]} → …{current_last[-40:]}",
+                                )
+                            latest_url = current_last
+                            latest_seen_at = now
+                        # Commit only if (a) we've waited the floor AND
+                        # (b) this URL has stayed latest for the stable
+                        # window. Otherwise keep polling.
+                        if (
+                            elapsed >= MIN_WAIT_SEC
+                            and latest_seen_at is not None
+                            and (now - latest_seen_at) >= STABLE_WINDOW_SEC
+                        ):
+                            found_url = latest_url
+                            self._log(
+                                tag,
+                                f"image url settled after {elapsed}s "
+                                f"(stable for {int(now - latest_seen_at)}s): "
+                                f"{found_url[:80]}…",
+                            )
+                            break
                     if elapsed - last_log >= 30:
                         # Dump any Grok-CDN URLs we DID see so we can
                         # debug filter false-negatives without a fresh
@@ -904,7 +957,7 @@ class GrokProvider(Provider):
                         else:
                             self._log(tag, f"polling chat… {elapsed}s — 0 grok assets yet")
                         last_log = elapsed
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(3)
 
                 if not found_url:
                     return JobResult(
@@ -1611,13 +1664,24 @@ class GrokProvider(Provider):
                 # care about <video> elements with non-empty src; for image jobs
                 # we care about <img> elements. Track stability separately.
                 want_video = job.job_type == "video"
-                # Adaptive timeout + stability window. Image jobs finish fast
-                # so we lock in the result aggressively (3s after first image).
-                # Video jobs may stream multiple thumbnail updates so we wait
-                # a bit longer for the URL set to settle.
+                # Adaptive timeout + stability window.
+                #
+                # Stability used to be 3s for image. That was too tight:
+                # Grok now serves the result in two phases at the same
+                # chat bubble — a ~24 KB blur placeholder appears within
+                # 3-5s, then the final ~200 KB-1 MB image swaps in
+                # 20-45s later. A 3s window let us commit on the blur
+                # before the swap, and partners received the mosaic as
+                # their "successful" result. 12s closes the swap reliably
+                # without making fast jobs feel sluggish.
+                #
+                # Video stays at 6s — its update cycle is slower (only
+                # one URL ever appears) so the old window was fine.
                 timeout_ms = self.VIDEO_TIMEOUT_MS if want_video else self.IMAGE_TIMEOUT_MS
                 deadline = time.monotonic() + timeout_ms / 1000
-                STABILITY_SECONDS = 6.0 if want_video else 3.0
+                STABILITY_SECONDS = 6.0 if want_video else float(
+                    os.environ.get("GROK_IMAGE_STABLE_WINDOW_SEC", "12"),
+                )
                 last_change_at: float | None = None
                 new_urls_set: set[str] = set()
                 new_video_urls: set[str] = set()
