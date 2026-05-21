@@ -70,6 +70,60 @@ def _sanitize_filename(raw: str | None) -> str:
     return name or "upload.bin"
 
 
+# Extensions FFmpeg's libavformat will demux. Lowercased on compare.
+# Pulled from the demuxer list rather than guessing — if a customer
+# wants to upload a format we don't list here, they can lobby for it
+# and we add the extension (it's just a string check, not a feature).
+_VIDEO_EXTS: frozenset[str] = frozenset({
+    "mp4", "mov", "m4v", "mkv", "webm", "avi", "wmv", "flv", "mpg",
+    "mpeg", "ts", "mts", "m2ts", "3gp", "ogv", "vob", "asf",
+})
+_AUDIO_EXTS: frozenset[str] = frozenset({
+    "mp3", "wav", "aac", "m4a", "ogg", "oga", "flac", "opus", "wma",
+})
+_IMAGE_EXTS: frozenset[str] = frozenset({
+    "jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff",
+})
+
+
+def _validate_media_upload(filename: str, mime_type: str | None, tool_name: str) -> None:
+    """Reject uploads that FFmpeg won't be able to demux.
+
+    Why: the v0 /upload endpoint used to accept anything and saved the
+    bytes verbatim. A `dummy.txt` upload then hit /run/<tool>, the
+    background task shelled out to ffmpeg, and ffmpeg failed with the
+    cryptic 'Invalid data found when processing input' — surfaced to
+    the user as 500 with the entire ffmpeg banner. Validating at the
+    edge gives a clean 400 with a real explanation instead.
+
+    Accept rules per tool:
+      - add-audio        : at least one video + one audio
+      - extract-audio    : video input
+      - everything else  : video input
+    """
+    name = filename.lower()
+    ext = name.rsplit(".", 1)[-1] if "." in name else ""
+    mime = (mime_type or "").lower()
+
+    is_video = ext in _VIDEO_EXTS or mime.startswith("video/")
+    is_audio = ext in _AUDIO_EXTS or mime.startswith("audio/")
+
+    # add-audio accepts an audio track alongside a video — treat audio
+    # as valid here, the per-tool argument resolver will figure out
+    # which file goes where.
+    if tool_name == "add-audio" and (is_video or is_audio):
+        return
+
+    if not is_video:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"File '{filename}' không phải video — Flow tools cần input video "
+                f"(mp4/mov/mkv/webm/…). Phát hiện ext='.{ext}' mime='{mime or 'unknown'}'."
+            ),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Upload
 # ---------------------------------------------------------------------------
@@ -85,6 +139,11 @@ async def upload(
         raise HTTPException(status_code=400, detail=f"unknown tool: {tool_name}")
     if not files:
         raise HTTPException(status_code=400, detail="at least one file is required")
+
+    # Pre-flight content-type / extension check — refuse non-media uploads
+    # at the edge so /run never hands ffmpeg a .txt and fails downstream.
+    for f in files:
+        _validate_media_upload(f.filename or "", f.content_type, tool_name)
 
     job_id = uuid.uuid4()
     dest_dir = service.input_dir(job_id)

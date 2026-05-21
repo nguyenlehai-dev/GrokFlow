@@ -173,6 +173,12 @@ async def _materialize_input(
     if not files:
         raise HTTPException(400, "at least one video file is required")
 
+    # Reject .txt/binary/etc uploads at the door so ffmpeg never sees them.
+    # Same rule as /api/flow/upload — see router.py:_validate_media_upload.
+    from .router import _validate_media_upload
+    for f in files:
+        _validate_media_upload(f.filename or "", f.content_type, operation)
+
     job_id = uuid.uuid4()
     dest_dir = service.input_dir(job_id)
     input_files: list[dict] = []
