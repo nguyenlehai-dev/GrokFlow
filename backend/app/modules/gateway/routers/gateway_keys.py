@@ -106,18 +106,27 @@ async def revoke_gateway_key(key_id: uuid.UUID, admin: AdminUser, db: DbSession)
 
 @router.post("/gateway-keys/verify", response_model=s.GatewayKeyVerifyResponse)
 async def verify_gateway_key(
-    payload: s.GatewayKeyVerifyRequest, user: CurrentUser, db: DbSession,
+    payload: s.GatewayKeyVerifyRequest, db: DbSession,
 ) -> s.GatewayKeyVerifyResponse:
-    """Used by the Playground to verify a key before letting the user run.
-    Lookup by prefix, then bcrypt-verify the full key.
+    """Verify a gateway API key — used by Playground + partner sanity
+    checks. Public on purpose: a wrong key returns verified=False rather
+    than 401, so a misconfigured partner sees the no-op instead of
+    leaking auth state.
+
+    Legacy gateway.plxeditor.com clients post `{"gateway_api_key": "..."}`,
+    v2 clients post `{"key": "..."}` — schema accepts both via
+    effective_key.
     """
-    prefix = payload.key[:12]
+    key_value = payload.effective_key
+    if not key_value:
+        return s.GatewayKeyVerifyResponse(verified=False)
+    prefix = key_value[:12]
     rows = (await db.execute(
         select(GwGatewayKey).where(GwGatewayKey.prefix == prefix, GwGatewayKey.status == "active")
     )).scalars().all()
     for k in rows:
         try:
-            if verify_password(payload.key, k.key_hash):
+            if verify_password(key_value, k.key_hash):
                 return s.GatewayKeyVerifyResponse(
                     verified=True, label=k.label,
                     allowed_functions=k.allowed_functions,

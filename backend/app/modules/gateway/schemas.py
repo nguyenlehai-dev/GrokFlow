@@ -198,7 +198,15 @@ class GatewayKeyCreated(GatewayKeyOut):
 
 
 class GatewayKeyVerifyRequest(BaseModel):
-    key: str
+    # `key` is the v2 field name; `gateway_api_key` is what the first-gen
+    # gateway.plxeditor.com clients send. Accept either so legacy
+    # integrations work unchanged.
+    key: str | None = None
+    gateway_api_key: str | None = None
+
+    @property
+    def effective_key(self) -> str:
+        return (self.key or self.gateway_api_key or "").strip()
 
 
 class GatewayKeyVerifyResponse(BaseModel):
