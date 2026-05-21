@@ -1687,15 +1687,24 @@ class GrokProvider(Provider):
                 new_video_urls: set[str] = set()
 
                 next_progress_log = time.monotonic() + 15
-                # Fast-fail watchdog for video jobs only. Old behaviour was
-                # "no <video> in 90s → fail" which gave false positives
-                # whenever Grok was just slow (90-150s is normal under
-                # load). New rule: only fast-fail if we can confirm Grok
-                # NEVER fired a generation API call after submit. If the
-                # call DID fire, Grok is just slow — wait the full
-                # VIDEO_TIMEOUT_MS (6 min). 120s gives enough head-room
-                # before we conclude the call truly never came.
-                stuck_check_deadline = time.monotonic() + 120 if want_video else None
+                # Fast-fail watchdog for "Grok ignored submit" — applies
+                # to both image and video, with different head-rooms.
+                #
+                # Trigger: N seconds after submit with ZERO media on page
+                # AND `generate_call_seen["hit"] == False` (network probe
+                # never saw a /api/imagine or /api/conversations call).
+                # That combo means Grok received the click but silently
+                # dropped it — shadow-ban / CF block / statsig downgrade.
+                # No amount of further polling helps; rotate now.
+                #
+                # Image: 45s (real images render in 15-30s, anything past
+                #   45s with no API call is dead). Before this watchdog
+                #   image jobs blocked the full 5-minute IMAGE_TIMEOUT
+                #   and then surfaced as TargetClosedError when the page
+                #   crashed mid-wait.
+                # Video: 120s (genuine video renders take 60-150s under
+                #   load, so we wait longer before declaring death).
+                stuck_check_deadline = time.monotonic() + (120 if want_video else 45)
 
                 while time.monotonic() < deadline:
                     cur_imgs = await self._collect_image_urls(page) - seen_urls
@@ -1721,33 +1730,34 @@ class GrokProvider(Provider):
                         next_progress_log = time.monotonic() + 30
                         self._log(tag, f"polling… imgs={len(new_urls_set)} vids={len(new_video_urls)} elapsed={int(time.monotonic() - (deadline - timeout_ms/1000))}s")
 
-                    # Watchdog: video job + 120s passed + still no <video>
-                    # element on page. Two interpretations:
+                    # Watchdog: post-submit + N seconds + still no media
+                    # of the wanted type. Two interpretations:
                     #   (a) generate_call_seen.hit == False → Grok never
                     #       hit the generation API since submit. Could be
                     #       silent throttle / shadow-ban / CF block.
                     #       Fast-fail with rate_limited → worker rotates.
                     #   (b) generate_call_seen.hit == True → generation
                     #       API DID fire; Grok just hasn't rendered the
-                    #       <video> tag yet (90-150s legitimate under
-                    #       load). DON'T fail — let polling continue to
-                    #       the full 6-min deadline.
+                    #       result yet. DON'T fail — keep polling to the
+                    #       full deadline.
                     # Watchdog only triggers once (sets deadline=None).
+                    media_seen = bool(new_video_urls if want_video else new_urls_set)
                     if (
                         stuck_check_deadline is not None
                         and time.monotonic() >= stuck_check_deadline
-                        and not new_video_urls
+                        and not media_seen
                     ):
                         stuck_check_deadline = None  # only check once
+                        watchdog_secs = 120 if want_video else 45
                         if not generate_call_seen["hit"]:
-                            self._log(tag, "fast-fail: 120s post-submit, vids=0, no generate API call — Grok ignored submit")
+                            self._log(tag, f"fast-fail: {watchdog_secs}s post-submit, no media, no generate API call — Grok ignored submit")
                             return JobResult(
                                 success=False, error_code="rate_limited",
                                 error_message="Grok không nhận submit (không có /api/imagine call) — profile có thể bị throttle. Rotating.",
                                 retryable=True,
                             )
                         else:
-                            self._log(tag, f"slow gen: 120s post-submit but generate API call seen — waiting full {timeout_ms // 1000}s")
+                            self._log(tag, f"slow gen: {watchdog_secs}s post-submit but generate API call seen — waiting full {timeout_ms // 1000}s")
 
                     # In-loop text scanning was removed: it generated too many
                     # false-positives by matching phrases that appear in chat
