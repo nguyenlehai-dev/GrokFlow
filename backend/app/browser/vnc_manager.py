@@ -21,6 +21,7 @@ Lifecycle:
 import os
 import threading
 import time
+import traceback
 from typing import Any
 
 import docker
@@ -98,6 +99,10 @@ def get_for_profile(profile_id: str) -> dict[str, Any] | None:
 def stop_for_profile(profile_id: str) -> None:
     cli = _client()
     name = _container_name(profile_id)
+    # Dump caller stack so the next 'vanished VNC' hunt has a name to point
+    # at instead of staring at vnc-events destroy lines with no attribution.
+    caller = "".join(traceback.format_stack(limit=8))
+    print(f"[vnc] stop_for_profile({profile_id}) — caller stack:\n{caller}", flush=True)
     try:
         c = cli.containers.get(name)
         c.stop(timeout=5)
