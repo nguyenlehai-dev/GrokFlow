@@ -274,26 +274,45 @@ async def process_one(db: AsyncSession, job: Job) -> None:
         job.status = "processing_provider"
         await db.commit()
 
-        # Resolve attachments
+        # Resolve attachments. Two sources, both honoured:
+        #   - reference_images: list[uuid]   (multi-ref, max 4)
+        #   - input_image_file_id: uuid      (legacy single-ref)
+        # Both can be sent together; we de-dupe by file_id and keep order
+        # so the operator's first picker slot maps to Grok's first
+        # reference slot. Provider's _attach_files iterates the full
+        # list so all of them end up in the Grok chat upload.
         attachments: list = []
         opts = job.input_payload or {}
+        ref_ids: list[str] = []
+        raw_refs = opts.get("reference_images") or []
+        if isinstance(raw_refs, list):
+            for r in raw_refs:
+                if isinstance(r, str) and r and r not in ref_ids:
+                    ref_ids.append(r)
         input_id = opts.get("input_image_file_id")
-        if input_id:
+        if input_id and input_id not in ref_ids:
+            ref_ids.append(input_id)
+
+        if ref_ids:
             from app.providers.base import InputAttachment
             from app.modules.grok.files import service as files_service_mod
             from app.models import File as FileModel
-            try:
-                f = await db.get(FileModel, uuid.UUID(input_id))
-                if f and f.user_id == job.user_id:
-                    data = await files_service_mod.read_file_bytes(f)
-                    attachments.append(InputAttachment(
-                        name=f.file_name, mime=f.mime_type or "image/png", bytes=data,
-                    ))
-                    db.add(JobLog(job_id=job.id, level="info",
-                                  message=f"Attached input {f.file_name} ({len(data)} bytes)"))
-            except Exception as exc:  # noqa: BLE001
-                db.add(JobLog(job_id=job.id, level="warning",
-                              message=f"Failed input image: {exc}"))
+            # Cap to 4 — matches the UI picker and stays well under Grok's
+            # observed limit of 8 chat attachments before the upload
+            # widget starts dropping files.
+            for rid in ref_ids[:4]:
+                try:
+                    f = await db.get(FileModel, uuid.UUID(rid))
+                    if f and f.user_id == job.user_id:
+                        data = await files_service_mod.read_file_bytes(f)
+                        attachments.append(InputAttachment(
+                            name=f.file_name, mime=f.mime_type or "image/png", bytes=data,
+                        ))
+                        db.add(JobLog(job_id=job.id, level="info",
+                                      message=f"Attached input {f.file_name} ({len(data)} bytes)"))
+                except Exception as exc:  # noqa: BLE001
+                    db.add(JobLog(job_id=job.id, level="warning",
+                                  message=f"Failed input image {rid}: {exc}"))
 
         # Hard wall-clock cap on the whole provider run. If anything
         # inside hangs (Chromium freeze, dead CDP, page.evaluate stuck,

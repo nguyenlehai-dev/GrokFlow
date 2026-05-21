@@ -77,22 +77,34 @@ async def create_job(
     if payload.n != 1: options["n"] = payload.n
     if payload.seed is not None: options["seed"] = payload.seed
     if payload.input_image_file_id: options["input_image_file_id"] = str(payload.input_image_file_id)
+    if payload.reference_images:
+        options["reference_images"] = [str(r) for r in payload.reference_images]
 
-    # If the caller references an input file, validate it exists + belongs to
-    # them BEFORE we burn a quota check and create the job row. Avoids the
-    # orphan case where a job ends up pointing at a deleted/missing file_id.
+    # If the caller references input file(s), validate each exists + belongs
+    # to them BEFORE we burn a quota check and create the job row. Avoids
+    # the orphan case where a job ends up pointing at a deleted/missing
+    # file_id. Single-ref (input_image_file_id) and multi-ref
+    # (reference_images) are both checked; the worker later merges them.
+    from app.models import File as FileModel
+    file_ids_to_check: list[uuid.UUID] = []
     if payload.input_image_file_id:
-        from app.models import File as FileModel
-        f = await db.get(FileModel, payload.input_image_file_id)
+        file_ids_to_check.append(payload.input_image_file_id)
+    if payload.reference_images:
+        file_ids_to_check.extend(payload.reference_images)
+    for fid in file_ids_to_check:
+        f = await db.get(FileModel, fid)
         if not f or f.user_id != user.id:
-            raise InvalidPayload("input_image_file_id không tồn tại hoặc không thuộc về bạn")
+            raise InvalidPayload(f"reference file {fid} không tồn tại hoặc không thuộc về bạn")
 
     eff = await get_effective_entitlements(db, user)
     try:
         assert_job_options(
             eff,
             job_type=payload.job_type,
-            has_input_image=payload.input_image_file_id is not None,
+            has_input_image=(
+                payload.input_image_file_id is not None
+                or bool(payload.reference_images)
+            ),
             options=options,
         )
         await assert_concurrent_jobs(db, user, eff)

@@ -27,7 +27,10 @@ import {
 export function CreateJobModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [inputImage, setInputImage] = useState<InputImage | null>(null);
+  // Multi-reference picker (up to 4). Single-ref legacy users see no
+  // change — they upload one image, the array is length 1, the submit
+  // path still produces a usable job.
+  const [inputImages, setInputImages] = useState<InputImage[]>([]);
 
   // Entitlements — gate UI options to what the user's plan allows.
   const canImage = useFeature(FEATURE_KEYS.jobImage);
@@ -168,7 +171,14 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     if (v.profile_id) payload.profile_id = v.profile_id;
     if (v.project_id) payload.project_id = v.project_id;
     if (v.seed != null && Number(v.seed) > 0) payload.seed = Number(v.seed);
-    if (inputImage) payload.input_image_file_id = inputImage.file_id;
+    if (inputImages.length === 1) {
+      // Stay on the single-ref field so legacy parts of the system
+      // (entitlement checks, status formatters that read input_image_file_id)
+      // keep behaving exactly the same for the common 1-image case.
+      payload.input_image_file_id = inputImages[0].file_id;
+    } else if (inputImages.length > 1) {
+      payload.reference_images = inputImages.map((i) => i.file_id);
+    }
     try {
       await jobsService.create(payload);
     } catch (e: any) {
@@ -342,8 +352,8 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
           <CreateJobReferenceImagePicker
             jobType={jobType}
             allowed={jobType === "image" ? canImg2Img : canImg2Vid}
-            value={inputImage}
-            onChange={setInputImage}
+            value={inputImages}
+            onChange={setInputImages}
           />
         )}
 
