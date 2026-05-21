@@ -34,9 +34,9 @@ export function EditJobModal({ job, onClose }: { job: Job; onClose: () => void }
           className="input min-h-[120px] w-full"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          maxLength={4000}
+          maxLength={16000}
         />
-        <div className="text-xs text-slate-400 text-right">{prompt.length}/4000</div>
+        <div className="text-xs text-slate-400 text-right">{prompt.length}/16000</div>
         <div className="flex justify-end gap-2 border-t pt-3">
           <button className="btn-ghost" onClick={onClose}>{t("grok.edit_job_cancel")}</button>
           <button

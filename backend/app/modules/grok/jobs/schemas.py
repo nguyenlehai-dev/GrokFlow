@@ -26,7 +26,7 @@ STYLE_OPTIONS = ["natural", "vivid", "anime", "photographic"]
 class JobCreate(BaseModel):
     provider: str = Field(pattern="^(grok|flow)$")
     job_type: str = Field(pattern="^(image|video)$")
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=16000)
     profile_id: uuid.UUID | None = None
     # Explicit per-job project override. When set, the auto-pick rules in
     # service._create_job are skipped and this project is used verbatim.
@@ -53,7 +53,7 @@ class JobCreate(BaseModel):
 
 
 class JobUpdate(BaseModel):
-    prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+    prompt: str | None = Field(default=None, min_length=1, max_length=16000)
     options: dict[str, Any] | None = None
 
 

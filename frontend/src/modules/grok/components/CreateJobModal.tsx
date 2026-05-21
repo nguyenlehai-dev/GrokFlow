@@ -344,7 +344,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
           <textarea
             className="input min-h-[100px]"
             placeholder={t("grok.create_job_prompt_placeholder")}
-            {...register("prompt", { required: true, maxLength: 4000 })}
+            {...register("prompt", { required: true, maxLength: 16000 })}
           />
         </div>
 

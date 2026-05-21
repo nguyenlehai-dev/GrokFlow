@@ -67,7 +67,7 @@ class ImageGenerateIn(BaseModel):
     knobs that matter: prompt + ratio + how many variants + optional
     reference images for I2I.
     """
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=16000)
     ratio: str | None = None
     count: int = Field(default=1, ge=1, le=10)
     reference_images: list[str] | None = None
@@ -79,7 +79,7 @@ class VideoGenerateIn(BaseModel):
     Same as ImageGenerateIn + `duration` (seconds, optional).
     `reference_images` present → I2V (animate the still); absent → T2V.
     """
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=16000)
     ratio: str | None = None
     duration: int | None = None
     count: int = Field(default=1, ge=1, le=10)
@@ -89,7 +89,7 @@ class VideoGenerateIn(BaseModel):
 # Legacy shape — DO NOT modify. Add new fields to NEW endpoints instead.
 class ClientGenerateIn(BaseModel):
     target: Literal["image", "video"]
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=16000)
     ratio: str | None = None
     count: int = Field(default=1, ge=1, le=10)
     quality: str | None = None
