@@ -31,6 +31,12 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
   // change — they upload one image, the array is length 1, the submit
   // path still produces a usable job.
   const [inputImages, setInputImages] = useState<InputImage[]>([]);
+  // True while ANY reference-image upload is in flight. The Submit
+  // button reads this to refuse firing — without the gate, operators
+  // hit Submit before /api/jobs/upload-input returns, the job row is
+  // created with no file_id attached, and Grok ends up asking the
+  // user for the image they thought they sent (see job 9914a926).
+  const [uploadPending, setUploadPending] = useState(false);
 
   // Entitlements — gate UI options to what the user's plan allows.
   const canImage = useFeature(FEATURE_KEYS.jobImage);
@@ -149,6 +155,12 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
   })();
 
   const onSubmit = async (v: CreateJobForm) => {
+    // Hard refuse if a reference upload is still in flight — see the
+    // uploadPending state above for context.
+    if (uploadPending) {
+      toast("Đang upload ảnh tham chiếu — chờ xong rồi submit lại", "warning");
+      return;
+    }
     const payload: any = {
       provider: v.provider, job_type: v.job_type, prompt: v.prompt,
       size: v.size, model: v.model, style: v.style, n: Number(v.n),
@@ -354,6 +366,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
             allowed={jobType === "image" ? canImg2Img : canImg2Vid}
             value={inputImages}
             onChange={setInputImages}
+            onPendingChange={setUploadPending}
           />
         )}
 
@@ -396,8 +409,12 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex justify-end gap-2 pt-3 border-t">
           <button type="button" onClick={onClose} className="btn-ghost">{t("grok.create_job_cancel")}</button>
-          <button className="btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? t("grok.create_job_submitting") : t("grok.create_job_submit")}
+          <button className="btn-primary" disabled={isSubmitting || uploadPending}>
+            {uploadPending
+              ? "Đang upload ảnh…"
+              : isSubmitting
+              ? t("grok.create_job_submitting")
+              : t("grok.create_job_submit")}
           </button>
         </div>
       </form>

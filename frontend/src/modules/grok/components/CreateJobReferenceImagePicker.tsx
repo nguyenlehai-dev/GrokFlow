@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Image as ImageIcon, Lock, X } from "lucide-react";
 import { toast } from "@/components/ui/Toast";
@@ -26,12 +26,18 @@ const MAX_REFS = 4;
  *  backend so older clients keep working.
  */
 export function CreateJobReferenceImagePicker({
-  jobType, allowed, value, onChange,
+  jobType, allowed, value, onChange, onPendingChange,
 }: {
   jobType: "image" | "video";
   allowed: boolean;
   value: InputImage[];
   onChange: (v: InputImage[]) => void;
+  /** Lifts the upload-in-flight state to the parent modal so its
+   *  Submit button can disable itself while an upload is mid-flight.
+   *  Without this the operator can race past upload and end up with
+   *  a job that has no reference_image — Grok then replies "send me
+   *  the image" because nothing was attached. */
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -49,6 +55,13 @@ export function CreateJobReferenceImagePicker({
       toast(msg, "error");
     },
   });
+
+  // Mirror the mutation state up to the parent so the modal's submit
+  // button knows when an upload is still in-flight. useEffect avoids
+  // the "render-time setState in parent" warning.
+  useEffect(() => {
+    onPendingChange?.(uploadInput.isPending);
+  }, [uploadInput.isPending, onPendingChange]);
 
   if (!allowed) {
     return (
