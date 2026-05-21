@@ -27,6 +27,15 @@ from typing import Any
 import docker
 from docker.errors import APIError, NotFound
 
+
+def _trace_destroy(where: str, name: str) -> None:
+    """Tag every VNC container removal with the calling code path.
+    When a VNC vanishes mysteriously this log is the only signal that
+    tells us WHICH branch did it — without the tag, vnc-events just
+    says 'destroy <name>' with no attribution to the Python caller."""
+    caller = "".join(traceback.format_stack(limit=10)[:-1])
+    print(f"[vnc] destroy via {where}: {name}\n{caller}", flush=True)
+
 VNC_IMAGE = os.environ.get("VNC_IMAGE", "grokflow/chrome-vnc:latest")
 NETWORK_NAME = os.environ.get("VNC_NETWORK", "grokflow_default")
 
@@ -99,12 +108,9 @@ def get_for_profile(profile_id: str) -> dict[str, Any] | None:
 def stop_for_profile(profile_id: str) -> None:
     cli = _client()
     name = _container_name(profile_id)
-    # Dump caller stack so the next 'vanished VNC' hunt has a name to point
-    # at instead of staring at vnc-events destroy lines with no attribution.
-    caller = "".join(traceback.format_stack(limit=8))
-    print(f"[vnc] stop_for_profile({profile_id}) — caller stack:\n{caller}", flush=True)
     try:
         c = cli.containers.get(name)
+        _trace_destroy("stop_for_profile", name)
         c.stop(timeout=5)
         c.remove(force=True)
     except NotFound:
@@ -166,6 +172,7 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         except APIError as exc:
             print(f"[vnc] {name} restart failed: {exc} — falling back to recreate", flush=True)
         try:
+            _trace_destroy("_start_locked pre-cleanup", name)
             c.remove(force=True)
         except (APIError, NotFound) as exc:
             print(f"[vnc] pre-cleanup remove failed for {name}: {exc}", flush=True)
@@ -289,6 +296,7 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
                 print(f"[vnc] 409 on '{name}' — reusing healthy existing container ({existing.status})", flush=True)
                 return _reuse_info(existing)
             print(f"[vnc] 409 on '{name}' (state={existing.status}) — force-removing + retry", flush=True)
+            _trace_destroy("_start_locked 409-handler", name)
             existing.remove(force=True)
         except NotFound:
             print(f"[vnc] 409 on '{name}' but get() says NotFound — retrying", flush=True)
@@ -338,6 +346,7 @@ def stop() -> None:
     cli = _client()
     for c in cli.containers.list(all=True, filters={"name": "grokflow-vnc-"}):
         try:
+            _trace_destroy("stop() global reset", c.name)
             c.stop(timeout=5)
             c.remove(force=True)
         except APIError:
@@ -367,6 +376,10 @@ def reap_orphans(known_profile_ids: set[str]) -> list[str]:
         if label_pid and label_pid in known_profile_ids:
             continue
         # No profile_id label or profile_id not in DB → orphan for THIS env.
+        _trace_destroy(
+            f"reap_orphans(label_pid={label_pid!r}, known={len(known_profile_ids)})",
+            c.name,
+        )
         try:
             c.stop(timeout=3)
         except APIError:
