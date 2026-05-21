@@ -158,7 +158,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     // Hard refuse if a reference upload is still in flight — see the
     // uploadPending state above for context.
     if (uploadPending) {
-      toast("Đang upload ảnh tham chiếu — chờ xong rồi submit lại", "warning");
+      toast("Đang upload ảnh tham chiếu — chờ xong rồi submit lại", "info");
       return;
     }
     const payload: any = {
