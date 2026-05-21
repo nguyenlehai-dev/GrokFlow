@@ -51,10 +51,18 @@ async def require_caller(
     db: DbSession,
     authorization: str | None = Header(default=None),
 ) -> GatewayCaller:
+    # Error response shapes match the first-gen gateway.plxeditor.com
+    # exactly: legacy returned a flat string in `detail` (eg "Missing
+    # bearer token"), v2 originally wrapped it in a {code,message} dict.
+    # Customer integrations parse `resp.json()['detail']` as a string;
+    # the dict shape broke type-naive callers. Keep `detail` a string
+    # here, surface the code separately via a header for clients that
+    # want a stable machine-readable signal.
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "missing_auth", "message": "Authorization: Bearer <token> required"},
+            detail="Missing bearer token",
+            headers={"X-Error-Code": "missing_auth"},
         )
     token = authorization.split(" ", 1)[1].strip()
 
@@ -83,7 +91,8 @@ async def require_caller(
                 continue
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "invalid_gateway_key", "message": "Gateway key không hợp lệ hoặc đã revoke"},
+            detail="Invalid bearer token",
+            headers={"X-Error-Code": "invalid_gateway_key"},
         )
 
     # Admin JWT path
@@ -91,13 +100,15 @@ async def require_caller(
     if not payload or "sub" not in payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "invalid_token", "message": "Token không hợp lệ"},
+            detail="Invalid bearer token",
+            headers={"X-Error-Code": "invalid_token"},
         )
     user = await db.get(User, payload["sub"])
     if not user or user.status != "active" or user.role not in ("admin", "super_admin"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "admin_required", "message": "Admin JWT required cho non-gateway-key calls"},
+            detail="Invalid bearer token",
+            headers={"X-Error-Code": "admin_required"},
         )
     return GatewayCaller(kind="admin", user_id=user.id, domain_id=user.domain_id)
 

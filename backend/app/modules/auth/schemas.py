@@ -1,13 +1,24 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.types import PermissiveEmail
 
 
 class LoginRequest(BaseModel):
+    # Legacy gateway.plxeditor.com clients post {username, password}; v2
+    # uses {email, password}. Accept either — before-mode validator
+    # promotes a stray `username` into the `email` slot so the email
+    # validator still runs on whatever the client supplied.
     email: PermissiveEmail
     password: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_username_alias(cls, data):
+        if isinstance(data, dict) and "email" not in data and "username" in data:
+            return {**data, "email": data["username"]}
+        return data
 
 
 class RegisterRequest(BaseModel):
