@@ -898,6 +898,16 @@ class GrokProvider(Provider):
                 last_log = -30
                 latest_url: str | None = None
                 latest_seen_at: float | None = None
+                first_match_at: float | None = None
+                # Once a /generated/ URL appears in the DOM at all, commit
+                # to whatever's latest after a short grace period. The
+                # earlier "stay stable for N seconds" approach drove the
+                # loop into the full 150s timeout whenever Grok flickered
+                # the <img src> (which it does, often) — the URL is the
+                # right one even when the DOM toggles it on and off.
+                FIRST_MATCH_GRACE = float(os.environ.get(
+                    "GROK_IMAGE_FIRST_MATCH_GRACE", "8",
+                ))
                 while time.monotonic() - start < timeout_s:
                     elapsed = int(time.monotonic() - start)
                     try:
@@ -924,10 +934,9 @@ class GrokProvider(Provider):
                         # render is at the end of the list.
                         current_last = urls[-1]
                         now = time.monotonic()
+                        if first_match_at is None:
+                            first_match_at = now
                         if current_last != latest_url:
-                            # URL just changed — phase-2 swap just happened,
-                            # or we just saw phase-1. Restart the stability
-                            # timer on this new URL.
                             if latest_url is not None:
                                 self._log(
                                     tag,
@@ -936,19 +945,24 @@ class GrokProvider(Provider):
                                 )
                             latest_url = current_last
                             latest_seen_at = now
-                        # Commit only if (a) we've waited the floor AND
-                        # (b) this URL has stayed latest for the stable
-                        # window. Otherwise keep polling.
-                        if (
-                            elapsed >= MIN_WAIT_SEC
-                            and latest_seen_at is not None
+                        # Commit when (a) we've waited the floor AND
+                        # (b) either the URL has been stable for the
+                        # short stable window, OR the grace period since
+                        # FIRST sighting expired (catches flickering DOM).
+                        stable_ok = (
+                            latest_seen_at is not None
                             and (now - latest_seen_at) >= STABLE_WINDOW_SEC
-                        ):
+                        )
+                        grace_ok = (
+                            first_match_at is not None
+                            and (now - first_match_at) >= FIRST_MATCH_GRACE
+                        )
+                        if elapsed >= MIN_WAIT_SEC and (stable_ok or grace_ok):
                             found_url = latest_url
                             self._log(
                                 tag,
-                                f"image url settled after {elapsed}s "
-                                f"(stable for {int(now - latest_seen_at)}s): "
+                                f"image url committed after {elapsed}s "
+                                f"(reason={'stable' if stable_ok else 'grace'}): "
                                 f"{found_url[:80]}…",
                             )
                             break
