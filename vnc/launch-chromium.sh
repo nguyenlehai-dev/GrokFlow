@@ -5,7 +5,14 @@
 #
 # Memory tuning (multi-tab friendly):
 #   --memory-pressure-off          — don't throttle on host pressure (we manage)
-#   --js-flags="--max-old-space-size=512" — cap V8 heap per renderer
+#   --js-flags=--max-old-space-size=$CHROMIUM_HEAP_MB (default 2048 MB)
+#       V8 old-space cap per renderer. Bumped from 512 → 2048 after every
+#       image-to-image job with a >5 MB input was OOM-killing the renderer
+#       (TargetClosedError on Page.evaluate after setInputFiles). Grok's
+#       React preview copies the blob 3-4× before paint; at 512 MB heap a
+#       7 MB upload exceeded the cap during preview generation.
+#       Tunable via the GROK_VNC_CHROMIUM_HEAP_MB backend env (passed
+#       through vnc_manager → docker run env).
 #   --disable-features=...         — kill background work that wastes RAM
 #   --aggressive-cache-discard     — drop unused caches sooner
 #   --renderer-process-limit=8     — cap renderer count (one per tab)
@@ -96,5 +103,5 @@ exec /usr/lib/chromium/chromium \
     --disable-component-update \
     --disable-default-apps \
     --renderer-process-limit=8 \
-    --js-flags="--max-old-space-size=512" \
+    --js-flags="--max-old-space-size=${CHROMIUM_HEAP_MB:-2048}" \
     "$URL"

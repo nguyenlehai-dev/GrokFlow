@@ -222,6 +222,14 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
                     else {}
                 )
             ),
+            # V8 old-space cap for the renderer. 2048 MB lets Grok's React
+            # preview hold a 7-10 MB user upload without OOM-killing the
+            # page mid-job. Old 512 MB cap was crashing every image-to-image
+            # job with >5 MB inputs (TargetClosedError on Page.evaluate
+            # right after setInputFiles). Override via
+            # GROK_VNC_CHROMIUM_HEAP_MB on the backend for larger inputs
+            # or memory-constrained hosts.
+            "CHROMIUM_HEAP_MB": os.environ.get("GROK_VNC_CHROMIUM_HEAP_MB", "2048"),
         },
         volumes={
             host_profile_path: {"bind": "/config", "mode": "rw"},
