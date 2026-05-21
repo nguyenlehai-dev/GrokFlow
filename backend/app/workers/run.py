@@ -294,6 +294,7 @@ async def process_one(db: AsyncSession, job: Job) -> None:
             ref_ids.append(input_id)
 
         if ref_ids:
+            import httpx
             from app.providers.base import InputAttachment
             from app.modules.grok.files import service as files_service_mod
             from app.models import File as FileModel
@@ -301,6 +302,34 @@ async def process_one(db: AsyncSession, job: Job) -> None:
             # observed limit of 8 chat attachments before the upload
             # widget starts dropping files.
             for rid in ref_ids[:4]:
+                # URL refs (http/https) — fetch bytes directly. Partners
+                # often pre-host their source images on a CDN and skip
+                # the upload-input round trip; the contract docs both
+                # "uuid file_id" and "https://… URL" for reference_images.
+                if isinstance(rid, str) and rid.startswith(("http://", "https://")):
+                    try:
+                        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cli:
+                            r = await cli.get(rid)
+                            r.raise_for_status()
+                        # Derive a sensible filename from the URL path
+                        # (fallback to "ref.jpg" so Grok's upload UI has
+                        # something to display).
+                        from urllib.parse import urlparse
+                        path = urlparse(rid).path
+                        name = path.rsplit("/", 1)[-1] or "ref.jpg"
+                        if "." not in name:
+                            name += ".jpg"
+                        mime = r.headers.get("content-type", "image/jpeg").split(";")[0]
+                        attachments.append(InputAttachment(
+                            name=name, mime=mime, bytes=r.content,
+                        ))
+                        db.add(JobLog(job_id=job.id, level="info",
+                                      message=f"Attached URL ref {name} ({len(r.content)} bytes from {rid[:60]}…)"))
+                    except Exception as exc:  # noqa: BLE001
+                        db.add(JobLog(job_id=job.id, level="warning",
+                                      message=f"URL ref download failed {rid[:60]}: {type(exc).__name__}: {exc}"))
+                    continue
+                # file_id (UUID) path — original behaviour.
                 try:
                     f = await db.get(FileModel, uuid.UUID(rid))
                     if f and f.user_id == job.user_id:
