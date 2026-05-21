@@ -66,7 +66,7 @@ async def require_caller(
         )
     token = authorization.split(" ", 1)[1].strip()
 
-    # Gateway key path
+    # Gateway key path (gwk_live_*)
     if token.startswith("gwk_"):
         prefix = token[:12]
         rows = (await db.execute(
@@ -93,6 +93,39 @@ async def require_caller(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid bearer token",
             headers={"X-Error-Code": "invalid_gateway_key"},
+        )
+
+    # Unified key path — accept the standard GrokFlow personal API key
+    # (uxpm_live_* by default; whatever settings.API_KEY_PREFIX is set to)
+    # so operators don't have to manage two parallel key systems on the
+    # same instance. Looks up in the api_keys table, returns a caller
+    # scoped to the key's owner.
+    from app.core.config import settings
+    from app.models import ApiKey
+    if token.startswith(settings.API_KEY_PREFIX):
+        prefix_part = token[:18]  # uxpm_live_xxxxxxxx (10 + 8)
+        rows = (await db.execute(
+            select(ApiKey).where(
+                ApiKey.key_prefix == prefix_part, ApiKey.status == "active",
+            )
+        )).scalars().all()
+        for k in rows:
+            try:
+                if verify_password(token, k.key_hash):
+                    owner = await db.get(User, k.user_id)
+                    return GatewayCaller(
+                        kind="gateway_key",
+                        gateway_key_id=None,  # not a gw_gateway_keys row
+                        allowed_functions=None,  # personal keys: no per-fn whitelist
+                        label=k.name,
+                        domain_id=(owner.domain_id if owner else None),
+                    )
+            except Exception:  # noqa: BLE001
+                continue
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid bearer token",
+            headers={"X-Error-Code": "invalid_api_key"},
         )
 
     # Admin JWT path
