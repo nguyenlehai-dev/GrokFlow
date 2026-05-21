@@ -876,17 +876,22 @@ class GrokProvider(Provider):
                 # that's been the LATEST observed for STABLE_WINDOW_SEC.
                 timeout_s = self.IMAGE_TIMEOUT_MS / 1000
                 # How long the same final-URL must remain "latest" before
-                # we commit. 12s is enough to clear the phase-1→phase-2
-                # swap in practice; shorter and we still catch the blur.
+                # we commit. Originally 12s — empirically that proved too
+                # generous: when Grok streams the result the <img src>
+                # toggles between phase-1 / phase-2 / cleared a few times
+                # before settling, and a 12s stability window never holds,
+                # so the loop ran the full timeout (150s+) before the
+                # worker retried. 6s catches the typical settle pattern
+                # and still skips the early blur thumbnail.
                 STABLE_WINDOW_SEC = float(os.environ.get(
-                    "GROK_IMAGE_STABLE_WINDOW_SEC", "12",
+                    "GROK_IMAGE_STABLE_WINDOW_SEC", "6",
                 ))
-                # Floor on total wait — Grok almost never finishes in <15s
+                # Floor on total wait — Grok almost never finishes in <8s
                 # even when the phase-1 URL is up. Don't even consider a
                 # match before this so we never short-circuit out of the
-                # phase-2 swap.
+                # phase-2 swap. Halved from 20s.
                 MIN_WAIT_SEC = float(os.environ.get(
-                    "GROK_IMAGE_MIN_WAIT_SEC", "20",
+                    "GROK_IMAGE_MIN_WAIT_SEC", "10",
                 ))
                 start = time.monotonic()
                 found_url: str | None = None
@@ -1755,7 +1760,7 @@ class GrokProvider(Provider):
                 timeout_ms = self.VIDEO_TIMEOUT_MS if want_video else self.IMAGE_TIMEOUT_MS
                 deadline = time.monotonic() + timeout_ms / 1000
                 STABILITY_SECONDS = 6.0 if want_video else float(
-                    os.environ.get("GROK_IMAGE_STABLE_WINDOW_SEC", "12"),
+                    os.environ.get("GROK_IMAGE_STABLE_WINDOW_SEC", "6"),
                 )
                 last_change_at: float | None = None
                 new_urls_set: set[str] = set()
