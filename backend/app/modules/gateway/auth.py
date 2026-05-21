@@ -17,7 +17,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 
 from app.core.deps import DbSession
-from app.core.security import decode_access_token, verify_password
+from app.core.security import decode_access_token, hash_api_key, verify_password
 from app.models import GwGatewayKey, User
 
 
@@ -100,28 +100,29 @@ async def require_caller(
     # so operators don't have to manage two parallel key systems on the
     # same instance. Looks up in the api_keys table, returns a caller
     # scoped to the key's owner.
+    #
+    # IMPORTANT: api_keys table stores key_hash as SHA256 of the FULL
+    # token (see core.security.generate_api_key), NOT bcrypt. Use
+    # hash_api_key + constant-time compare here — bcrypt's verify_password
+    # would always return False against a 64-char hex digest.
     from app.core.config import settings
     from app.models import ApiKey
     if token.startswith(settings.API_KEY_PREFIX):
-        prefix_part = token[:18]  # uxpm_live_xxxxxxxx (10 + 8)
-        rows = (await db.execute(
+        token_hash = hash_api_key(token)
+        row = (await db.execute(
             select(ApiKey).where(
-                ApiKey.key_prefix == prefix_part, ApiKey.status == "active",
+                ApiKey.key_hash == token_hash, ApiKey.status == "active",
             )
-        )).scalars().all()
-        for k in rows:
-            try:
-                if verify_password(token, k.key_hash):
-                    owner = await db.get(User, k.user_id)
-                    return GatewayCaller(
-                        kind="gateway_key",
-                        gateway_key_id=None,  # not a gw_gateway_keys row
-                        allowed_functions=None,  # personal keys: no per-fn whitelist
-                        label=k.name,
-                        domain_id=(owner.domain_id if owner else None),
-                    )
-            except Exception:  # noqa: BLE001
-                continue
+        )).scalar_one_or_none()
+        if row is not None:
+            owner = await db.get(User, row.user_id)
+            return GatewayCaller(
+                kind="gateway_key",
+                gateway_key_id=None,  # not a gw_gateway_keys row
+                allowed_functions=None,  # personal keys: no per-fn whitelist
+                label=row.name,
+                domain_id=(owner.domain_id if owner else None),
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid bearer token",
