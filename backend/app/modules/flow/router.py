@@ -400,8 +400,8 @@ async def retry_job(
     return FlowJobOut.model_validate(job)
 
 
-@router.delete("/jobs/{job_id}", status_code=204)
-async def delete_job(job_id: uuid.UUID, user: CurrentUser, db: DbSession) -> None:
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: uuid.UUID, user: CurrentUser, db: DbSession) -> dict:
     """Remove a Flow job record + best-effort wipe of its on-disk files.
 
     Lets operators clean up the Requests list — failed jobs from before a
@@ -438,7 +438,7 @@ async def delete_job(job_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Non
         metadata={"operation": job.operation, "status_at_delete": job.status},
     )
     await db.commit()
-    return None
+    return {"deleted": str(job_id)}
 
 
 # ---------------------------------------------------------------------------
