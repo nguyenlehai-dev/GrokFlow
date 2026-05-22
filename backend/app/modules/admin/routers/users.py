@@ -206,6 +206,7 @@ async def delete_user(user_id: uuid.UUID, admin: AdminUser, db: DbSession) -> No
 
 from pydantic import BaseModel, EmailStr, Field
 from app.models import ApiKey, Domain
+from app.models.tool_install import ToolInstall
 from app.core.security import generate_api_key
 
 
@@ -234,11 +235,22 @@ class QuickProvisionIn(BaseModel):
     role: str = Field(default="user", pattern="^(user|admin|support)$")
     plan_id: uuid.UUID | None = None
 
-    # Exactly one of these — caller picks an existing domain OR creates
-    # a fresh one inline. Both empty = put the user on "no domain" (only
-    # super_admin can do that, otherwise inherits admin's domain).
+    # Pick exactly ONE scope target:
+    #   - domain_id            → user belongs to existing tenant domain
+    #   - new_domain           → create+attach a fresh domain inline
+    #   - tool_install_id      → user belongs to a desktop kiosk install
+    #                            (mutually exclusive with domain — backend
+    #                             constraint says user has EITHER domain
+    #                             OR tool_install, never both)
+    # All empty = no scope (super_admin only).
     domain_id: uuid.UUID | None = None
     new_domain: QuickProvisionNewDomain | None = None
+    tool_install_id: uuid.UUID | None = None
+    pin_as_only_user: bool = Field(
+        default=False,
+        description="When tool_install_id is set, also set the install's "
+                    "assigned_user_id so nobody else can log in on this kiosk.",
+    )
 
     # API key options. When create_api_key=true an `uxpm_live_*` key is
     # generated and returned in plaintext exactly ONCE in the response.
@@ -254,6 +266,8 @@ class QuickProvisionOut(BaseModel):
     user_email: str
     domain_id: uuid.UUID | None
     domain_hostname: str | None
+    tool_install_id: uuid.UUID | None = None
+    tool_install_label: str | None = None
     api_key: str | None = None
     api_key_id: uuid.UUID | None = None
     api_key_prefix: str | None = None
@@ -269,8 +283,13 @@ async def quick_provision(
     create-api-key in a single transaction so a partial failure rolls
     back everything (e.g. duplicate email won't leave an orphan domain).
     """
-    if payload.domain_id and payload.new_domain:
-        raise InvalidPayload("Chọn domain_id HOẶC new_domain, không cả hai")
+    # Exactly one scope target. Pre-flight check beats DB constraint
+    # violations.
+    scope_targets = sum(bool(x) for x in (payload.domain_id, payload.new_domain, payload.tool_install_id))
+    if scope_targets > 1:
+        raise InvalidPayload(
+            "Chọn duy nhất 1 trong: domain_id, new_domain, tool_install_id"
+        )
 
     # Pre-check duplicate email so we don't waste a domain insert on it.
     existing = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
@@ -286,9 +305,20 @@ async def quick_provision(
             raise PermissionDenied("Không có quyền tạo super_admin")
         if payload.new_domain:
             raise PermissionDenied("Chỉ super_admin được tạo domain mới")
+        if payload.tool_install_id:
+            raise PermissionDenied("Chỉ super_admin được gán Tool Install")
         target_domain = admin.domain_id
     else:
         target_domain = payload.domain_id
+
+    # Tool-install path is mutually exclusive with domain (DB-level
+    # constraint). When set, the user is kiosk-bound and has no domain.
+    install_row: ToolInstall | None = None
+    if payload.tool_install_id:
+        install_row = await db.get(ToolInstall, payload.tool_install_id)
+        if not install_row:
+            raise InvalidPayload("Tool install không tồn tại")
+        target_domain = None
 
     # Inline domain creation (super_admin only).
     new_domain_row: Domain | None = None
@@ -320,9 +350,16 @@ async def quick_provision(
         status="active",
         plan_id=payload.plan_id,
         domain_id=target_domain,
+        tool_install_id=install_row.id if install_row else None,
     )
     db.add(user)
     await db.flush()
+
+    # Pin the install to this user so other tool-scoped accounts can't
+    # later steal the kiosk session. Only applies in the tool-install
+    # path; ignored when caller picked a domain instead.
+    if install_row and payload.pin_as_only_user:
+        install_row.assigned_user_id = user.id
 
     full_key: str | None = None
     key_id: uuid.UUID | None = None
@@ -351,21 +388,29 @@ async def quick_provision(
             "plan_id": str(payload.plan_id) if payload.plan_id else None,
             "domain_id": str(target_domain) if target_domain else None,
             "new_domain": payload.new_domain.hostname if payload.new_domain else None,
+            "tool_install_id": str(install_row.id) if install_row else None,
+            "pin_as_only_user": payload.pin_as_only_user if install_row else False,
             "with_api_key": payload.create_api_key,
         },
     )
     await db.commit()
 
-    # Build the login URL. Prefer the new/picked domain's hostname so the
-    # link the reseller copies points at the right tenant. Falls back to
-    # the admin's own domain — last resort is just "/" (caller knows host).
+    # Build the login URL. Tool-install accounts log in only from the
+    # kiosk app, so the URL is informational ("Open the desktop app");
+    # domain users get the hostname they were assigned to.
     host: str | None = None
-    if new_domain_row:
+    if install_row:
+        # No URL for kiosk-bound accounts — leave host empty, note covers it.
+        host = None
+    elif new_domain_row:
         host = new_domain_row.hostname
     elif target_domain:
         d = await db.get(Domain, target_domain)
         host = d.hostname if d else None
-    login_url = f"https://{host}/" if host else "/"
+    login_url = f"https://{host}/" if host else (
+        "Mở app GrokFlow Desktop trên máy đã đăng ký tool install này"
+        if install_row else "/"
+    )
 
     note = (
         "Lưu lại api_key — chỉ hiện 1 lần. Gửi cho khách kèm login_url + email/password."
@@ -378,6 +423,8 @@ async def quick_provision(
         user_email=user.email,
         domain_id=target_domain,
         domain_hostname=host,
+        tool_install_id=install_row.id if install_row else None,
+        tool_install_label=(install_row.label or install_row.tool_id) if install_row else None,
         api_key=full_key,
         api_key_id=key_id,
         api_key_prefix=key_prefix,

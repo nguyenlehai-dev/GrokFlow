@@ -47,6 +47,8 @@ export interface QuickProvisionIn {
     label?: string | null;
     jobs_quota_per_day?: number | null;
   } | null;
+  tool_install_id?: string | null;
+  pin_as_only_user?: boolean;
   create_api_key?: boolean;
   api_key_name?: string;
   api_key_providers?: string[];
@@ -59,6 +61,8 @@ export interface QuickProvisionOut {
   user_email: string;
   domain_id: string | null;
   domain_hostname: string | null;
+  tool_install_id?: string | null;
+  tool_install_label?: string | null;
   api_key: string | null;
   api_key_id: string | null;
   api_key_prefix: string | null;

@@ -8,6 +8,7 @@ import type { Plan } from "../models/plan";
 import type { DomainOpt } from "../models/user";
 import { usersService, type QuickProvisionIn, type QuickProvisionOut } from "../services/users.service";
 import { domainsService } from "../services/domains.service";
+import { toolInstallsService, type ToolInstallAdmin } from "../services/toolInstalls.service";
 
 /** Single-step customer onboard.
  *
@@ -28,7 +29,8 @@ export function QuickProvisionModal({
   const me = useAuthStore((s) => s.user);
   const isSuper = me?.role === "super_admin";
 
-  const [domainMode, setDomainMode] = useState<"existing" | "new" | "none">("existing");
+  const [scopeMode, setScopeMode] = useState<"existing" | "new" | "tool" | "none">("existing");
+  const [pinAsOnly, setPinAsOnly] = useState(true);
   const [includeApiKey, setIncludeApiKey] = useState(true);
   const [result, setResult] = useState<QuickProvisionOut | null>(null);
   const [copied, setCopied] = useState(false);
@@ -42,6 +44,7 @@ export function QuickProvisionModal({
     domain_id: string;
     new_hostname: string;
     new_quota: string;
+    tool_install_id: string;
     api_key_name: string;
     api_key_daily_limit: string;
   }>({
@@ -56,7 +59,13 @@ export function QuickProvisionModal({
   const { data: domains } = useQuery<DomainOpt[]>({
     queryKey: ["admin-domains"],
     queryFn: () => domainsService.listAs<DomainOpt>(),
-    enabled: isSuper && domainMode === "existing",
+    enabled: isSuper && scopeMode === "existing",
+  });
+
+  const { data: toolInstalls } = useQuery<ToolInstallAdmin[]>({
+    queryKey: ["admin-tool-installs", "for-quick-provision"],
+    queryFn: () => toolInstallsService.list({ limit: 200 }),
+    enabled: isSuper && scopeMode === "tool",
   });
 
   const provision = useMutation({
@@ -87,13 +96,16 @@ export function QuickProvisionModal({
       api_key_name: v.api_key_name,
       api_key_daily_limit: Number(v.api_key_daily_limit) || 1000,
     };
-    if (domainMode === "existing") {
+    if (scopeMode === "existing") {
       payload.domain_id = v.domain_id || null;
-    } else if (domainMode === "new") {
+    } else if (scopeMode === "new") {
       payload.new_domain = {
         hostname: v.new_hostname,
         jobs_quota_per_day: v.new_quota ? Number(v.new_quota) : null,
       };
+    } else if (scopeMode === "tool") {
+      payload.tool_install_id = v.tool_install_id || null;
+      payload.pin_as_only_user = pinAsOnly;
     }
     provision.mutate(payload);
   });
@@ -104,7 +116,10 @@ export function QuickProvisionModal({
     ? [
         `🔑 Tài khoản GrokFlow`,
         `──────────────────`,
-        `Login: ${result.login_url}`,
+        result.tool_install_id
+          ? `Truy cập: Mở app GrokFlow Desktop trên máy đã đăng ký`
+          : `Login: ${result.login_url}`,
+        result.tool_install_label ? `Tool install: ${result.tool_install_label}` : "",
         `Email: ${result.user_email}`,
         passwordValueRef ? `Password: ${passwordValueRef}` : "",
         result.api_key ? `\nAPI Key: ${result.api_key}` : "",
@@ -137,9 +152,16 @@ export function QuickProvisionModal({
           </div>
 
           <div className="space-y-2 text-sm">
-            <Row label="Login URL"><a href={result.login_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{result.login_url}</a></Row>
+            {result.tool_install_id ? (
+              <Row label="Truy cập">
+                <span className="text-slate-700">Mở app GrokFlow Desktop trên máy đã đăng ký tool install</span>
+              </Row>
+            ) : (
+              <Row label="Login URL"><a href={result.login_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{result.login_url}</a></Row>
+            )}
             <Row label="Email"><code className="font-mono">{result.user_email}</code></Row>
             {result.domain_hostname && <Row label="Domain"><code className="font-mono">{result.domain_hostname}</code></Row>}
+            {result.tool_install_label && <Row label="Tool install"><code className="font-mono">{result.tool_install_label}</code></Row>}
             {result.api_key && (
               <Row label="API Key">
                 <code className="font-mono text-xs break-all bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
@@ -229,26 +251,32 @@ export function QuickProvisionModal({
         </div>
 
         <fieldset className="rounded-lg border border-slate-200 p-3 space-y-2">
-          <legend className="text-sm font-medium px-1">Domain</legend>
-          <div className="flex items-center gap-3 text-sm">
+          <legend className="text-sm font-medium px-1">Scope (Domain hoặc Tool Install)</legend>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <label className="flex items-center gap-1.5">
-              <input type="radio" checked={domainMode === "existing"} onChange={() => setDomainMode("existing")} disabled={!isSuper} />
-              Chọn domain có sẵn
+              <input type="radio" checked={scopeMode === "existing"} onChange={() => setScopeMode("existing")} disabled={!isSuper} />
+              Domain có sẵn
             </label>
             {isSuper && (
               <label className="flex items-center gap-1.5">
-                <input type="radio" checked={domainMode === "new"} onChange={() => setDomainMode("new")} />
+                <input type="radio" checked={scopeMode === "new"} onChange={() => setScopeMode("new")} />
                 Tạo domain mới
               </label>
             )}
             {isSuper && (
               <label className="flex items-center gap-1.5">
-                <input type="radio" checked={domainMode === "none"} onChange={() => setDomainMode("none")} />
+                <input type="radio" checked={scopeMode === "tool"} onChange={() => setScopeMode("tool")} />
+                Gán Tool Install (kiosk)
+              </label>
+            )}
+            {isSuper && (
+              <label className="flex items-center gap-1.5">
+                <input type="radio" checked={scopeMode === "none"} onChange={() => setScopeMode("none")} />
                 Không gán
               </label>
             )}
           </div>
-          {domainMode === "existing" && (
+          {scopeMode === "existing" && (
             <select className="input" {...register("domain_id")}>
               <option value="">— pick domain —</option>
               {(domains ?? []).map((d) => (
@@ -256,11 +284,32 @@ export function QuickProvisionModal({
               ))}
             </select>
           )}
-          {domainMode === "new" && (
+          {scopeMode === "new" && (
             <div className="grid grid-cols-2 gap-2">
-              <input className="input" placeholder="hostname (vd: khach.nexoratech.com.vn)" {...register("new_hostname", { required: domainMode === "new" })} />
+              <input className="input" placeholder="hostname (vd: khach.nexoratech.com.vn)" {...register("new_hostname", { required: scopeMode === "new" })} />
               <input className="input" type="number" placeholder="quota/ngày (trống = unlimited)" {...register("new_quota")} />
             </div>
+          )}
+          {scopeMode === "tool" && (
+            <>
+              <select className="input" {...register("tool_install_id", { required: scopeMode === "tool" })}>
+                <option value="">— pick tool install —</option>
+                {(toolInstalls ?? []).map((ti) => (
+                  <option key={ti.id} value={ti.id}>
+                    {ti.label || ti.tool_id}
+                    {ti.machine_name ? ` · ${ti.machine_name}` : ""}
+                    {ti.assigned_user_email ? ` (đã có ${ti.assigned_user_email})` : ""}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                <input type="checkbox" checked={pinAsOnly} onChange={(e) => setPinAsOnly(e.target.checked)} />
+                Pin khách này làm "chủ" install — máy này về sau không login user khác được
+              </label>
+              <p className="text-[11px] text-slate-500">
+                Khách tool-bound chỉ login được từ desktop app đã cài trên máy đăng ký install này. Không có URL web để truy cập.
+              </p>
+            </>
           )}
         </fieldset>
 
