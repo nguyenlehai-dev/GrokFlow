@@ -72,7 +72,7 @@ export function ImageSyncPanel() {
     if (!f) return;
     setRefImage({ file: f, preview: URL.createObjectURL(f) });
     setRefFileId(null);
-    setLog((p) => [...p, { ts: nowTs(), level: "info", msg: `Uploading ${f.name}...` }]);
+    setLog((p) => [...p, { ts: nowTs(), level: "info", msg: `Uploading ${f?.name ?? "file"}...` }]);
     try {
       const res = await upload.mutateAsync(f);
       setRefFileId(res.file_id);

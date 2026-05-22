@@ -15,6 +15,7 @@ import { ImageSyncPanel } from "./cvp-panels/ImageSyncPanel";
 import { ImageDirectPanel } from "./cvp-panels/ImageDirectPanel";
 import { AutoLoginPanel } from "./cvp-panels/AutoLoginPanel";
 import { QuotaPill } from "./cvp-panels/QuotaPill";
+import { PanelErrorBoundary } from "./cvp-panels/PanelErrorBoundary";
 
 /** "Create Video Pro" — Tech Studio premium workspace for batch AI
  *  video/image generation. Lives at /create-video-pro (top-level route,
@@ -125,7 +126,9 @@ export function CreateVideoProPage() {
           {visibleTools.length === 0 ? (
             <NoPanelsAccess />
           ) : (
-            <ActivePanel />
+            <PanelErrorBoundary key={activeKey} name={activeKey}>
+              <ActivePanel />
+            </PanelErrorBoundary>
           )}
         </div>
       </div>
