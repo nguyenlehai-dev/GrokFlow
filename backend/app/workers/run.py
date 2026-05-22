@@ -583,14 +583,68 @@ async def process_one(db: AsyncSession, job: Job) -> None:
                 )
 
     except Exception as exc:  # noqa: BLE001
-        job.status = "failed"
         # Same scrub as the provider-error branch — exception text can
         # contain credentials from connection strings / response bodies.
-        job.error_message = scrub_secrets(
+        err_text = scrub_secrets(
             f"Worker exception: {type(exc).__name__}: {exc}"
         )
-        job.completed_at = datetime.now(timezone.utc)
-        db.add(JobLog(job_id=job.id, level="error", message=job.error_message))
+        job.error_message = err_text
+        db.add(JobLog(job_id=job.id, level="error", message=err_text))
+
+        # Treat uncaught Playwright / Chromium crashes the same way the
+        # provider-error branch treats `tab_crashed`: rotate to a sibling
+        # profile if one's available and retries remain. Without this,
+        # any exception that escapes the provider's try/except — most
+        # commonly TargetClosedError when Chromium dies mid-setup —
+        # marks the job dead on first hit, ignoring max_retry entirely.
+        exc_name = type(exc).__name__
+        retryable_exc = (
+            exc_name in {"TargetClosedError", "Error"}
+            or "Target page, context or browser has been closed" in err_text
+            or "TargetClosedError" in err_text
+            or "browser has been closed" in err_text
+        )
+        if retryable_exc and job.retry_count < job.max_retry:
+            # Try to rotate to a sibling profile — same logic as the
+            # provider error branch, condensed inline.
+            job.retry_count += 1
+            payload = dict(job.input_payload or {})
+            banned = list(payload.get("_banned_profiles") or [])
+            pid_str = str(job.profile_id) if job.profile_id else None
+            alt = None
+            if pid_str:
+                try_skip = list(set(banned + [pid_str]))
+                try:
+                    alt = await jobs_service._resolve_profile_for_job(
+                        db, requested_id=None, user_id=job.user_id,
+                        provider=job.provider,
+                        excluded_profile_ids=try_skip,
+                        domain_id=getattr(job, "domain_id", None),
+                        job_type=job.job_type,
+                    )
+                except Exception:  # noqa: BLE001
+                    alt = None
+            if alt is not None and pid_str:
+                if pid_str not in banned:
+                    banned.append(pid_str)
+                payload["_banned_profiles"] = banned
+                job.input_payload = payload
+                job.profile_id = None
+                job.next_attempt_at = None
+                job.status = "queued"
+                db.add(JobLog(job_id=job.id, level="info",
+                              message=f"Worker-level rotate after {exc_name} ({job.retry_count}/{job.max_retry})"))
+            else:
+                # No alt available — backoff on same profile.
+                delay = BACKOFF_SECONDS[min(job.retry_count - 1, len(BACKOFF_SECONDS) - 1)]
+                job.next_attempt_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+                job.status = "queued"
+                db.add(JobLog(job_id=job.id, level="info",
+                              message=f"Worker-level retry on same after ~{delay}s ({job.retry_count}/{job.max_retry})"))
+        else:
+            # Either non-retryable exception (rare) or out of retries.
+            job.status = "failed"
+            job.completed_at = datetime.now(timezone.utc)
 
     finally:
         if slot_held:
