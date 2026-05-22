@@ -86,29 +86,41 @@ export function JobGrid({
             <IconBtn title="Xem chi tiết" onClick={() => onView(j.id)} className="hover:bg-slate-200 text-slate-600">
               <Eye size={14} />
             </IconBtn>
-            {j.status === "success" && (
-              <IconBtn title="Xem kết quả" onClick={() => onGallery(j)} className="hover:bg-emerald-100 text-emerald-600">
-                <Images size={14} />
-              </IconBtn>
-            )}
+            <IconBtn
+              title={j.status === "success" ? "Xem kết quả" : "Chỉ xem được khi job success"}
+              onClick={() => onGallery(j)}
+              disabled={j.status !== "success"}
+              className={j.status === "success" ? "hover:bg-emerald-100 text-emerald-600" : "text-slate-300 cursor-not-allowed"}
+            >
+              <Images size={14} />
+            </IconBtn>
             <IconBtn title="Re-run" onClick={() => onClone(j)} className="hover:bg-indigo-100 text-indigo-600">
               <Copy size={14} />
             </IconBtn>
-            {isRetryable(j.status) && (
-              <IconBtn title="Retry" onClick={() => onRetry(j.id)} className="hover:bg-blue-100 text-blue-600">
-                <RefreshCw size={14} />
-              </IconBtn>
-            )}
-            {isEditable(j.status) && (
-              <IconBtn title="Edit prompt" onClick={() => onEdit(j)} className="hover:bg-amber-100 text-amber-600">
-                <Pencil size={14} />
-              </IconBtn>
-            )}
-            {isDeletable(j.status) && (
-              <IconBtn title="Xoá" onClick={() => onRemove(j)} className="hover:bg-rose-100 text-rose-600 ml-auto">
-                <Trash2 size={14} />
-              </IconBtn>
-            )}
+            <IconBtn
+              title={isRetryable(j.status) ? "Retry" : "Chỉ retry được job failed/cancelled"}
+              onClick={() => onRetry(j.id)}
+              disabled={!isRetryable(j.status)}
+              className={isRetryable(j.status) ? "hover:bg-blue-100 text-blue-600" : "text-slate-300 cursor-not-allowed"}
+            >
+              <RefreshCw size={14} />
+            </IconBtn>
+            <IconBtn
+              title={isEditable(j.status) ? "Edit prompt" : "Chỉ sửa được job đang queued"}
+              onClick={() => onEdit(j)}
+              disabled={!isEditable(j.status)}
+              className={isEditable(j.status) ? "hover:bg-amber-100 text-amber-600" : "text-slate-300 cursor-not-allowed"}
+            >
+              <Pencil size={14} />
+            </IconBtn>
+            <IconBtn
+              title={isDeletable(j.status) ? "Xoá" : "Job đang chạy phải cancel trước"}
+              onClick={() => onRemove(j)}
+              disabled={!isDeletable(j.status)}
+              className={`ml-auto ${isDeletable(j.status) ? "hover:bg-rose-100 text-rose-600" : "text-slate-300 cursor-not-allowed"}`}
+            >
+              <Trash2 size={14} />
+            </IconBtn>
           </div>
         </div>
       ))}
@@ -140,17 +152,20 @@ function IconBtn({
   onClick,
   title,
   className,
+  disabled,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   title: string;
   className: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       title={title}
+      disabled={disabled}
       className={`p-1.5 rounded ${className}`}
     >
       {children}

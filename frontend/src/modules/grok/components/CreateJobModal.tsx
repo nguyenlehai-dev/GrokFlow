@@ -132,6 +132,11 @@ export function CreateJobModal({
     }
   }, [aspect, setValue]);
 
+  // Pre-filter: only profiles for the chosen provider. The dropdown
+  // further narrows down to "selectable" ones (status ready, video flag
+  // if needed) — non-selectable profiles are hidden entirely rather
+  // than shown greyed-out, since they're noise to end users who can't
+  // do anything about them anyway.
   const eligibleProfiles = (profiles ?? []).filter((p) => p.provider === provider);
 
   // Preview which profile the backend WOULD pick when "Auto pick" is
@@ -286,31 +291,22 @@ export function CreateJobModal({
               render={({ field }) => (
                 <select className="input" {...field}>
                   <option value="">{t("grok.create_job_auto_pick")}</option>
-                  {eligibleProfiles.map((p) => {
-                    const ready = p.status === "logged_in" || p.status === "running_job";
-                    const imageOnlyForVideo =
-                      jobType === "video" && p.allows_video === false;
-                    const selectable = profileSelectable(p);
-                    const slots = `${p.active_jobs}/${p.max_concurrent_jobs}`;
-                    const full = p.active_jobs >= p.max_concurrent_jobs;
-                    // Reason annotation in the option label so the user
-                    // understands why some entries are greyed out. Order
-                    // matters: image-only takes precedence over "full"
-                    // (the latter doesn't help if the profile flat-out
-                    // can't accept this job type).
-                    const note = !ready
-                      ? ` — ${p.status}`
-                      : imageOnlyForVideo
-                        ? ` — ${t("grok.create_job_profile_image_only")}`
-                        : full
-                          ? ` — ${t("grok.create_job_full_will_queue")}`
-                          : "";
-                    return (
-                      <option key={p.id} value={p.id} disabled={!selectable}>
-                        {p.name} [{slots}{note}]
-                      </option>
-                    );
-                  })}
+                  {eligibleProfiles
+                    .filter(profileSelectable)
+                    .map((p) => {
+                      const slots = `${p.active_jobs}/${p.max_concurrent_jobs}`;
+                      const full = p.active_jobs >= p.max_concurrent_jobs;
+                      // Selectable profiles can still be "full" — let the
+                      // user know the job will queue rather than start
+                      // immediately. Other states are hidden by the filter
+                      // above so don't need annotation here.
+                      const note = full ? ` — ${t("grok.create_job_full_will_queue")}` : "";
+                      return (
+                        <option key={p.id} value={p.id}>
+                          {p.name} [{slots}{note}]
+                        </option>
+                      );
+                    })}
                 </select>
               )}
             />
