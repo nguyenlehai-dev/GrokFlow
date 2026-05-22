@@ -193,7 +193,13 @@ class GrokProvider(Provider):
     # generation queue under shared-account load took ~90-150s for images
     # and 180-300s for videos. The old timeouts caused premature retries
     # that compounded the upstream backlog.
-    IMAGE_TIMEOUT_MS = 180000  # 3 min — handles slow generations under load
+    # 90s — happy-path image jobs settle within 30s now that the loop
+    # commits on the first-match grace window (see commit 57bf9d7). The
+    # old 180s budget was a hedge against the loop running the full
+    # timeout when the URL flickered, which it no longer does. Profiles
+    # that genuinely don't render in 90s are stuck — rotate to a sibling
+    # rather than burning the budget on the same dead session.
+    IMAGE_TIMEOUT_MS = int(os.environ.get("GROK_IMAGE_TIMEOUT_MS", "90000"))
     VIDEO_TIMEOUT_MS = 360000  # 6 min — Grok video can take 90-300s
 
     async def run(self, job: JobInput) -> JobResult:
