@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
 import {
-  Menu, Settings as Cog, ChevronLeft, ChevronRight,
+  Menu, Settings as Cog,
   Type as TypeIcon, Image as ImageIcon, Users, Camera, Aperture, LogIn,
   ArrowLeft, LogOut, Sparkles, Zap,
 } from "lucide-react";
@@ -96,52 +96,36 @@ export function CreateVideoProPage() {
   const ActivePanel = PANELS[activeKey];
 
   return (
-    <div className="min-h-screen cvp-skin">
-      <div className="flex">
-        {sidebarOpen && (
-          <ToolSidebar
-            tools={visibleTools}
-            activeKey={activeKey}
-            onSelect={setActiveKey}
-            onClose={() => setSidebarOpen(false)}
-          />
-        )}
+    // h-screen + overflow-hidden trên outer = "viewport-frame" cố định.
+    // Cả 3 vùng (sidebar, header, content) chia nhau viewport, chỉ
+    // content được phép scroll. Trước đó dùng min-h-screen → cả trang
+    // scroll, sidebar + header trôi theo nội dung khi cuộn xuống.
+    <div className="h-screen overflow-hidden cvp-skin flex">
+      {sidebarOpen && (
+        <ToolSidebar
+          tools={visibleTools}
+          activeKey={activeKey}
+          onSelect={setActiveKey}
+          onClose={() => setSidebarOpen(false)}
+        />
+      )}
 
-        <div className="flex-1 flex flex-col relative min-w-0">
-          <TopBar
-            onToggleSidebar={() => setSidebarOpen((v) => !v)}
-            sidebarOpen={sidebarOpen}
-          />
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        <TopBar
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          sidebarOpen={sidebarOpen}
+        />
 
-          <div className="flex-1 cvp-panel-border p-4 sm:p-5">
-            {visibleTools.length === 0 ? (
-              <NoPanelsAccess />
-            ) : (
-              <ActivePanel />
-            )}
-          </div>
-
-          {/* Floating side arrows for quick tool nav. Hidden on auto-login
-              since it's a management surface, not a flow. */}
-          {activeKey !== "auto_login" && visibleTools.length > 1 && (
-            <>
-              <NavArrow side="left"  onClick={() => navigateTool(visibleTools, activeKey, -1, setActiveKey)} />
-              <NavArrow side="right" onClick={() => navigateTool(visibleTools, activeKey, +1, setActiveKey)} />
-            </>
+        <div className="flex-1 cvp-panel-border p-4 sm:p-5 overflow-y-auto">
+          {visibleTools.length === 0 ? (
+            <NoPanelsAccess />
+          ) : (
+            <ActivePanel />
           )}
         </div>
       </div>
     </div>
   );
-}
-
-function navigateTool(
-  tools: SidebarItem[], current: ToolKey, delta: number, set: (k: ToolKey) => void,
-) {
-  if (tools.length === 0) return;
-  const idx = tools.findIndex((t) => t.key === current);
-  const next = (idx + delta + tools.length) % tools.length;
-  set(tools[next].key);
 }
 
 function NoPanelsAccess() {
@@ -178,7 +162,7 @@ function ToolSidebar({
   }, [tools]);
 
   return (
-    <aside className="w-64 shrink-0 cvp-sidebar px-3 py-4 space-y-4">
+    <aside className="w-64 shrink-0 cvp-sidebar px-3 py-4 space-y-4 h-full overflow-y-auto">
       <header className="flex items-center gap-2 px-2 pb-3 border-b border-white/5">
         <div className="w-8 h-8 rounded-lg grid place-items-center"
              style={{
@@ -297,19 +281,6 @@ function TopBar({
         </button>
       </div>
     </header>
-  );
-}
-
-function NavArrow({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
-  const Icon = side === "left" ? ChevronLeft : ChevronRight;
-  return (
-    <button
-      onClick={onClick}
-      className={`absolute top-1/2 -translate-y-1/2 ${side === "left" ? "left-4" : "right-4"} z-10 grid place-items-center w-9 h-9 rounded-full bg-slate-900/60 text-slate-300 ring-1 ring-cyan-500/20 backdrop-blur hover:bg-cyan-500/15 hover:text-cyan-200 hover:ring-cyan-400/50 hover:shadow-[0_0_24px_-4px_rgba(6,182,212,0.5)] transition-all`}
-      aria-label={side}
-    >
-      <Icon size={18} />
-    </button>
   );
 }
 
