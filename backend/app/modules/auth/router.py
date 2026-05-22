@@ -333,6 +333,17 @@ async def me(
                     effective_pages = sorted(install_pages)
                 else:
                     effective_pages = [p for p in effective_pages if p in install_pages]
+
+    # Always-allowed pages: self-service core mà mọi user phải truy
+    # cập được dù domain/role/install có restrictive thế nào. Logout đã
+    # client-side; /account = đổi password/profile của chính mình. Nếu
+    # admin muốn user KHÔNG đổi được, dùng status=banned thay vì cắt
+    # /account khỏi allowed_pages (sẽ tự append lại ở đây).
+    ALWAYS_ALLOWED = {"/account"}
+    if effective_pages is not None:
+        for page in ALWAYS_ALLOWED:
+            if page not in effective_pages:
+                effective_pages.append(page)
     return MeResponse(
         id=user.id,
         email=user.email,
