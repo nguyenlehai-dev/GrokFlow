@@ -678,7 +678,11 @@ async def chat(
     from app.providers.grok_api_client import GrokAPIError as _GrokAPIError
 
     api_key, user = principal
-    _check_perm(api_key, "chat")
+    # Provider check only — chat is not a job_type in the legacy enum
+    # (it never goes through the job queue), so the per-job_type
+    # whitelist on the API key doesn't apply.
+    if api_key.allowed_providers and "grok" not in api_key.allowed_providers:
+        raise PermissionDenied("API key not allowed for provider 'grok'")
     await enforce_api_key_rate_limit(api_key)
 
     # Resolve a profile — explicit pick or first logged_in for this user.
