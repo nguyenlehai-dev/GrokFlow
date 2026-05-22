@@ -179,6 +179,36 @@ async def update_user(user_id: uuid.UUID, payload: AdminUserUpdate, admin: Admin
             db, payload.role_id, user.domain_id,
         )
         changes["role_id"] = str(user.role_id) if user.role_id else None
+    # Tool-install assignment (super_admin only). Mutex with domain: when
+    # admin sets a tool_install_id the user becomes kiosk-bound and any
+    # previous domain attachment is cleared. Likewise when domain_id was
+    # just set above, we already implicitly cleared tool_install via the
+    # `if str(payload.domain_id) != NULL_FK_SENTINEL` branch — handle that
+    # symmetrically here for the reverse direction.
+    if payload.tool_install_id is not None and admin.role == "super_admin":
+        from app.models.tool_install import ToolInstall as _ToolInstall
+        if str(payload.tool_install_id) == NULL_FK_SENTINEL:
+            user.tool_install_id = None
+            changes["tool_install_id"] = None
+        else:
+            ti = await db.get(_ToolInstall, payload.tool_install_id)
+            if not ti:
+                raise InvalidPayload("Tool install không tồn tại")
+            user.tool_install_id = payload.tool_install_id
+            user.domain_id = None
+            user.role_id = None
+            changes["tool_install_id"] = str(payload.tool_install_id)
+            changes["domain_id"] = None  # mutex cleared
+    elif (
+        payload.domain_id is not None
+        and admin.role == "super_admin"
+        and str(payload.domain_id) != NULL_FK_SENTINEL
+        and user.tool_install_id is not None
+    ):
+        # Caller swapped domain on a kiosk-bound user — clear the install
+        # binding so the mutex invariant stays valid.
+        user.tool_install_id = None
+        changes["tool_install_id"] = None
     await audit.log_action(
         db, user_id=admin.id, action="admin_update_user", target_type="user", target_id=user.id,
         metadata=changes,

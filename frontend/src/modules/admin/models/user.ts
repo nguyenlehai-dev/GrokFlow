@@ -8,6 +8,7 @@ export interface AdminUser {
   created_at: string;
   plan_id: string | null;
   domain_id: string | null;
+  tool_install_id: string | null;
   entitlement_overrides: Record<string, unknown> | null;
 }
 

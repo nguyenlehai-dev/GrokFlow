@@ -34,6 +34,11 @@ class AdminUserUpdate(BaseModel):
     # Per-domain role assignment. Zero-uuid clears the role (user falls
     # back to inheriting the domain's allowed_pages).
     role_id: uuid.UUID | None = None
+    # super_admin only — bind to a desktop kiosk install. Mutually
+    # exclusive with domain_id: setting one auto-clears the other so the
+    # DB-level "EITHER domain OR tool_install" invariant holds. Zero-uuid
+    # clears the field (user becomes web-only or scopeless).
+    tool_install_id: uuid.UUID | None = None
 
 
 class AdminUserOut(BaseModel):
