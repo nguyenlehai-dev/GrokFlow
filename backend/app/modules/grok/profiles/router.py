@@ -24,7 +24,10 @@ from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
 from app.core.deps import SuperAdminUser
 from app.services.nginx_sync import refresh_vnc_map, refresh_vnc_map_until_present
-from app.models import Domain, GrokProject, Job, Profile, ProjectDomainAssignment, User
+from app.models import (
+    Domain, GrokProject, Job, Profile,
+    ProjectDomainAssignment, ProjectToolInstallAssignment, User,
+)
 from app.modules.admin.audit import service as audit
 
 
@@ -162,18 +165,46 @@ async def list_profiles(user: CurrentUser, db: DbSession) -> list[Profile]:
             .order_by(Profile.created_at.desc())
         )
     else:
-        # Customer pool: admin-owned, logged_in, visible to my domain.
-        q = (
-            select(Profile)
-            .join(User, User.id == Profile.user_id)
-            .where(
-                User.role.in_(("admin", "super_admin")),
-                Profile.status == "logged_in",
-                (User.domain_id == user.domain_id)
-                | Profile.id.in_(_profile_ids_assigned_to_domain(user.domain_id)),
+        # Customer pool: admin-owned, logged_in, visible to my scope.
+        # Scope rules (mutex enforced at user level):
+        #   - tool_install_id set → only profiles whose projects are
+        #     assigned to that install. Domain bound user fields are
+        #     ignored on this branch because tool wins by spec.
+        #   - domain_id set      → profiles owned by admin in my domain
+        #     OR profiles whose projects are loaned to my domain.
+        #   - neither             → empty pool. Scopeless customers
+        #     shouldn't see any profile (was a hole previously — same-
+        #     null domain comparison silently matched all the admin
+        #     profiles whose owner also had domain_id=null).
+        if user.tool_install_id:
+            q = (
+                select(Profile)
+                .join(User, User.id == Profile.user_id)
+                .where(
+                    User.role.in_(("admin", "super_admin")),
+                    Profile.status == "logged_in",
+                    Profile.id.in_(
+                        _profile_ids_assigned_to_tool_install(user.tool_install_id)
+                    ),
+                )
+                .order_by(Profile.created_at.desc())
             )
-            .order_by(Profile.created_at.desc())
-        )
+        elif user.domain_id:
+            q = (
+                select(Profile)
+                .join(User, User.id == Profile.user_id)
+                .where(
+                    User.role.in_(("admin", "super_admin")),
+                    Profile.status == "logged_in",
+                    (User.domain_id == user.domain_id)
+                    | Profile.id.in_(_profile_ids_assigned_to_domain(user.domain_id)),
+                )
+                .order_by(Profile.created_at.desc())
+            )
+        else:
+            # Scopeless customer — return empty list. Was previously
+            # leaking admin profiles because NULL=NULL silently matched.
+            q = select(Profile).where(Profile.id == uuid.UUID(int=0))
     result = await db.execute(q)
     return list(result.scalars().all())
 
@@ -193,6 +224,28 @@ def _profile_ids_assigned_to_domain(domain_id):
         .where(
             ProjectDomainAssignment.domain_id == domain_id,
             ProjectDomainAssignment.enabled.is_(True),
+        )
+        .scalar_subquery()
+    )
+
+
+def _profile_ids_assigned_to_tool_install(install_id):
+    """Tool-install variant of _profile_ids_assigned_to_domain.
+
+    Used by the kiosk-bound customer path in list_profiles so a desktop
+    tool user only sees profiles whose projects have an explicit
+    ProjectToolInstallAssignment row for their install. Without this,
+    every kiosk would see every admin-owned logged_in profile — defeating
+    the per-install scoping super_admin set up via /admin/tool-installs."""
+    return (
+        select(GrokProject.profile_id)
+        .join(
+            ProjectToolInstallAssignment,
+            ProjectToolInstallAssignment.project_id == GrokProject.id,
+        )
+        .where(
+            ProjectToolInstallAssignment.tool_install_id == install_id,
+            ProjectToolInstallAssignment.enabled.is_(True),
         )
         .scalar_subquery()
     )
