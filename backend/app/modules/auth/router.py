@@ -246,7 +246,6 @@ async def me(
                     403, "wrong_scope_tool_user",
                     "Tài khoản này chỉ dùng được trên desktop tool đã được cấp.",
                 )
-            from app.models import ToolInstall
             install = (await db.execute(
                 select(ToolInstall).where(ToolInstall.tool_id == x_tool_install_id)
             )).scalar_one_or_none()
