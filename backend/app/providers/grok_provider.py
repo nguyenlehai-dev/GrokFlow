@@ -227,24 +227,25 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            # Video API path stays OFF. We've exhausted reasonable angles:
-            #   • upload-file fileMetadataId as parentPostId          ✗
-            #   • chat /imagine imageUuid as parentPostId             ✗
-            #   • 3 body variants (with/no parent / message-only)     ✗
-            #   • /imagine session warm-up before request             ✗
-            #   • x-xai-request-id + priority headers                 ✗
-            #   • job.attachments (real user upload) path             ✗
-            # Every combination 404s with `invalid-parent-post` while
-            # Playwright submitting through the Imagine studio UI on the
-            # SAME profile succeeds. Strong signal Grok server-side checks
-            # for an active /imagine WebSocket / SSE session that our
-            # stateless httpx call can't hold. Without reverse-engineering
-            # that channel, video must stay on Playwright.
-            # Re-enable for further debugging via GROK_VIDEO_API_ENABLED=1.
+            # Video API path — re-enabled now that the HTTP client routes
+            # through curl_cffi (Chrome 124 TLS impersonation). The original
+            # `invalid-parent-post` 404 wave turned out to be Cloudflare /
+            # statsig mangling the request before it ever hit Grok's app
+            # server; with the wire fingerprint matching a real browser
+            # the same request body Playwright submits successfully now
+            # gets through here too. Same api-blocked cooldown as the
+            # image path so a 403 wave doesn't burn 15s per job on a
+            # doomed attempt.
+            #
+            # Set GROK_VIDEO_API_ENABLED=0 to force the legacy Playwright
+            # fallback (only useful for A/B comparison).
+            video_api_enabled = os.getenv("GROK_VIDEO_API_ENABLED", "1").lower() in (
+                "1", "true", "yes"
+            )
             if (
                 job.job_type == "video"
-                and os.getenv("GROK_VIDEO_API_ENABLED", "").lower()
-                in ("1", "true", "yes")
+                and video_api_enabled
+                and not self._api_path_blocked(job.profile_path)
             ):
                 api_result = await self._run_video_via_api(job)
                 if api_result is not None:
