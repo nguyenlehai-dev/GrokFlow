@@ -112,6 +112,7 @@ def _load_modules() -> list[ModuleManifest]:
     from app.modules.servers import manifest as servers
     from app.modules.tool import manifest as tool
     from app.modules.tool_install import manifest as tool_install
+    from app.modules.prompt_history import manifest as prompt_history
 
     # Order is preserved to keep OpenAPI tag ordering stable across deploys.
     return [
@@ -146,6 +147,8 @@ def _load_modules() -> list[ModuleManifest]:
         tool,
         # Tool installs — desktop client registry under Auth admin
         tool_install,
+        # Per-user prompt history (replaces localStorage)
+        prompt_history,
         # Public / landing
         billing,
         plans_public,

@@ -1,35 +1,21 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Clock, X } from "lucide-react";
+import { promptHistoryService, type PromptHistoryEntry } from "../services/promptHistory.service";
 
-const STORAGE_KEY = "grok:prompt-history";
-const MAX_ITEMS = 20;
+/** Server-synced dropdown of recent prompts. Per-user via JWT auth, so
+ *  switching accounts on the same machine never leaks each other's
+ *  history. Multi-device (web + desktop) sees the same set. */
 
-type Entry = { prompt: string; ts: number; jobType: string };
-
-function load(): Entry[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.slice(0, MAX_ITEMS) : [];
-  } catch {
-    return [];
-  }
-}
-
-function save(entries: Entry[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, MAX_ITEMS)));
-  } catch {
-    // Quota exceeded or disabled — silently drop. History is not critical.
-  }
-}
-
+/** Called from CreateJobModal right after a successful submit. Fire-and-
+ *  forget — UX shouldn't block on history sync. */
 export function rememberPrompt(prompt: string, jobType: string) {
   const trimmed = prompt.trim();
   if (!trimmed) return;
-  const existing = load().filter((e) => e.prompt !== trimmed);
-  save([{ prompt: trimmed, ts: Date.now(), jobType }, ...existing]);
+  promptHistoryService.add(trimmed, jobType).catch(() => {
+    // History sync is best-effort. Server unreachable / 401 / etc.
+    // shouldn't break the post-submit flow.
+  });
 }
 
 export function PromptHistoryDropdown({
@@ -40,25 +26,29 @@ export function PromptHistoryDropdown({
   onPick: (prompt: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const qc = useQueryClient();
 
-  useEffect(() => {
-    if (open) setEntries(load());
-  }, [open]);
+  const { data: entries = [], isLoading } = useQuery<PromptHistoryEntry[]>({
+    queryKey: ["prompt-history", jobType],
+    queryFn: () => promptHistoryService.list(jobType || undefined, 20),
+    enabled: open,
+    // Refetch fresh each time the dropdown opens — invalidation after
+    // submit happens via the parent's mutation onSuccess; opening again
+    // forces a re-pull in case the user submitted from another tab.
+    staleTime: 5_000,
+  });
 
-  const filtered = entries.filter((e) => !jobType || e.jobType === jobType);
-
-  const remove = (prompt: string) => {
-    const next = load().filter((e) => e.prompt !== prompt);
-    save(next);
-    setEntries(next);
-  };
-
-  const clearAll = () => {
-    save([]);
-    setEntries([]);
-    setOpen(false);
-  };
+  const removeOne = useMutation({
+    mutationFn: (id: string) => promptHistoryService.removeOne(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["prompt-history"] }),
+  });
+  const clearAll = useMutation({
+    mutationFn: () => promptHistoryService.clearAll(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["prompt-history"] });
+      setOpen(false);
+    },
+  });
 
   return (
     <div className="relative inline-block">
@@ -77,27 +67,28 @@ export function PromptHistoryDropdown({
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 sticky top-0 bg-white">
             <span className="text-xs font-medium text-slate-600">
-              {filtered.length} prompt gần đây
+              {isLoading ? "Đang tải…" : `${entries.length} prompt gần đây`}
             </span>
-            {filtered.length > 0 && (
+            {entries.length > 0 && (
               <button
                 type="button"
-                onClick={clearAll}
-                className="text-xs text-rose-600 hover:underline"
+                onClick={() => clearAll.mutate()}
+                disabled={clearAll.isPending}
+                className="text-xs text-rose-600 hover:underline disabled:opacity-50"
               >
                 Xoá tất cả
               </button>
             )}
           </div>
-          {filtered.length === 0 ? (
+          {!isLoading && entries.length === 0 ? (
             <div className="px-3 py-6 text-center text-xs text-slate-400">
               Chưa có prompt nào. Submit job để lưu lại tự động.
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {filtered.map((e) => (
+              {entries.map((e) => (
                 <li
-                  key={e.ts}
+                  key={e.id}
                   className="px-3 py-2 hover:bg-slate-50 flex items-start gap-2 group"
                 >
                   <button
@@ -112,8 +103,9 @@ export function PromptHistoryDropdown({
                   </button>
                   <button
                     type="button"
-                    onClick={() => remove(e.prompt)}
-                    className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600"
+                    onClick={() => removeOne.mutate(e.id)}
+                    disabled={removeOne.isPending}
+                    className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 disabled:opacity-30"
                     title="Xoá khỏi lịch sử"
                   >
                     <X size={12} />

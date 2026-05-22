@@ -56,6 +56,7 @@ from .servers import (
 from .tool import ChatSession, PromptTemplate
 from .tool_distribution import Tool, ToolAsset
 from .tool_install import ToolInstall, ToolInstallQuotaPeriod
+from .prompt_history import PromptHistory
 
 __all__ = [
     # Infrastructure
@@ -81,4 +82,6 @@ __all__ = [
     "Tool", "ToolAsset",
     # Tool installs (desktop client registrations)
     "ToolInstall", "ToolInstallQuotaPeriod",
+    # Per-user prompt history (server-synced)
+    "PromptHistory",
 ]
