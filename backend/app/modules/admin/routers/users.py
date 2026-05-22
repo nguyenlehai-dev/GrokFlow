@@ -99,8 +99,25 @@ async def update_user(user_id: uuid.UUID, payload: AdminUserUpdate, admin: Admin
         user.role = payload.role
         changes["role"] = payload.role
     if payload.status is not None:
+        prev_status = user.status
         user.status = payload.status
         changes["status"] = payload.status
+        # Alert super_admin + domain admins khi 1 user vừa bị ban —
+        # họ có thể cần liên hệ khách hoặc revert nếu nhầm. Skip khi
+        # status không đổi hoặc đổi sang active (unban không cần alert).
+        if payload.status == "banned" and prev_status != "banned":
+            try:
+                from app.modules.admin.notifications import service as _notif
+                await _notif.notify_admins_async(
+                    db, domain_id=user.domain_id,
+                    kind="user_banned",
+                    title=f"User bị ban — {user.email}",
+                    body=f"Admin {admin.email} vừa chuyển {user.email} sang banned.",
+                    target_url=f"/admin/users?id={user.id}",
+                    severity="warning",
+                )
+            except Exception:  # noqa: BLE001
+                pass  # notification best-effort
     if payload.password is not None:
         user.password_hash = hash_password(payload.password)
         changes["password"] = "***"

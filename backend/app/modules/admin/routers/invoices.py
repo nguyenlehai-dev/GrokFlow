@@ -53,7 +53,8 @@ async def create_invoice_admin(
     """Manually issue an invoice (e.g. for cash sales or post-hoc invoicing)."""
     from app.modules.landing.billing.service import next_invoice_number
 
-    if not await db.get(User, payload.user_id):
+    target_user = await db.get(User, payload.user_id)
+    if not target_user:
         raise NotFound("user")
     await assert_billing_owner_in_admin_domain(db, admin, payload.user_id)
     inv_no = await next_invoice_number(db)
@@ -69,6 +70,9 @@ async def create_invoice_admin(
         issued_at=now if payload.status != "draft" else None,
         paid_at=now if payload.status == "paid" else None,
         line_items=payload.line_items, billing_info=payload.billing_info,
+        # Denormalise scope (xem comment trong model billing.py).
+        domain_id=target_user.domain_id,
+        tool_install_id=target_user.tool_install_id,
     )
     db.add(inv)
     await db.flush()

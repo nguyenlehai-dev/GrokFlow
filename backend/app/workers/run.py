@@ -111,6 +111,7 @@ async def _release_slot(db: AsyncSession, profile_id: uuid.UUID,
     profile.active_jobs = max(0, profile.active_jobs - 1)
     if job_type == "video":
         profile.active_video_jobs = max(0, profile.active_video_jobs - 1)
+    prev_profile_status = profile.status
     if profile.active_jobs == 0:
         profile.status = new_status or "logged_in"
     elif new_status and new_status != "logged_in":
@@ -121,6 +122,29 @@ async def _release_slot(db: AsyncSession, profile_id: uuid.UUID,
         # echo back tokens, query params with keys, etc.
         profile.error_message = scrub_secrets(error_message)
     profile.last_used_at = datetime.now(timezone.utc)
+
+    # Alert admins khi profile chuyển sang terminal status cần can thiệp
+    # (need_login / blocked / expired). Bỏ qua khi chỉ chuyển về
+    # logged_in / running_job — đó là healthy transitions.
+    _NOTIFY_PROFILE_STATES = {"need_login", "blocked", "expired", "quota_exhausted"}
+    if (
+        profile.status in _NOTIFY_PROFILE_STATES
+        and profile.status != prev_profile_status
+    ):
+        try:
+            from app.modules.admin.notifications import service as _notif
+            owner = await db.get(User, profile.user_id)
+            await _notif.notify_admins_async(
+                db,
+                domain_id=owner.domain_id if owner else None,
+                kind="profile_needs_attention",
+                title=f"Profile {profile.name} cần xử lý: {profile.status}",
+                body=(profile.error_message or "")[:200],
+                target_url=f"/profiles?id={profile.id}",
+                severity="warning",
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _profile_status_after_error(error_code: str | None) -> str | None:
@@ -654,6 +678,29 @@ async def process_one(db: AsyncSession, job: Job) -> None:
 
     if job.status in {"success", "failed", "cancelled"}:
         await _maybe_send_webhook(db, job)
+
+    # Notify domain admins + super_admin on terminal FAILURE so they
+    # can act (re-login profile, refund credit, contact customer).
+    # Skip success/cancelled — too noisy. Skip when retry will fire next
+    # because the user can't fix anything mid-retry; only the final
+    # status='failed' (no more retries) raises an admin alert.
+    if job.status == "failed":
+        try:
+            from app.modules.admin.notifications import service as _notif
+            user = await db.get(User, job.user_id)
+            domain_id = user.domain_id if user else None
+            err = (job.error_message or "")[:120]
+            await _notif.notify_admins_async(
+                db,
+                domain_id=domain_id,
+                kind="job_failed",
+                title=f"Job thất bại — {user.email if user else 'unknown'}",
+                body=f"#{str(job.id)[:8]} ({job.job_type}/{job.provider}): {err}",
+                target_url=f"/jobs?id={job.id}",
+                severity="warning",
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[worker] notify on fail err: {exc}", flush=True)
 
     await db.commit()
 
