@@ -420,12 +420,21 @@ export async function parsePromptFile(file: File): Promise<string[]> {
       const parsed = JSON.parse(trimmed);
       if (Array.isArray(parsed)) {
         return parsed
-          .map((x) => typeof x === "string" ? x : (x?.prompt ?? x?.text ?? ""))
+          .map((x) => typeof x === "string" ? x : (x?.prompt ?? x?.text ?? x?.description ?? ""))
           .filter((s: string) => typeof s === "string" && s.trim());
       }
-      // Single object → look for prompts/prompt list
-      if (parsed.prompts && Array.isArray(parsed.prompts)) {
-        return parsed.prompts.filter((s: any) => typeof s === "string" && s.trim());
+      // Single object — accept multiple common keys + array of objects
+      // with .prompt/.text/.description. Schema sample (Romantic Movie):
+      //   { "title": "...", "scenes": [ { "scene":1, "title":"...", "prompt": "..." }, ... ] }
+      // Cũng support: { "prompts": [...] }, { "items": [...] }, { "scenes": [...] }
+      const candidateKeys = ["prompts", "scenes", "items", "drafts"];
+      for (const key of candidateKeys) {
+        const arr = (parsed as Record<string, unknown>)[key];
+        if (Array.isArray(arr)) {
+          return arr
+            .map((x) => typeof x === "string" ? x : (x?.prompt ?? x?.text ?? x?.description ?? ""))
+            .filter((s: string) => typeof s === "string" && s.trim());
+        }
       }
     } catch {
       /* fall through to newline split */

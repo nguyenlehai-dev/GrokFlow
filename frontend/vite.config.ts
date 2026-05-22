@@ -93,6 +93,11 @@ export default defineConfig({
     // Cap individual chunks at 600 KB; warn instead of error so a one-off
     // big chunk doesn't fail CI.
     chunkSizeWarningLimit: 600,
+    // Source maps temporarily ON để debug "Cannot read properties of
+    // undefined (reading 'name')" crash trong CVP panel. Tăng ~30%
+    // bundle size nhưng error stack hiện đúng file/line gốc thay vì
+    // minified bytes 41507. Tắt lại sau khi fix xong.
+    sourcemap: true,
     rollupOptions: {
       output: {
         // Split heavy libraries off the main app chunk so first-paint pulls
