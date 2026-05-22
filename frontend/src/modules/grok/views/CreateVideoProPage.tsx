@@ -100,13 +100,18 @@ export function CreateVideoProPage() {
     // Cả 3 vùng (sidebar, header, content) chia nhau viewport, chỉ
     // content được phép scroll. Trước đó dùng min-h-screen → cả trang
     // scroll, sidebar + header trôi theo nội dung khi cuộn xuống.
-    <div className="h-screen overflow-hidden cvp-skin flex">
+    //
+    // CSS var --cvp-main-left expose sidebar width (16rem khi mở, 0 khi
+    // đóng) để PreviewModal có thể "nằm trong main" thay vì che cả app.
+    <div
+      className="h-screen overflow-hidden cvp-skin flex"
+      style={{ "--cvp-main-left": sidebarOpen ? "16rem" : "0px" } as React.CSSProperties}
+    >
       {sidebarOpen && (
         <ToolSidebar
           tools={visibleTools}
           activeKey={activeKey}
           onSelect={setActiveKey}
-          onClose={() => setSidebarOpen(false)}
         />
       )}
 
@@ -148,12 +153,11 @@ function NoPanelsAccess() {
 // ─── Sidebar ───────────────────────────────────────────────────────────────
 
 function ToolSidebar({
-  tools, activeKey, onSelect, onClose,
+  tools, activeKey, onSelect,
 }: {
   tools: SidebarItem[];
   activeKey: ToolKey;
   onSelect: (k: ToolKey) => void;
-  onClose: () => void;
 }) {
   const grouped = useMemo(() => {
     const groups: Record<string, SidebarItem[]> = {};
@@ -179,13 +183,6 @@ function ToolSidebar({
             AI Studio
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="text-slate-500 hover:text-cyan-300 transition-colors p-1"
-          aria-label="Collapse sidebar"
-        >
-          <Menu size={14} />
-        </button>
       </header>
 
       {Object.entries(grouped).map(([groupName, items]) => (
@@ -276,9 +273,13 @@ function TopBar({
         >
           <LogOut size={12} /> Logout
         </button>
-        <button className="text-slate-400 hover:text-cyan-300 transition-colors p-1.5 rounded-md hover:bg-white/5">
+        <Link
+          to="/account"
+          className="text-slate-400 hover:text-cyan-300 transition-colors p-1.5 rounded-md hover:bg-white/5"
+          title="Tài khoản — đổi thông tin / mật khẩu"
+        >
           <Cog size={16} />
-        </button>
+        </Link>
       </div>
     </header>
   );

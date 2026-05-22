@@ -349,3 +349,64 @@ async def me(
         locale=user.locale,
         notification_prefs=user.notification_prefs,
     )
+
+
+# ─── Account self-service ────────────────────────────────────────────────
+# User-facing endpoints to update their own profile + change password.
+# Mirror /api/admin/users/{id} but scoped to `user.id` automatically so
+# operators get the "edit my account" UX without admin privileges.
+
+from pydantic import BaseModel, Field, EmailStr
+
+
+class UpdateProfileIn(BaseModel):
+    full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    email: EmailStr | None = None
+    locale: str | None = Field(default=None, max_length=10)
+
+
+class ChangePasswordIn(BaseModel):
+    """Require the current password — guards against shoulder-surfing
+    attacks where someone walks up to an unlocked session and changes
+    the password to lock the real user out."""
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+@router.patch("/me", response_model=MeResponse)
+async def update_self(
+    payload: UpdateProfileIn, user: CurrentUser, db: DbSession,
+    x_tool_install_id: str | None = Header(default=None, alias="X-Tool-Install-Id"),
+) -> MeResponse:
+    """Edit own profile fields. Email change conflicts with existing
+    accounts return 400 — no silent overwrite. Returns the full /me
+    payload so the client refreshes auth store in one round-trip."""
+    if payload.email and payload.email != user.email:
+        dup = (await db.execute(
+            select(User).where(User.email == payload.email, User.id != user.id)
+        )).scalar_one_or_none()
+        if dup:
+            raise AppError(400, "email_taken", "Email đã có người dùng")
+        user.email = payload.email
+    if payload.full_name is not None:
+        user.full_name = payload.full_name
+    if payload.locale is not None:
+        user.locale = payload.locale
+    await db.commit()
+    await db.refresh(user)
+    # Reuse the /me builder so role / domain / install scoping stays
+    # consistent — caller gets exactly the same shape as before.
+    return await me(user=user, db=db, x_tool_install_id=x_tool_install_id)
+
+
+@router.post("/me/password", status_code=204, response_model=None)
+async def change_password(
+    payload: ChangePasswordIn, user: CurrentUser, db: DbSession,
+) -> None:
+    """Change own password. Server verifies current_password first to
+    prevent unauthorised hijack of an active session."""
+    from app.core.security import verify_password
+    if not verify_password(payload.current_password, user.password_hash):
+        raise AppError(403, "wrong_current_password", "Mật khẩu hiện tại không đúng")
+    user.password_hash = hash_password(payload.new_password)
+    await db.commit()
