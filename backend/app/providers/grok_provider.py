@@ -665,6 +665,19 @@ class GrokProvider(Provider):
             self._log(tag, f"API error: {exc.code} — {exc.message}")
             if exc.code == "provider_blocked":
                 _STATSIG_CACHE.pop(profile_id, None)
+                self._mark_api_blocked(job.profile_path)
+            # `rate_limited` with "quota exhausted" / "invalid-parent-post"
+            # is Grok's server-side rejection of every videoize body
+            # variant — not a real CF block, but functionally the same:
+            # the next video job on this profile will burn ~30s
+            # retrying the same 3 variants before falling back. Trip the
+            # cooldown so subsequent video jobs skip the API attempt
+            # entirely until the bug is reverse-engineered.
+            if exc.code == "rate_limited" and (
+                "quota exhausted" in (exc.message or "")
+                or "invalid-parent-post" in (exc.message or "")
+            ):
+                self._mark_api_blocked(job.profile_path)
             if exc.code == "cookie_expired":
                 return JobResult(
                     success=False,
