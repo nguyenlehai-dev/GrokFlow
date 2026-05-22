@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Eye, Images, Pencil, Trash2, RefreshCw, Ban, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus } from "lucide-react";
+import { Eye, Images, Pencil, Trash2, RefreshCw, Ban, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Copy, LayoutGrid, List } from "lucide-react";
 import { toast } from "@/components/ui/Toast";
 import { confirm } from "@/components/ui/ConfirmDialog";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -9,6 +9,8 @@ import { JobDetailDrawer } from "../components/JobDetailDrawer";
 import { CreateJobModal } from "../components/CreateJobModal";
 import { ResultGalleryModal } from "../components/ResultGalleryModal";
 import { EditJobModal } from "../components/EditJobModal";
+import { JobGrid } from "../components/JobGrid";
+import { CompareJobsModal } from "../components/CompareJobsModal";
 import type { Job } from "../models/job";
 import { jobsService } from "../services/jobs.service";
 import { ERROR_HINTS, parseErrorCode } from "../utils/jobError";
@@ -109,6 +111,17 @@ export function JobsPage() {
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [galleryJob, setGalleryJob] = useState<Job | null>(null);
   const [editJob, setEditJob] = useState<Job | null>(null);
+  const [cloneJob, setCloneJob] = useState<Job | null>(null);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"table" | "grid">(() => {
+    // Remember the user's last preference. Default to table since it's
+    // the higher-density view operators rely on for triage.
+    try { return (localStorage.getItem("grok:jobs-view") as "table" | "grid") ?? "table"; }
+    catch { return "table"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("grok:jobs-view", viewMode); } catch { /* ignore */ }
+  }, [viewMode]);
 
   const retry = useMutation({
     mutationFn: (id: string) => jobsService.retry(id),
@@ -240,8 +253,28 @@ export function JobsPage() {
             {t("grok.jobs_clear_filter")}
           </button>
         )}
-        <div className="ml-auto text-xs text-slate-400 font-medium">
-          <span className="text-slate-900 font-bold">{total}</span> {t("grok.jobs_total_suffix")}
+        <div className="ml-auto flex items-center gap-3">
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={`px-2 py-1 text-xs flex items-center gap-1 ${viewMode === "table" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              title="Table view"
+            >
+              <List size={14} /> Table
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`px-2 py-1 text-xs flex items-center gap-1 ${viewMode === "grid" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              title="Grid view"
+            >
+              <LayoutGrid size={14} /> Grid
+            </button>
+          </div>
+          <div className="text-xs text-slate-400 font-medium">
+            <span className="text-slate-900 font-bold">{total}</span> {t("grok.jobs_total_suffix")}
+          </div>
         </div>
       </div>
 
@@ -256,6 +289,16 @@ export function JobsPage() {
               Bỏ chọn
             </button>
           </div>
+          <div className="flex items-center gap-2">
+            {selectedIds.size >= 2 && selectedIds.size <= 4 && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setCompareOpen(true)}
+              >
+                So sánh {selectedIds.size}
+              </button>
+            )}
           <button
             className="btn-primary bg-rose-600 hover:bg-rose-700 inline-flex items-center gap-1.5"
             disabled={bulkDelete.isPending}
@@ -271,11 +314,24 @@ export function JobsPage() {
             <Trash2 size={14} />
             {bulkDelete.isPending ? "Đang xoá…" : `Xoá ${selectedIds.size} job`}
           </button>
+          </div>
         </div>
       )}
 
       {isLoading ? (
         <p className="text-slate-500">{t("common.loading")}</p>
+      ) : viewMode === "grid" ? (
+        <JobGrid
+          items={items}
+          onView={setDrawerId}
+          onGallery={setGalleryJob}
+          onClone={setCloneJob}
+          onRetry={(id) => retry.mutate(id)}
+          onEdit={setEditJob}
+          onRemove={(j) => remove.mutate(j.id)}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleRow}
+        />
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full text-sm">
@@ -367,6 +423,13 @@ export function JobsPage() {
                           onClick={() => retryable && retry.mutate(j.id)}
                         >
                           <RefreshCw size={16} />
+                        </button>
+                        <button
+                          className="p-1.5 rounded hover:bg-indigo-100 text-indigo-600"
+                          title="Re-run với prompt này"
+                          onClick={() => setCloneJob(j)}
+                        >
+                          <Copy size={16} />
                         </button>
                         {cancellable && (
                           <button
@@ -470,6 +533,22 @@ export function JobsPage() {
       )}
 
       {createOpen && <CreateJobModal onClose={() => setCreateOpen(false)} />}
+      {cloneJob && (
+        <CreateJobModal
+          onClose={() => setCloneJob(null)}
+          cloneFrom={{
+            prompt: cloneJob.prompt,
+            provider: cloneJob.provider,
+            job_type: cloneJob.job_type,
+          }}
+        />
+      )}
+      {compareOpen && (
+        <CompareJobsModal
+          jobs={items.filter((j) => selectedIds.has(j.id))}
+          onClose={() => setCompareOpen(false)}
+        />
+      )}
       {drawerId && <JobDetailDrawer jobId={drawerId} onClose={() => setDrawerId(null)} />}
       {galleryJob && (
         <ResultGalleryModal

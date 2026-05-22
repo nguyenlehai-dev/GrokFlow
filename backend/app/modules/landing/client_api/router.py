@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -476,6 +477,99 @@ async def generate_video(
     )
 
 
+# ────────────────────────── BATCH ENDPOINT ──────────────────────────
+# Submit up to 20 image/video prompts in a single request. Each item is
+# treated as an independent job — partial success is the norm (some items
+# may 422 on quota/permission while others succeed). The reply mirrors
+# the order of the input and reports per-item success/error.
+
+class BatchItem(BaseModel):
+    target: Literal["image", "video"]
+    prompt: str = Field(min_length=1, max_length=16000)
+    ratio: str | None = None
+    duration: int | None = None
+    count: int = Field(default=1, ge=1, le=10)
+    reference_images: list[str] | None = None
+
+
+class BatchGenerateIn(BaseModel):
+    items: list[BatchItem] = Field(min_length=1, max_length=20)
+
+
+class BatchItemOut(BaseModel):
+    index: int
+    target: str
+    task_id: uuid.UUID | None = None
+    status: str | None = None
+    error: str | None = None
+
+
+class BatchGenerateOut(BaseModel):
+    submitted: int
+    failed: int
+    items: list[BatchItemOut]
+
+
+@router.post("/generate/batch", response_model=BatchGenerateOut, status_code=201)
+async def generate_batch(
+    payload: BatchGenerateIn, principal: ApiKeyPrincipal, db: DbSession,
+) -> BatchGenerateOut:
+    """Submit up to 20 jobs in one round-trip.
+
+    Each item has its own target / prompt / options. Permission +
+    rate-limit are still enforced PER item — so a key without 'video'
+    permission can still submit image-only batches that succeed in full,
+    while video items in the same batch get error='permission_denied'.
+    """
+    api_key, _ = principal
+    results: list[BatchItemOut] = []
+    submitted = 0
+    failed = 0
+    for idx, item in enumerate(payload.items):
+        # Build a per-item ImageGenerateIn / VideoGenerateIn shim and
+        # delegate to _submit_job. We don't share rate-limit state across
+        # items in the batch — each call enforces its own bucket so a
+        # batch of 20 fires 20 individual rate-limit checks.
+        try:
+            opts: dict[str, Any] = {}
+            if item.ratio:
+                opts["ratio"] = item.ratio
+                opts["aspect_ratio"] = item.ratio
+            if item.duration is not None and item.target == "video":
+                opts["duration"] = item.duration
+            if item.count != 1:
+                opts["n"] = item.count
+            if item.reference_images:
+                opts["reference_images"] = item.reference_images
+                opts["reference_image_urls"] = item.reference_images
+            out = await _submit_job(
+                target=item.target,
+                payload_dict=item.model_dump(),
+                options=opts or None,
+                profile_id=None,
+                principal=principal,
+                db=db,
+            )
+            results.append(BatchItemOut(
+                index=idx, target=item.target,
+                task_id=out.task_id, status=out.status,
+            ))
+            submitted += 1
+        except PermissionDenied as exc:
+            results.append(BatchItemOut(
+                index=idx, target=item.target, error=str(exc.detail or exc),
+            ))
+            failed += 1
+        except Exception as exc:  # noqa: BLE001
+            # Don't let one bad item kill the rest — log inline and move on.
+            results.append(BatchItemOut(
+                index=idx, target=item.target,
+                error=f"{type(exc).__name__}: {exc}",
+            ))
+            failed += 1
+    return BatchGenerateOut(submitted=submitted, failed=failed, items=results)
+
+
 @router.get("/status/{task_id}", response_model=ClientTaskStatusOut)
 async def get_status(
     task_id: uuid.UUID,
@@ -619,6 +713,192 @@ async def _build_lite(task_id: uuid.UUID, user, db, request: Request) -> ClientL
     )
 
 
+class UsageBreakdownItem(BaseModel):
+    job_type: str
+    status: str
+    count: int
+
+
+class ClientUsageOut(BaseModel):
+    key_name: str
+    key_prefix: str
+    daily_limit: int
+    used_today: int
+    remaining_today: int
+    jobs_24h: int
+    jobs_7d: int
+    jobs_30d: int
+    breakdown_7d: list[UsageBreakdownItem]
+    allowed_providers: list[str]
+    allowed_job_types: list[str]
+
+
+@router.get("/usage", response_model=ClientUsageOut)
+async def get_usage(
+    principal: ApiKeyPrincipal, db: DbSession,
+) -> ClientUsageOut:
+    """Per-key usage dashboard: daily quota, 24h/7d/30d job counts, and a
+    7-day breakdown by job_type × status. Lets partners build their own
+    spend monitor without polling the full /tasks list."""
+    from datetime import timedelta
+    from sqlalchemy import func
+    api_key, _ = principal
+    now = datetime.now(timezone.utc)
+
+    async def _count(since_delta: timedelta) -> int:
+        stmt = select(func.count(Job.id)).where(
+            Job.api_key_id == api_key.id,
+            Job.created_at >= now - since_delta,
+        )
+        return int((await db.execute(stmt)).scalar() or 0)
+
+    jobs_24h = await _count(timedelta(hours=24))
+    jobs_7d = await _count(timedelta(days=7))
+    jobs_30d = await _count(timedelta(days=30))
+
+    # Breakdown: job_type × status counts for the last 7 days. Single
+    # GROUP BY query — partners can chart "image successes vs failures"
+    # without N follow-up requests.
+    breakdown_stmt = (
+        select(Job.job_type, Job.status, func.count(Job.id))
+        .where(
+            Job.api_key_id == api_key.id,
+            Job.created_at >= now - timedelta(days=7),
+        )
+        .group_by(Job.job_type, Job.status)
+    )
+    rows = (await db.execute(breakdown_stmt)).all()
+    breakdown = [
+        UsageBreakdownItem(job_type=jt, status=st, count=int(cnt))
+        for (jt, st, cnt) in rows
+    ]
+
+    return ClientUsageOut(
+        key_name=api_key.name,
+        key_prefix=api_key.key_prefix,
+        daily_limit=api_key.daily_limit,
+        used_today=api_key.used_today,
+        remaining_today=max(0, api_key.daily_limit - api_key.used_today),
+        jobs_24h=jobs_24h,
+        jobs_7d=jobs_7d,
+        jobs_30d=jobs_30d,
+        breakdown_7d=breakdown,
+        allowed_providers=list(api_key.allowed_providers or []),
+        allowed_job_types=list(api_key.allowed_job_types or []),
+    )
+
+
+class WebhookOut(BaseModel):
+    webhook_url: str | None
+    has_secret: bool
+
+
+class WebhookSetIn(BaseModel):
+    """Set the webhook URL where job completion events get POSTed.
+
+    The server enforces an SSRF guard — URLs that resolve to private /
+    loopback / link-local IPs are silently rejected at delivery time.
+    HTTPS only (http:// fails the public-target check).
+    """
+    webhook_url: str = Field(min_length=1, max_length=2048)
+
+
+class WebhookSetOut(BaseModel):
+    webhook_url: str
+    secret: str
+    note: str
+
+
+class WebhookTestOut(BaseModel):
+    delivered: bool
+    status_code: int | None
+    error: str | None
+
+
+@router.get("/webhooks", response_model=WebhookOut)
+async def get_webhook(principal: ApiKeyPrincipal, db: DbSession) -> WebhookOut:
+    _, user = principal
+    # Reload from DB so a freshly-set URL is reflected even when the
+    # principal was constructed from a cached session.
+    fresh = await db.get(type(user), user.id)
+    return WebhookOut(
+        webhook_url=fresh.webhook_url if fresh else None,
+        has_secret=bool(fresh and fresh.webhook_secret),
+    )
+
+
+@router.put("/webhooks", response_model=WebhookSetOut)
+async def set_webhook(
+    payload: WebhookSetIn, principal: ApiKeyPrincipal, db: DbSession,
+) -> WebhookSetOut:
+    """Set webhook URL. Generates a fresh HMAC secret each call —
+    partners must save it from the response (we never return it again).
+    To rotate the secret without changing the URL, call PUT again with
+    the same URL."""
+    import secrets as _secrets
+    from app.workers.webhook import _is_public_webhook_target
+    if not _is_public_webhook_target(payload.webhook_url):
+        raise PermissionDenied(
+            "webhook_url must be a public https:// URL (private IPs / "
+            "non-https schemes are rejected to prevent SSRF)"
+        )
+    _, user = principal
+    fresh = await db.get(type(user), user.id)
+    new_secret = _secrets.token_urlsafe(32)
+    fresh.webhook_url = payload.webhook_url
+    fresh.webhook_secret = new_secret
+    await db.commit()
+    return WebhookSetOut(
+        webhook_url=payload.webhook_url,
+        secret=new_secret,
+        note="Save this secret — it's only shown once. Verify HMAC-SHA256(secret, body) base64 against X-Grokflow-Signature.",
+    )
+
+
+@router.delete("/webhooks", status_code=204)
+async def delete_webhook(principal: ApiKeyPrincipal, db: DbSession) -> None:
+    _, user = principal
+    fresh = await db.get(type(user), user.id)
+    fresh.webhook_url = None
+    fresh.webhook_secret = None
+    await db.commit()
+
+
+@router.post("/webhooks/test", response_model=WebhookTestOut)
+async def test_webhook(principal: ApiKeyPrincipal, db: DbSession) -> WebhookTestOut:
+    """Send a test ping to the configured webhook URL. Useful for the
+    partner's "Verify connection" UX. Sends a synthetic event with
+    `event=webhook.test` and a fake job payload — the real webhook
+    delivery from worker uses real job data."""
+    from app.workers.webhook import sign, _is_public_webhook_target
+    from app.core.http_client import get_http
+    _, user = principal
+    fresh = await db.get(type(user), user.id)
+    if not fresh or not fresh.webhook_url:
+        return WebhookTestOut(delivered=False, status_code=None, error="No webhook_url configured")
+    if not _is_public_webhook_target(fresh.webhook_url):
+        return WebhookTestOut(delivered=False, status_code=None, error="webhook_url is not a public https target")
+    import json as _json
+    body_dict = {
+        "event": "webhook.test",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "job": {"id": "00000000-0000-0000-0000-000000000000", "status": "test"},
+    }
+    body = _json.dumps(body_dict, separators=(",", ":")).encode()
+    headers = {"Content-Type": "application/json", "X-Grokflow-Event": "webhook.test"}
+    if fresh.webhook_secret:
+        headers["X-Grokflow-Signature"] = sign(fresh.webhook_secret, body)
+    try:
+        resp = await get_http().post(fresh.webhook_url, content=body, headers=headers, timeout=10.0)
+        return WebhookTestOut(
+            delivered=200 <= resp.status_code < 300,
+            status_code=resp.status_code,
+            error=None if 200 <= resp.status_code < 300 else f"HTTP {resp.status_code}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return WebhookTestOut(delivered=False, status_code=None, error=f"{type(exc).__name__}: {exc}")
+
+
 @router.get("/verify", response_model=ClientVerifyOut)
 async def verify_key(principal: ApiKeyPrincipal) -> ClientVerifyOut:
     """Partner ping — verify the API key is alive + readable without
@@ -745,6 +1025,92 @@ async def chat(
         response_id=result["response_id"],
         model=result["model"],
         latency_ms=result["latency_ms"],
+    )
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    payload: ChatIn, principal: ApiKeyPrincipal, db: DbSession,
+):
+    """SSE-streaming chat. Emits `data: {...}\\n\\n` events for each
+    token + a final `data: [DONE]` sentinel — matches the OpenAI SSE
+    convention so partners can reuse their existing parsing code.
+
+    Event payload shapes:
+      meta:  {"type":"meta","conversation_id":"...","response_id":"..."}
+      token: {"type":"token","text":"<chunk>"}
+      done:  {"type":"done","message":"<full>","latency_ms":N,"model":"..."}
+      err:   {"type":"error","code":"...","message":"..."}
+
+    Final line is always `data: [DONE]\\n\\n` even after errors so the
+    client knows the stream is closed.
+    """
+    import json as _json
+    from app.models import Profile as _Profile
+    from app.providers.base import JobInput as _JobInput
+    from app.providers.grok_provider import GrokProvider as _GrokProvider
+    from app.providers.grok_api_client import GrokAPIError as _GrokAPIError
+
+    api_key, user = principal
+    if api_key.allowed_providers and "grok" not in api_key.allowed_providers:
+        raise PermissionDenied("API key not allowed for provider 'grok'")
+    await enforce_api_key_rate_limit(api_key)
+
+    from app.modules.grok.jobs.service import _resolve_profile_for_job as _resolve
+    if payload.profile_id:
+        prof = await db.get(_Profile, payload.profile_id)
+        if not prof or prof.provider != "grok":
+            raise NotFound("profile")
+    else:
+        prof = await _resolve(
+            db, requested_id=None, user_id=user.id,
+            provider="grok", job_type="image",
+        )
+        if prof is None:
+            raise NotFound("no logged_in grok profile available")
+
+    provider = _GrokProvider()
+    session = await provider._build_api_session(_JobInput(
+        prompt="", job_type="image", options=None,
+        profile_path=prof.profile_path,
+    ))
+    if session is None:
+        raise PermissionDenied("Could not extract Grok session — profile may need re-login")
+    client, _pid, _tag = session
+
+    # Bump usage upfront — SSE responses can't easily fail-and-rollback
+    # after the body starts streaming. Counts the attempt, not just
+    # successful completions (matches OpenAI's billing semantics).
+    api_key.last_used_at = datetime.now(timezone.utc)
+    api_key.used_today += 1
+    await db.commit()
+
+    async def _gen():
+        try:
+            async for evt in client.chat_stream(
+                prompt=payload.prompt,
+                project_id=payload.project_id,
+                model=payload.model,
+            ):
+                yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
+        except _GrokAPIError as exc:
+            err = {"type": "error", "code": exc.code, "message": exc.message}
+            yield f"data: {_json.dumps(err, ensure_ascii=False)}\n\n"
+        except Exception as exc:  # noqa: BLE001
+            err = {"type": "error", "code": "internal", "message": f"{type(exc).__name__}: {exc}"}
+            yield f"data: {_json.dumps(err, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            # nginx buffers SSE by default — kill the buffer for this
+            # response so tokens reach the client as they're produced.
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
     )
 
 

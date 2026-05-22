@@ -203,6 +203,10 @@ class Job(Base, TimestampMixin):
     # When set in the future, the worker skips this job until that time —
     # used to enforce retry backoff without blocking the worker loop.
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    # User-facing organisation. Both shipped in 0045 — see migration for
+    # the GIN index choice. Default-empty so existing rows stay queryable.
+    is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    tags: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
 
     user: Mapped["User"] = relationship(back_populates="jobs")  # noqa: F821
     profile: Mapped[Profile | None] = relationship(back_populates="jobs")

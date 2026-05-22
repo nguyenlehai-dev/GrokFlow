@@ -311,6 +311,47 @@ async def edit_job(
     return job
 
 
+class JobTagsIn(BaseModel):
+    """Replaces the full tag set on a job. To add one tag without nuking
+    the others, the client should read tags first, append, then PUT."""
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+@router.put("/{job_id}/tags", response_model=JobOut)
+async def set_job_tags(
+    job_id: uuid.UUID, payload: JobTagsIn, user: CurrentUser, db: DbSession,
+) -> Job:
+    job = await service.assert_job_owner(db, job_id, user.id, user.role == "admin")
+    # Dedupe + strip whitespace + drop empty. Keep client-supplied order
+    # so the UI's drag-reorder gesture is preserved on save.
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for raw in payload.tags:
+        t = (raw or "").strip()
+        if not t or t in seen or len(t) > 50:
+            continue
+        seen.add(t)
+        cleaned.append(t)
+    job.tags = cleaned
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+@router.post("/{job_id}/favorite", response_model=JobOut)
+async def toggle_favorite(
+    job_id: uuid.UUID, user: CurrentUser, db: DbSession,
+) -> Job:
+    """Flip the favorite bit. Idempotent on either branch — the value
+    reflects the *post-toggle* state so the UI can rely on the response
+    instead of double-tracking optimistically."""
+    job = await service.assert_job_owner(db, job_id, user.id, user.role == "admin")
+    job.is_favorite = not job.is_favorite
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_job(job_id: uuid.UUID, user: CurrentUser, db: DbSession) -> None:
     """Delete a job permanently. Only terminal-status jobs can be deleted —

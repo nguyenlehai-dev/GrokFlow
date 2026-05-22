@@ -486,6 +486,109 @@ class GrokAPIClient:
             "latency_ms": latency_ms,
         }
 
+    async def chat_stream(
+        self,
+        prompt: str,
+        project_id: str | None = None,
+        model: str | None = None,
+    ):
+        """Streaming variant of chat() — yields dicts as events arrive.
+
+        Each yielded event is one of:
+          { "type": "token", "text": "<chunk>" }                — partial text
+          { "type": "meta",  "conversation_id": "...", "response_id": "..." }
+          { "type": "done",  "message": "<full>", "model": "...",
+            "latency_ms": <int> }
+
+        Caller decides how to encode them on the wire (SSE / NDJSON / WS).
+        Raises GrokAPIError on 4xx/5xx the same way chat() does.
+        """
+        body = dict(_CHAT_BODY)
+        body["message"] = prompt
+        body["workspaceIds"] = [project_id] if project_id else []
+        if model:
+            body["modelOverride"] = model
+        referer_path = f"/project/{project_id}" if project_id else "/"
+
+        t0 = time.monotonic()
+        chunks: list[str] = []
+        conversation_id: str | None = None
+        response_id: str | None = None
+        model_used: str | None = None
+        final_message: str | None = None
+        soft_stopped = False
+        meta_emitted = False
+
+        ctx = await _post_stream(
+            GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+            headers=self._headers(referer_path),
+            cookies=self.cookies,
+            json_body=body,
+            timeout=self.timeout,
+        )
+        if ctx.status_code == 401:
+            raise GrokAPIError("cookie_expired", "401 from /conversations/new — session cookie invalid")
+        if ctx.status_code == 403:
+            raise GrokAPIError("provider_blocked", "403 — Cloudflare or statsig challenge", retryable=True)
+        if ctx.status_code == 429:
+            raise GrokAPIError("rate_limited", "429 — Grok rate limit", retryable=True)
+        if ctx.status_code >= 400:
+            raise GrokAPIError(
+                "unknown_error",
+                f"{ctx.status_code}: {(ctx.error_body or b'')[:200].decode('utf-8', errors='replace')!r}",
+            )
+
+        buf = ""
+        async for chunk in ctx.text_iter:
+            buf += chunk
+            last_end = 0
+            for obj_text, end in _iter_complete_json(buf):
+                last_end = end
+                try:
+                    evt = json.loads(obj_text)
+                except json.JSONDecodeError:
+                    continue
+                result = evt.get("result") or {}
+                conv = result.get("conversation") or {}
+                if conv.get("conversationId") and not conversation_id:
+                    conversation_id = conv["conversationId"]
+                response = result.get("response") or {}
+                if not response_id and response.get("responseId"):
+                    response_id = response["responseId"]
+                # Emit the meta event once both IDs are known so the
+                # client can persist them before token streaming starts.
+                if (not meta_emitted) and conversation_id and response_id:
+                    meta_emitted = True
+                    yield {"type": "meta", "conversation_id": conversation_id, "response_id": response_id}
+                if (
+                    response.get("token")
+                    and response.get("messageTag") == "final"
+                    and not response.get("isThinking")
+                ):
+                    tok = response["token"]
+                    chunks.append(tok)
+                    yield {"type": "token", "text": tok}
+                mr = response.get("modelResponse") or {}
+                if mr.get("message"):
+                    final_message = mr["message"]
+                    model_used = mr.get("model") or model_used
+                if response.get("isSoftStop"):
+                    soft_stopped = True
+            if last_end:
+                buf = buf[last_end:]
+            if soft_stopped and final_message:
+                break
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        yield {
+            "type": "done",
+            "message": final_message or "".join(chunks),
+            "conversation_id": conversation_id,
+            "response_id": response_id,
+            "model": model_used or model or "grok-3",
+            "latency_ms": latency_ms,
+        }
+
     async def imagine(
         self,
         prompt: str,

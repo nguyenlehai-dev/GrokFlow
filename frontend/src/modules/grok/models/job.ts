@@ -11,6 +11,8 @@ export interface Job {
   next_attempt_at?: string | null;
   created_at: string;
   completed_at: string | null;
+  is_favorite?: boolean;
+  tags?: string[];
 }
 
 /** Lighter-weight job projection returned by the Playground submit

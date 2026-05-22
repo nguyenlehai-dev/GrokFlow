@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Image as ImageIcon, Lock, X } from "lucide-react";
 import { toast } from "@/components/ui/Toast";
@@ -40,21 +40,51 @@ export function CreateJobReferenceImagePicker({
   onPendingChange?: (pending: boolean) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
 
   const uploadInput = useMutation({
     mutationFn: async (file: File) => {
       const data = await jobsService.uploadInput(file);
       return { file_id: data.file_id, preview: URL.createObjectURL(file) };
     },
-    onSuccess: (v) => {
-      onChange([...value, v]);
-      toast(`Đã upload ảnh tham chiếu #${value.length + 1}`, "success");
-    },
     onError: (e: any) => {
       const msg = e?.response?.data?.detail?.message ?? e?.message ?? "Upload ảnh lỗi";
       toast(msg, "error");
     },
   });
+
+  // Use a ref-tracked counter for the success toast so back-to-back
+  // multi-file uploads (drag-drop of N files) don't all toast "#1" —
+  // each completion sees the current value.length at resolve time.
+  const handleFiles = async (files: FileList | File[]) => {
+    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (arr.length === 0) {
+      toast("Chỉ chấp nhận file ảnh", "info");
+      return;
+    }
+    const slots = MAX_REFS - value.length;
+    if (slots <= 0) {
+      toast(`Đã đủ ${MAX_REFS} ảnh tham chiếu`, "info");
+      return;
+    }
+    const toUpload = arr.slice(0, slots);
+    if (arr.length > slots) {
+      toast(`Chỉ upload ${slots}/${arr.length} ảnh (đã đầy)`, "info");
+    }
+    // Serialise the uploads so React-Query's mutation state stays
+    // consistent (the parent's uploadPending gate reads isPending).
+    const accumulated: InputImage[] = [...value];
+    for (const f of toUpload) {
+      try {
+        const v = await uploadInput.mutateAsync(f);
+        accumulated.push(v);
+        onChange([...accumulated]);
+      } catch {
+        // mutation's onError already toasted — keep going for the rest.
+      }
+    }
+    toast(`Đã upload ${toUpload.length} ảnh`, "success");
+  };
 
   // Mirror the mutation state up to the parent so the modal's submit
   // button knows when an upload is still in-flight. useEffect avoids
@@ -77,7 +107,7 @@ export function CreateJobReferenceImagePicker({
   return (
     <div>
       <label className="text-sm font-medium">
-        Ảnh tham chiếu (optional, tối đa {MAX_REFS}) — quyết định mode:
+        Ảnh tham chiếu (optional, tối đa {MAX_REFS}, kéo-thả vào ô) — quyết định mode:
       </label>
       <p className="text-xs text-slate-600 mt-1">
         {jobType === "image" ? (
@@ -94,7 +124,18 @@ export function CreateJobReferenceImagePicker({
           </>
         )}
       </p>
-      <div className="flex flex-wrap items-center gap-3 mt-2">
+      <div
+        className={`flex flex-wrap items-center gap-3 mt-2 p-2 rounded-lg border-2 border-dashed transition ${dragOver ? "border-blue-500 bg-blue-50/50" : "border-transparent"}`}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (e.dataTransfer.files?.length) {
+            handleFiles(e.dataTransfer.files);
+          }
+        }}
+      >
         {value.map((img, idx) => (
           <div key={idx} className="relative">
             <img src={img.preview} alt={`ref ${idx + 1}`} className="w-24 h-24 object-cover rounded border" />
@@ -125,10 +166,10 @@ export function CreateJobReferenceImagePicker({
           </button>
         )}
         <input
-          type="file" accept="image/*" ref={fileRef} className="hidden"
+          type="file" accept="image/*" multiple ref={fileRef} className="hidden"
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) uploadInput.mutate(f);
+            const files = e.target.files;
+            if (files && files.length) handleFiles(files);
             // Reset so the same file can be re-selected if removed then
             // re-added (browsers gate same-file change events otherwise).
             e.target.value = "";

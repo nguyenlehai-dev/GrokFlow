@@ -72,6 +72,8 @@ class JobOut(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
+    is_favorite: bool = False
+    tags: list[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

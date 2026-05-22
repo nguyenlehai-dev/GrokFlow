@@ -14,6 +14,7 @@ import { ASPECT_OPTIONS, SIZES_FROM_ASPECT } from "../configs/aspects";
 import type { CreateJobForm } from "./CreateJobForm.types";
 import { CreateJobReferenceImagePicker, type InputImage } from "./CreateJobReferenceImagePicker";
 import { CreateJobImageFields } from "./CreateJobImageFields";
+import { PromptHistoryDropdown, rememberPrompt } from "./PromptHistoryDropdown";
 import {
   CreateJobVideoResolutionAndDuration,
   CreateJobVideoModeField,
@@ -24,7 +25,13 @@ import {
 // JobCreate payload validates, but they're hidden from the UI to match
 // Grok's actual prompt bar.
 
-export function CreateJobModal({ onClose }: { onClose: () => void }) {
+export function CreateJobModal({
+  onClose,
+  cloneFrom,
+}: {
+  onClose: () => void;
+  cloneFrom?: { prompt: string; provider: string; job_type: string };
+}) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   // Multi-reference picker (up to 4). Single-ref legacy users see no
@@ -57,7 +64,10 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
 
   const { register, handleSubmit, watch, control, setValue, formState: { isSubmitting } } = useForm<CreateJobForm>({
     defaultValues: {
-      provider: "grok", job_type: "image", profile_id: "", project_id: "",
+      provider: (cloneFrom?.provider as "grok" | "flow") ?? "grok",
+      job_type: (cloneFrom?.job_type as "image" | "video") ?? "image",
+      prompt: cloneFrom?.prompt ?? "",
+      profile_id: "", project_id: "",
       size: "1024x1024", aspect: "1:1",
       quality: "speed",                  // image-only
       resolution: "720p", duration: 6,   // video-only
@@ -193,6 +203,7 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     }
     try {
       await jobsService.create(payload);
+      rememberPrompt(v.prompt, v.job_type);
     } catch (e: any) {
       const msg = e?.response?.data?.detail?.message ?? e?.message ?? t("grok.create_job_error");
       toast(msg, "error");
@@ -352,7 +363,13 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div>
-          <label className="text-sm font-medium">{t("grok.create_job_prompt")}</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-sm font-medium">{t("grok.create_job_prompt")}</label>
+            <PromptHistoryDropdown
+              jobType={jobType}
+              onPick={(p) => setValue("prompt", p, { shouldDirty: true })}
+            />
+          </div>
           <textarea
             className="input min-h-[100px]"
             placeholder={t("grok.create_job_prompt_placeholder")}

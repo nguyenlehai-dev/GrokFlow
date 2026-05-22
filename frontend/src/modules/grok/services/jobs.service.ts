@@ -34,6 +34,14 @@ export const jobsService = {
     api.patch(`/api/jobs/${id}`, payload),
 
   retry: (id: string) => api.post(`/api/jobs/${id}/retry`),
+
+  /** Flip favorite flag — the response carries the post-toggle state. */
+  toggleFavorite: (id: string) =>
+    api.post<Job>(`/api/jobs/${id}/favorite`).then((r) => r.data),
+
+  /** Replace the full tag set on a job. */
+  setTags: (id: string, tags: string[]) =>
+    api.put<Job>(`/api/jobs/${id}/tags`, { tags }).then((r) => r.data),
   cancel: (id: string) => api.post(`/api/jobs/${id}/cancel`),
   remove: (id: string) => api.delete(`/api/jobs/${id}`),
 
