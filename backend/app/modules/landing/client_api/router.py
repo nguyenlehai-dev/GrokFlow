@@ -855,7 +855,7 @@ async def set_webhook(
     )
 
 
-@router.delete("/webhooks", status_code=204)
+@router.delete("/webhooks", status_code=204, response_model=None)
 async def delete_webhook(principal: ApiKeyPrincipal, db: DbSession) -> None:
     _, user = principal
     fresh = await db.get(type(user), user.id)
