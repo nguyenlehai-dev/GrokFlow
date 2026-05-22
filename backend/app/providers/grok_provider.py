@@ -227,19 +227,21 @@ class GrokProvider(Provider):
                 if api_result is not None:
                     return api_result
 
-            # Video API path — re-enabled now that the HTTP client routes
-            # through curl_cffi (Chrome 124 TLS impersonation). The original
-            # `invalid-parent-post` 404 wave turned out to be Cloudflare /
-            # statsig mangling the request before it ever hit Grok's app
-            # server; with the wire fingerprint matching a real browser
-            # the same request body Playwright submits successfully now
-            # gets through here too. Same api-blocked cooldown as the
-            # image path so a 403 wave doesn't burn 15s per job on a
-            # doomed attempt.
+            # Video API path stays OFF by default. Empirical retest with
+            # curl_cffi (Chrome 124 TLS impersonation) confirmed CF is no
+            # longer mangling the request — but Grok's app server still
+            # rejects every videoize body variant we send with
+            # `invalid-parent-post`. The Playwright /imagine studio flow
+            # on the same profile, same minute, same cookies works
+            # — strong signal Grok server-side requires an active
+            # WebSocket / SSE session our stateless videoize POST can't
+            # hold. Until that channel is reverse-engineered, the API
+            # attempt only burns ~30s on the critical path (3 body
+            # variants × ~10s each) and trips an api-blocked cooldown.
+            # Net effect: pointless waste, so default OFF.
             #
-            # Set GROK_VIDEO_API_ENABLED=0 to force the legacy Playwright
-            # fallback (only useful for A/B comparison).
-            video_api_enabled = os.getenv("GROK_VIDEO_API_ENABLED", "1").lower() in (
+            # Re-enable for further debugging via GROK_VIDEO_API_ENABLED=1.
+            video_api_enabled = os.getenv("GROK_VIDEO_API_ENABLED", "0").lower() in (
                 "1", "true", "yes"
             )
             if (
