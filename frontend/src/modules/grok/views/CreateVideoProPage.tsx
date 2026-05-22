@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Menu, Settings as Cog,
   Type as TypeIcon, Image as ImageIcon, Users, Camera, Aperture, LogIn,
@@ -230,6 +230,7 @@ function TopBar({
 }: { onToggleSidebar: () => void; sidebarOpen: boolean }) {
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
+  const navigate = useNavigate();
   const isToolUser = !!user?.tool_install_id;
   return (
     <header className="cvp-topbar flex items-center justify-between px-4 py-3">
@@ -273,13 +274,26 @@ function TopBar({
         >
           <LogOut size={12} /> Logout
         </button>
-        <Link
-          to="/account"
+        <button
+          type="button"
+          onClick={() => {
+            // Cố tình dùng useNavigate + fallback window.location vì:
+            // (1) <Link> trước đó "chóp chóp" — navigate firing nhưng
+            //     route guard hoặc Electron sandbox can thiệp.
+            // (2) Nếu React Router fail (vd HashRouter mismatch trong
+            //     Electron file:// load), window.location đảm bảo
+            //     navigation luôn xảy ra.
+            try {
+              navigate("/account");
+            } catch {
+              window.location.href = "/account";
+            }
+          }}
           className="text-slate-400 hover:text-cyan-300 transition-colors p-1.5 rounded-md hover:bg-white/5"
           title="Tài khoản — đổi thông tin / mật khẩu"
         >
           <Cog size={16} />
-        </Link>
+        </button>
       </div>
     </header>
   );
