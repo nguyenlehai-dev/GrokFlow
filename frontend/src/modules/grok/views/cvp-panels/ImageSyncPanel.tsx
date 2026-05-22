@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ImagePlus, Eraser, Play, Square, RotateCcw, Trash2, Plus,
   Camera, User, Eye, Download, Loader2,
@@ -11,7 +11,7 @@ import {
 } from "./shared";
 import {
   useGrokJobs, useUploadInput, useBatchSubmit, useLocalState,
-  checkQuotaBeforeBatch, mapStatus, type JobRow,
+  checkQuotaBeforeBatch, mapStatus, parsePromptFile, type JobRow,
 } from "./hooks";
 import { AuthedImage, downloadAuthed } from "./media";
 import { PreviewModal } from "./PreviewModal";
@@ -88,6 +88,36 @@ export function ImageSyncPanel() {
     setPoses((p) => [...p, { draftId: draftSeq, text: "" }]);
     setSelected((p) => { const s = new Set(p); s.add(draftSeq); return s; });
     setDraftSeq((n) => n + 1);
+  };
+
+  // Import Poses từ JSON/txt — cùng pattern với CharacterSync/TextToVideo
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const onImportPicked = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    try {
+      const lines = await parsePromptFile(files[0]);
+      if (lines.length === 0) {
+        toast("File rỗng hoặc không parse được pose nào", "error");
+        return;
+      }
+      setPoses((p) => [
+        ...p,
+        ...lines.map((text, i) => ({ draftId: draftSeq + i, text })),
+      ]);
+      setSelected((p) => {
+        const s = new Set(p);
+        for (let i = 0; i < lines.length; i++) s.add(draftSeq + i);
+        return s;
+      });
+      setDraftSeq((n) => n + lines.length);
+      setLog((p) => [
+        ...p,
+        { ts: nowTs(), level: "info", msg: `📥 Import ${lines.length} pose(s) từ ${files[0].name}` },
+      ]);
+    } catch (e: any) {
+      toast(`Đọc file lỗi: ${e?.message ?? "unknown"}`, "error");
+    }
+    if (importInputRef.current) importInputRef.current.value = "";
   };
   const addPreset = (text: string) => {
     setPoses((p) => [...p, { draftId: draftSeq, text }]);
@@ -242,7 +272,14 @@ export function ImageSyncPanel() {
       <div className="cvp-card p-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
           <ToolButton icon={Plus} onClick={addPose}>Thêm Góc</ToolButton>
-          <ToolButton icon={ImagePlus}>Import Poses</ToolButton>
+          <ToolButton icon={ImagePlus} onClick={() => importInputRef.current?.click()}>Import Poses</ToolButton>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json,.txt,application/json,text/plain"
+            className="hidden"
+            onChange={(e) => onImportPicked(e.target.files)}
+          />
           <ToolButton icon={Eraser} onClick={() => setPoses([])}>Clear</ToolButton>
           <div className="w-px h-6 bg-white/10 mx-1" />
           <ToolButton icon={Play} variant="primary" onClick={startBatch}

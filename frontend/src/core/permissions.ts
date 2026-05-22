@@ -38,6 +38,17 @@ export const ADMIN_BUILTIN_PATHS: readonly string[] = [
   "/admin/roles",
 ];
 
+/** Pages mọi user đăng nhập ĐỀU phải truy cập được — bất kể role,
+ *  domain, hay install allow-list. Self-service core như đổi mật khẩu /
+ *  profile. Nếu admin muốn cấm user truy cập, dùng status=banned
+ *  (logout user), KHÔNG cắt route khỏi allowed_pages.
+ *
+ *  Backend /me cũng append /account vào effective_allowed_pages —
+ *  client-side check này phòng case bundle cũ / cache /me cũ. */
+export const ALWAYS_ALLOWED_PATHS: readonly string[] = [
+  "/account",
+];
+
 export function isSuperAdmin(user: PermissionUser | null | undefined): boolean {
   return user?.role === "super_admin";
 }
@@ -67,6 +78,9 @@ export function userCanSeePath(
   path: string,
   domainCheck: (p: string) => boolean,
 ): boolean {
+  // Self-service paths bypass mọi check, kể cả khi user=null (đang
+  // boot) — Account Settings vẫn truy cập được giữa các state ngắn.
+  if (matchesAny(ALWAYS_ALLOWED_PATHS, path)) return true;
   if (!user) return domainCheck(path);
   if (user.role === "super_admin") return true;
 

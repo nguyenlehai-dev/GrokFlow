@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ImagePlus, Eraser, Play, Square, RotateCcw, FolderOpen, Trash2, Plus, User, Loader2,
 } from "lucide-react";
@@ -10,7 +10,7 @@ import {
 } from "./shared";
 import {
   useGrokJobs, useUploadInput, useBatchSubmit, useLocalState,
-  checkQuotaBeforeBatch, mapStatus, type JobRow,
+  checkQuotaBeforeBatch, mapStatus, parsePromptFile, type JobRow,
 } from "./hooks";
 import { PreviewModal } from "./PreviewModal";
 
@@ -70,6 +70,38 @@ export function CharacterSyncPanel() {
     setScenes((p) => [...p, { draftId: draftSeq, text: "" }]);
     setSelected((p) => { const s = new Set(p); s.add(draftSeq); return s; });
     setDraftSeq((n) => n + 1);
+  };
+
+  // Import Scenes — đọc file JSON/txt và bulk-create scene drafts.
+  // Reuse parsePromptFile: accept `["scene1","scene2"]`, `[{prompt:..}]`,
+  // `{"scenes":[...]}`, hoặc plain text newline-separated.
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const onImportPicked = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    try {
+      const lines = await parsePromptFile(files[0]);
+      if (lines.length === 0) {
+        toast("File rỗng hoặc không parse được scene nào", "error");
+        return;
+      }
+      setScenes((p) => [
+        ...p,
+        ...lines.map((text, i) => ({ draftId: draftSeq + i, text })),
+      ]);
+      setSelected((p) => {
+        const s = new Set(p);
+        for (let i = 0; i < lines.length; i++) s.add(draftSeq + i);
+        return s;
+      });
+      setDraftSeq((n) => n + lines.length);
+      setLog((p) => [
+        ...p,
+        { ts: nowTs(), level: "info", msg: `📥 Import ${lines.length} scene(s) từ ${files[0].name}` },
+      ]);
+    } catch (e: any) {
+      toast(`Đọc file lỗi: ${e?.message ?? "unknown"}`, "error");
+    }
+    if (importInputRef.current) importInputRef.current.value = "";
   };
   const updateScene = (id: number, text: string) =>
     setScenes((p) => p.map((s) => s.draftId === id ? { ...s, text } : s));
@@ -210,7 +242,14 @@ export function CharacterSyncPanel() {
       <div className="cvp-card p-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
           <ToolButton icon={Plus} onClick={addScene}>Thêm Cảnh</ToolButton>
-          <ToolButton icon={ImagePlus}>Import Scenes</ToolButton>
+          <ToolButton icon={ImagePlus} onClick={() => importInputRef.current?.click()}>Import Scenes</ToolButton>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json,.txt,application/json,text/plain"
+            className="hidden"
+            onChange={(e) => onImportPicked(e.target.files)}
+          />
           <ToolButton icon={Eraser} onClick={() => setScenes([])}>Clear</ToolButton>
           <div className="w-px h-6 bg-white/10 mx-1" />
           <ToolButton icon={Play} variant="primary" onClick={startBatch}
