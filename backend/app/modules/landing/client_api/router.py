@@ -685,22 +685,23 @@ async def chat(
         raise PermissionDenied("API key not allowed for provider 'grok'")
     await enforce_api_key_rate_limit(api_key)
 
-    # Resolve a profile — explicit pick or first logged_in for this user.
+    # Resolve a profile via the shared job-service resolver — same rules
+    # the generate endpoints use (domain scoping + cross-tenant project
+    # assignments). Means a partner API key can hit /chat with the same
+    # entitlements it has for /generate, no separate config needed.
+    from app.modules.grok.jobs.service import _resolve_profile_for_job as _resolve
     if payload.profile_id:
         prof = await db.get(_Profile, payload.profile_id)
-        if not prof or prof.user_id != user.id or prof.provider != "grok":
+        if not prof or prof.provider != "grok":
             raise NotFound("profile")
     else:
-        prof = (await db.execute(
-            _select(_Profile)
-            .where(
-                _Profile.user_id == user.id,
-                _Profile.provider == "grok",
-                _Profile.status == "logged_in",
-            )
-            .order_by(_Profile.last_used_at.desc().nulls_last())
-            .limit(1)
-        )).scalar_one_or_none()
+        prof = await _resolve(
+            db,
+            requested_id=None,
+            user_id=user.id,
+            provider="grok",
+            job_type="image",  # any non-video job_type works for chat
+        )
         if prof is None:
             raise NotFound("no logged_in grok profile available")
 
