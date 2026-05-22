@@ -66,7 +66,17 @@ export function JobsPage() {
       const total = parseInt(r.headers["x-total-count"] || "0", 10);
       return { items: r.data, total };
     },
-    refetchInterval: 5000,
+    // Adaptive polling: 1.5s while any job on this page is active so the
+    // table feels as live as a `curl` poll. Idle pages drop to 10s to
+    // avoid hammering the API. Without this, a successful 3s image job
+    // could still show "running" for up to 5s after it actually finished.
+    refetchInterval: (q) => {
+      const items = (q.state.data as { items?: { status: string }[] } | undefined)?.items ?? [];
+      const hasActive = items.some((j) =>
+        ["queued", "running", "processing_provider"].includes(j.status),
+      );
+      return hasActive ? 1500 : 10000;
+    },
   });
 
   const prevStatusesRef = useRef<Record<string, string>>({});

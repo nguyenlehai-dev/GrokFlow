@@ -779,7 +779,11 @@ async def loop(job_type_filter: str | None = None) -> None:
                         job.status = "running"
                         claimed_id = job.id
             if not claimed_id:
-                await asyncio.sleep(2)
+                # Idle poll: 0.5s shaves up to 1.5s off the time-to-pickup
+                # for fresh jobs vs the previous 2s. At 16 workers × 2 req/s
+                # = 32 req/s steady-state DB load when the queue is empty,
+                # which is negligible compared to a single SELECT...LIMIT 1.
+                await asyncio.sleep(0.5)
                 continue
 
             async def _run(jid: uuid.UUID):
