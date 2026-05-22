@@ -586,11 +586,19 @@ class GrokProvider(Provider):
 
         opts = job.options or {}
         aspect = str(opts.get("aspect_ratio") or opts.get("aspect") or "3:2")
-        quality = str(opts.get("resolution") or opts.get("quality") or "720p")
-        if quality in ("low", "draft"):
-            quality = "480p"
-        elif quality in ("high", "hd"):
-            quality = "720p"
+        # Grok's videoize endpoint only accepts the literal strings 480p,
+        # 720p, 1080p — passing anything else (eg the partner-facing
+        # "standard" / "high" / "low" labels we get on the client API)
+        # returns 400 "Resolution must be ... got <label>" and the
+        # worker falls back to Playwright. Normalise here so the API
+        # path actually runs.
+        quality_raw = str(opts.get("resolution") or opts.get("quality") or "720p").lower()
+        _RES_MAP = {
+            "480p": "480p", "low": "480p", "draft": "480p",
+            "720p": "720p", "standard": "720p", "medium": "720p", "hd": "720p", "high": "720p",
+            "1080p": "1080p", "full": "1080p", "fhd": "1080p", "ultra": "1080p",
+        }
+        quality = _RES_MAP.get(quality_raw, "720p")
         try:
             duration = int(opts.get("duration") or opts.get("video_length") or 10)
         except (TypeError, ValueError):
