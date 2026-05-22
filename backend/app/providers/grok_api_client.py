@@ -29,6 +29,7 @@ import asyncio
 import base64
 import json
 import os
+import time
 import uuid
 from typing import Any, Callable
 
@@ -52,6 +53,44 @@ def _httpx_proxy_kwargs() -> dict:
     """
     proxy = os.environ.get("GROK_HTTP_PROXY")
     return {"proxy": proxy} if proxy else {}
+
+# Pinned body fields for plain text-chat (no image gen), captured from a
+# real /conversations/new request that produced a streamed text reply.
+# Same shape as image but with enableImageGeneration off and
+# imageGenerationCount=0 — Grok then runs the text-completion path
+# instead of the diffusion pipeline.
+_CHAT_BODY: dict[str, Any] = {
+    "temporary": False,
+    "fileAttachments": [],
+    "imageAttachments": [],
+    "disableSearch": False,
+    "enableImageGeneration": False,
+    "returnImageBytes": False,
+    "returnRawGrokInXaiRequest": False,
+    "enableImageStreaming": False,
+    "imageGenerationCount": 0,
+    "forceConcise": False,
+    "enableSideBySide": True,
+    "sendFinalMetadata": True,
+    "disableTextFollowUps": False,
+    "responseMetadata": {},
+    "disableMemory": False,
+    "forceSideBySide": False,
+    "isAsyncChat": False,
+    "disableSelfHarmShortCircuit": False,
+    "collectionIds": [],
+    "disabledConnectorIds": [],
+    "deviceEnvInfo": {
+        "darkModeEnabled": False,
+        "devicePixelRatio": 1,
+        "screenWidth": 1920,
+        "screenHeight": 1080,
+        "viewportWidth": 1920,
+        "viewportHeight": 533,
+    },
+    "modeId": "fast",
+}
+
 
 # Pinned body fields for IMAGE jobs, from a verified working request.
 _IMAGE_BODY: dict[str, Any] = {
@@ -181,6 +220,130 @@ class GrokAPIClient:
         if self.x_statsig_id:
             h["x-statsig-id"] = self.x_statsig_id
         return h
+
+    async def chat(
+        self,
+        prompt: str,
+        project_id: str | None = None,
+        model: str | None = None,
+        log: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """Plain text chat against /conversations/new — no image / no
+        upload — and return the streamed message reassembled.
+
+        Captures the streaming pattern observed in the wild:
+          - one or more `{result.response.token: "<chunk>"}` events
+            with `messageTag = "final"` carry the user-visible text
+          - the closing `{result.response.modelResponse: {...}}` event
+            carries the full assembled message + metadata
+          - `{result.response.isSoftStop: true}` is the soft EOF
+
+        Returns: {message, conversation_id, response_id, model, latency_ms}.
+        """
+        body = dict(_CHAT_BODY)
+        body["message"] = prompt
+        body["workspaceIds"] = [project_id] if project_id else []
+        if model:
+            # Grok also accepts a top-level "modelOverride"; this is
+            # passed through verbatim so callers can request grok-3,
+            # grok-2-mini, etc., when the profile has access.
+            body["modelOverride"] = model
+        referer_path = f"/project/{project_id}" if project_id else "/"
+
+        def _emit(msg: str) -> None:
+            if log:
+                log(msg)
+
+        t0 = time.monotonic()
+        chunks: list[str] = []
+        conversation_id: str | None = None
+        response_id: str | None = None
+        model_used: str | None = None
+        final_message: str | None = None
+        soft_stopped = False
+
+        async with httpx.AsyncClient(
+            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
+            **_httpx_proxy_kwargs(),
+        ) as client:
+            async with client.stream(
+                "POST",
+                GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+                headers=self._headers(referer_path),
+                json=body,
+            ) as resp:
+                if resp.status_code == 401:
+                    raise GrokAPIError(
+                        "cookie_expired",
+                        "401 from /conversations/new — session cookie invalid",
+                    )
+                if resp.status_code == 403:
+                    raise GrokAPIError(
+                        "provider_blocked",
+                        "403 — Cloudflare or statsig challenge",
+                        retryable=True,
+                    )
+                if resp.status_code == 429:
+                    raise GrokAPIError(
+                        "rate_limited", "429 — Grok rate limit", retryable=True
+                    )
+                if resp.status_code >= 400:
+                    snippet = (await resp.aread())[:200]
+                    raise GrokAPIError(
+                        "unknown_error",
+                        f"{resp.status_code}: {snippet.decode('utf-8', errors='replace')!r}",
+                    )
+
+                buf = ""
+                async for chunk in resp.aiter_text():
+                    buf += chunk
+                    last_end = 0
+                    for obj_text, end in _iter_complete_json(buf):
+                        last_end = end
+                        try:
+                            evt = json.loads(obj_text)
+                        except json.JSONDecodeError:
+                            continue
+                        result = evt.get("result") or {}
+                        conv = result.get("conversation") or {}
+                        if conv.get("conversationId") and not conversation_id:
+                            conversation_id = conv["conversationId"]
+                        response = result.get("response") or {}
+                        if not response_id and response.get("responseId"):
+                            response_id = response["responseId"]
+                        # Reassemble final visible tokens — skip the
+                        # "isThinking" header that streams "Thinking
+                        # about your request" before the real reply.
+                        if (
+                            response.get("token")
+                            and response.get("messageTag") == "final"
+                            and not response.get("isThinking")
+                        ):
+                            chunks.append(response["token"])
+                        # Capture the canonical assembled message from the
+                        # closing modelResponse event — falls back to the
+                        # chunks list if Grok omits it.
+                        mr = response.get("modelResponse") or {}
+                        if mr.get("message"):
+                            final_message = mr["message"]
+                            model_used = mr.get("model") or model_used
+                        if response.get("isSoftStop"):
+                            soft_stopped = True
+                    if last_end:
+                        buf = buf[last_end:]
+                    if soft_stopped and final_message:
+                        break
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        message = final_message or "".join(chunks)
+        _emit(f"chat done: {len(message)} chars in {latency_ms}ms")
+        return {
+            "message": message,
+            "conversation_id": conversation_id,
+            "response_id": response_id,
+            "model": model_used or model or "grok-3",
+            "latency_ms": latency_ms,
+        }
 
     async def imagine(
         self,

@@ -631,6 +631,118 @@ async def verify_key(principal: ApiKeyPrincipal) -> ClientVerifyOut:
     )
 
 
+# --------------------------------------------------------------------------
+# Chat — pure HTTP path (no browser)
+# --------------------------------------------------------------------------
+
+class ChatIn(BaseModel):
+    """Plain text-chat request.
+
+    Goes through the API-only path (no Playwright / no Chromium) — reuses
+    the same cookies / x-statsig-id that the live profile holds, then
+    posts to grok.com/rest/app-chat/conversations/new and streams the
+    response. Typical latency 2-6s for a short reply.
+    """
+    prompt: str = Field(min_length=1, max_length=16000)
+    model: str | None = Field(default=None, description="e.g. 'grok-3', 'grok-2-mini'. Omit = default")
+    profile_id: uuid.UUID | None = Field(default=None, description="Force a specific profile; auto-pick if omitted")
+    project_id: str | None = Field(default=None, description="Scope the conversation to a Grok project")
+
+
+class ChatOut(BaseModel):
+    message: str
+    conversation_id: str | None = None
+    response_id: str | None = None
+    model: str
+    latency_ms: int
+
+
+@router.post("/chat", response_model=ChatOut)
+async def chat(
+    payload: ChatIn, principal: ApiKeyPrincipal, db: DbSession,
+) -> ChatOut:
+    """Pure-HTTP text chat against Grok via /conversations/new.
+
+    Resolves a healthy profile from the user's pool, captures its
+    cookies + statsig ID, then calls Grok's chat endpoint directly.
+    No Chromium tab opened for this request — the only browser session
+    that ever needs to exist is the one the admin used to log the
+    profile in originally.
+
+    Returns the full assembled message + conversation metadata.
+    """
+    from sqlalchemy import select as _select
+    from app.models import Profile as _Profile
+    from app.providers.base import JobInput as _JobInput
+    from app.providers.grok_provider import GrokProvider as _GrokProvider
+    from app.providers.grok_api_client import GrokAPIError as _GrokAPIError
+
+    api_key, user = principal
+    _check_perm(api_key, "chat")
+    await enforce_api_key_rate_limit(api_key)
+
+    # Resolve a profile — explicit pick or first logged_in for this user.
+    if payload.profile_id:
+        prof = await db.get(_Profile, payload.profile_id)
+        if not prof or prof.user_id != user.id or prof.provider != "grok":
+            raise NotFound("profile")
+    else:
+        prof = (await db.execute(
+            _select(_Profile)
+            .where(
+                _Profile.user_id == user.id,
+                _Profile.provider == "grok",
+                _Profile.status == "logged_in",
+            )
+            .order_by(_Profile.last_used_at.desc().nulls_last())
+            .limit(1)
+        )).scalar_one_or_none()
+        if prof is None:
+            raise NotFound("no logged_in grok profile available")
+
+    provider = _GrokProvider()
+    # _build_api_session opens CDP, grabs cookies + x-statsig-id, builds
+    # an httpx-ready GrokAPIClient. The same call powers _run_image_via_api.
+    session = await provider._build_api_session(_JobInput(
+        prompt="", job_type="image", options=None,
+        profile_path=prof.profile_path,
+    ))
+    if session is None:
+        raise PermissionDenied("Could not extract Grok session — profile may need re-login")
+    client, _pid, _tag = session
+
+    try:
+        result = await client.chat(
+            prompt=payload.prompt,
+            project_id=payload.project_id,
+            model=payload.model,
+        )
+    except _GrokAPIError as exc:
+        if exc.code == "cookie_expired":
+            raise PermissionDenied(f"Grok session expired: {exc.message}")
+        if exc.code == "provider_blocked":
+            raise PermissionDenied(f"Grok rejected the call: {exc.message}")
+        raise
+
+    # Audit + usage bump on success path only — failure already raised.
+    api_key.last_used_at = datetime.now(timezone.utc)
+    api_key.used_today += 1
+    await audit.log_action(
+        db, user_id=user.id, action="chat",
+        target_type="profile", target_id=prof.id,
+        metadata={"latency_ms": result["latency_ms"], "model": result["model"]},
+    )
+    await db.commit()
+
+    return ChatOut(
+        message=result["message"],
+        conversation_id=result["conversation_id"],
+        response_id=result["response_id"],
+        model=result["model"],
+        latency_ms=result["latency_ms"],
+    )
+
+
 @router.post("/generate/status", response_model=ClientLiteStatusOut, status_code=201)
 async def generate_lite(
     payload: ClientGenerateIn, principal: ApiKeyPrincipal,
