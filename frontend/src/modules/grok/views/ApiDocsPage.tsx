@@ -28,7 +28,160 @@ type Endpoint = {
   notes?: string;
 };
 
+// Customer-facing endpoint reference. The full admin/JWT surface lives
+// in the source (see modules/grok/jobs/router.py et al) — partners only
+// ever touch the 5 client endpoints below to go from API key to
+// finished asset, so we don't dump the other 25 on them.
 const GROUPS: EndpointGroup[] = [
+  {
+    title: "1. Verify your key",
+    endpoints: [
+      {
+        title: "Verify",
+        method: "GET",
+        path: "/api/client/verify",
+        auth: "apikey",
+        summary: "Sanity-check API key. Trả 200 + key_prefix khi key OK, 401 khi sai/revoked. Không tốn quota.",
+        curl: `curl https://flowgrok-v2.plxeditor.com/api/client/verify \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: `{
+  "status": "ok",
+  "name": "production-key",
+  "key_prefix": "uxpm_live_xxxxxxxx"
+}`,
+      },
+    ],
+  },
+  {
+    title: "2. Chat (pure HTTP, sync, ~2-4s)",
+    endpoints: [
+      {
+        title: "Chat with Grok",
+        method: "POST",
+        path: "/api/client/chat",
+        auth: "apikey",
+        summary: "Gửi text → nhận reply ngay (sync, không cần poll). Latency 2-4s. Tốt cho chat bot, dịch thuật, tóm tắt, etc.",
+        parameters: [
+          { name: "prompt", type: "string", required: true, description: "Câu hỏi / yêu cầu. Tối đa 16000 ký tự." },
+          { name: "model", type: "string?", description: "vd \"grok-3\". Bỏ trống = default." },
+          { name: "project_id", type: "string?", description: "Scope vào 1 Grok project (rare)." },
+        ],
+        curl: `curl -X POST https://flowgrok-v2.plxeditor.com/api/client/chat \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"prompt":"Viết 1 câu giới thiệu Hà Nội"}'`,
+        response: `{
+  "message": "Hà Nội là thủ đô của Việt Nam, nổi tiếng với lịch sử lâu đời và vẻ đẹp cổ kính.",
+  "conversation_id": "3ae48fea-e2f4-4df8-bf4b-a262c8ff0c7d",
+  "model": "grok-3",
+  "latency_ms": 3762
+}`,
+      },
+    ],
+  },
+  {
+    title: "3. Generate image / video (async, poll status)",
+    endpoints: [
+      {
+        title: "Generate (T2I / I2I / T2V / I2V)",
+        method: "POST",
+        path: "/api/client/generate",
+        auth: "apikey",
+        summary: "Submit job → nhận task_id ngay → poll /tasks/{id}/status cho đến khi success. Image typical 17-26s, video 60-90s.",
+        parameters: [
+          { name: "target", type: "\"image\" | \"video\"", required: true, description: "Loại output." },
+          { name: "prompt", type: "string", required: true, description: "Mô tả nội dung. Tối đa 16000 ký tự." },
+          { name: "ratio", type: "string?", description: "\"1:1\", \"16:9\", \"9:16\", \"4:3\", \"3:4\". Default \"1:1\"." },
+          { name: "count", type: "int?", description: "Số biến thể, 1-10. Default 1." },
+          { name: "quality", type: "string?", description: "\"standard\" / \"high\" / \"low\" hoặc \"720p\"/\"1080p\" (video). Default standard." },
+          { name: "duration", type: "int?", description: "CHỈ video: số giây 5 hoặc 10." },
+          { name: "reference_images", type: "string[]?", description: "URL ảnh tham chiếu (tối đa 4). Có = I2I/I2V, không có = T2I/T2V." },
+        ],
+        request: `# T2I — text → image
+{ "target":"image", "prompt":"a cat in space", "ratio":"1:1" }
+
+# I2I — image → image
+{ "target":"image",
+  "prompt":"đổi áo sang màu đỏ",
+  "reference_images":["https://your-cdn.com/photo.jpg"] }
+
+# T2V — text → video
+{ "target":"video", "prompt":"a butterfly on flower",
+  "ratio":"16:9", "duration":5 }
+
+# I2V — image → video
+{ "target":"video", "prompt":"make it move slowly",
+  "reference_images":["https://your-cdn.com/photo.jpg"],
+  "ratio":"9:16", "duration":5 }`,
+        curl: `curl -X POST https://flowgrok-v2.plxeditor.com/api/client/generate \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"target":"image","prompt":"a cat in space","ratio":"1:1"}'`,
+        response: `{
+  "task_id": "22d8dda7-f31b-4f03-9a16-b3cf04f6a554",
+  "status": "queued",
+  "target": "image"
+}`,
+        notes: "Status code 201 khi đã nhận. Bước tiếp theo: poll /tasks/{task_id}/status mỗi 2-5 giây.",
+      },
+    ],
+  },
+  {
+    title: "4. Poll status & lấy URL kết quả",
+    endpoints: [
+      {
+        title: "Get task status",
+        method: "GET",
+        path: "/api/client/tasks/{task_id}/status",
+        auth: "apikey",
+        summary: "Poll mỗi 2-5s đến khi status=success → đọc image_urls / video_urls. Status=failed → đọc error_message.",
+        parameters: [
+          { name: "task_id", type: "uuid", required: true, description: "Lấy từ response của /generate." },
+        ],
+        curl: `curl https://flowgrok-v2.plxeditor.com/api/client/tasks/<task_id>/status \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: `# Đang chạy
+{ "task_id":"...", "status":"processing_provider",
+  "target":"image", "image_urls":[], "video_urls":[],
+  "result":null, "error_message":null }
+
+# Xong
+{ "task_id":"...", "status":"success", "target":"image",
+  "image_urls":["https://flowgrok-v2.plxeditor.com/api/files/<file_id>"],
+  "video_urls":[], "result":{"image_urls":[...], "video_urls":[]},
+  "error_message":null }
+
+# Fail
+{ "task_id":"...", "status":"failed",
+  "error_message":"Profile cookies expired — admin cần Auto-login lại." }`,
+        notes: "Status flow: queued → processing_provider → success | failed. Image typical 17-26s, video 60-90s. Poll mỗi 2-5s là đủ.",
+      },
+    ],
+  },
+  {
+    title: "5. Download asset",
+    endpoints: [
+      {
+        title: "Download file",
+        method: "GET",
+        path: "/api/files/{file_id}",
+        auth: "apikey",
+        summary: "Tải file binary (image jpeg / video mp4). URL này lấy từ image_urls / video_urls trong response của /tasks/{id}/status. Cần API key trong header — paste URL trực tiếp vào browser sẽ 404.",
+        curl: `curl -o output.jpg \\
+  https://flowgrok-v2.plxeditor.com/api/files/<file_id> \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: "<binary jpeg/mp4>",
+      },
+    ],
+  },
+];
+
+
+// Original full admin/JWT reference kept below (hidden by default —
+// flip _SHOW_ADMIN_DOCS=true to render). Partners don't need any of
+// these calls; they're documented in modules/grok/jobs/router.py.
+const _SHOW_ADMIN_DOCS = false;
+const _LEGACY_GROUPS: EndpointGroup[] = _SHOW_ADMIN_DOCS ? [
   {
     title: "Authentication",
     endpoints: [
@@ -762,7 +915,9 @@ file: <binary>`,
       },
     ],
   },
-];
+] : [];
+// Reference the legacy var to keep TS happy even though we don't render it.
+void _LEGACY_GROUPS;
 
 const BADGES: Record<Endpoint["auth"], { label: string; cls: string }> = {
   jwt:    { label: "JWT",    cls: "bg-blue-100 text-blue-700" },
@@ -934,38 +1089,48 @@ export function ApiDocsPage() {
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
-        <h1 className="page-title">{t("grok.apidocs_title")}</h1>
+        <h1 className="page-title">API Reference</h1>
         <p className="text-sm text-slate-500 mt-1">
-          {t("grok.apidocs_subtitle")}
+          5 endpoint partners cần. Pure HTTP, không cần SDK. Tất cả ví dụ là curl chạy được liền.
         </p>
       </div>
 
+      {/* Quick Start — đọc 30 giây, copy 3 lệnh, có ảnh ngay */}
       <section className="card space-y-3 border-l-4 border-emerald-500">
-        <h2 className="font-semibold text-emerald-700">⚡ What's new (2026-05-22)</h2>
-        <ul className="text-sm text-slate-700 space-y-1 list-disc ml-5">
-          <li><strong>NEW</strong>: <code>POST /api/client/chat</code> — text chat với Grok-3, response 2-4s, 100% pure HTTP (không qua browser).</li>
-          <li><strong>Speed boost</strong>: T2I/I2I giờ chạy qua HTTP API thuần (curl_cffi Chrome impersonation) — giảm 9-17× so với browser path. T2I fresh: 17-26s, I2I + 7MB ref: 14-25s.</li>
-          <li><strong>Prompt limit</strong>: bumped 4000 → <strong>16000 chars</strong> (hỗ trợ prompt director-style dài).</li>
-          <li><strong>Multi-reference</strong>: <code>reference_images</code> giờ accept tối đa 4 ảnh (URL hoặc file_id) — phân vai @IMAGE_1, @IMAGE_2 trong prompt.</li>
-          <li><strong>Reliability</strong>: pool keeper auto-respawn VNC, worker retry trên TargetClosedError, fast-fail 45s khi Grok shadow-block.</li>
-        </ul>
+        <h2 className="font-semibold text-emerald-700">🚀 Quick start (3 lệnh, &lt; 30s)</h2>
+        <ol className="text-sm text-slate-700 space-y-3 list-decimal ml-5">
+          <li>
+            <div className="font-medium">Lấy API key từ admin panel → Section "API Keys" → Create new (prefix <code>uxpm_live_</code>).</div>
+          </li>
+          <li>
+            <div className="font-medium mb-1">Submit job:</div>
+            <CodeBlock>{`curl -X POST ${apiBase}/api/client/generate \\
+  -H "X-API-Key: $KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"target":"image","prompt":"a cat in space","ratio":"1:1"}'
+# → {"task_id":"abc-123","status":"queued",...}`}</CodeBlock>
+          </li>
+          <li>
+            <div className="font-medium mb-1">Poll cho đến khi xong (mỗi 3s):</div>
+            <CodeBlock>{`curl ${apiBase}/api/client/tasks/abc-123/status \\
+  -H "X-API-Key: $KEY"
+# → status:"success" + image_urls:["https://.../api/files/<id>"]`}</CodeBlock>
+          </li>
+        </ol>
+        <p className="text-xs text-slate-500 mt-2">
+          Image typical 17-26s · Video 60-90s · Chat sync 2-4s (không cần poll).
+        </p>
       </section>
 
-      <section className="card space-y-3">
-        <h2 className="font-semibold">{t("grok.apidocs_section_authentication")}</h2>
-        <div className="grid md:grid-cols-2 gap-3 text-sm">
-          <div className="border-l-4 border-blue-400 pl-3">
-            <div className="font-semibold text-blue-700 mb-1">{t("grok.apidocs_auth_jwt_title")}</div>
-            <p className="text-slate-600">{t("grok.apidocs_auth_jwt_desc")}</p>
-            <code className="text-xs">Authorization: Bearer eyJhbGc...</code>
-          </div>
-          <div className="border-l-4 border-purple-400 pl-3">
-            <div className="font-semibold text-purple-700 mb-1">{t("grok.apidocs_auth_apikey_title")}</div>
-            <p className="text-slate-600">{t("grok.apidocs_auth_apikey_desc")}</p>
-            <code className="text-xs">X-API-Key: uxpm_live_xxx</code>
-            <span className="text-xs text-slate-500"> hoặc </span>
-            <code className="text-xs">Authorization: Bearer uxpm_live_xxx</code>
-          </div>
+      {/* Auth — 1 dòng, không bị block */}
+      <section className="card text-sm">
+        <h2 className="font-semibold text-slate-800 mb-2">🔑 Authentication</h2>
+        <p className="text-slate-600 mb-2">
+          Mọi request cần API key. 2 cách gửi đều work:
+        </p>
+        <div className="grid md:grid-cols-2 gap-3">
+          <code className="text-xs bg-slate-100 px-2 py-1 rounded block">X-API-Key: uxpm_live_xxx</code>
+          <code className="text-xs bg-slate-100 px-2 py-1 rounded block">Authorization: Bearer uxpm_live_xxx</code>
         </div>
       </section>
 
@@ -979,6 +1144,75 @@ export function ApiDocsPage() {
           </div>
         </section>
       ))}
+
+      {/* Code examples — full Python flow customers can copy-paste */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-slate-800">Code examples (full flow)</h2>
+        <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+          <h3 className="text-sm font-semibold text-slate-800">Python (requests)</h3>
+          <CodeBlock>{`import requests, time
+
+KEY  = "uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"
+BASE = "${apiBase}/api/client"
+H    = {"X-API-Key": KEY, "Content-Type": "application/json"}
+
+# 1. Chat (sync)
+r = requests.post(f"{BASE}/chat", headers=H,
+                  json={"prompt": "Viết 1 câu giới thiệu Hà Nội"})
+print("chat:", r.json()["message"])
+
+# 2. Image — submit + poll
+r = requests.post(f"{BASE}/generate", headers=H, json={
+    "target": "image",
+    "prompt": "a cat in space",
+    "ratio": "1:1",
+})
+task_id = r.json()["task_id"]
+while True:
+    s = requests.get(f"{BASE}/tasks/{task_id}/status", headers=H).json()
+    if s["status"] in ("success", "failed"):
+        break
+    time.sleep(3)
+
+if s["status"] == "success":
+    url = s["image_urls"][0]
+    out = requests.get(url, headers={"X-API-Key": KEY}).content
+    open("output.jpg", "wb").write(out)
+    print(f"saved {len(out)} bytes")
+else:
+    print("error:", s["error_message"])`}</CodeBlock>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+          <h3 className="text-sm font-semibold text-slate-800">Node.js (fetch)</h3>
+          <CodeBlock>{`const KEY  = "uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx";
+const BASE = "${apiBase}/api/client";
+const H    = { "X-API-Key": KEY, "Content-Type": "application/json" };
+
+async function generate(payload) {
+  const r = await fetch(\`\${BASE}/generate\`, {
+    method: "POST", headers: H, body: JSON.stringify(payload)
+  });
+  const { task_id } = await r.json();
+  while (true) {
+    const s = await (await fetch(\`\${BASE}/tasks/\${task_id}/status\`,
+                                 { headers: H })).json();
+    if (s.status === "success") return s.image_urls[0] || s.video_urls[0];
+    if (s.status === "failed")  throw new Error(s.error_message);
+    await new Promise(r => setTimeout(r, 3000));
+  }
+}
+
+// I2I example
+const url = await generate({
+  target: "image",
+  prompt: "đổi áo sang màu đỏ",
+  reference_images: ["https://your-cdn.com/photo.jpg"],
+  ratio: "1:1",
+});
+console.log("done:", url);`}</CodeBlock>
+        </div>
+      </section>
 
       <section className="card space-y-2">
         <h2 className="font-semibold">{t("grok.apidocs_section_error_codes")}</h2>
