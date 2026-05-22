@@ -361,6 +361,49 @@ const GROUPS: EndpointGroup[] = [
     title: "Client API (Partner)",
     endpoints: [
       {
+        title: "Verify API Key",
+        method: "GET",
+        path: "/api/client/verify",
+        auth: "apikey",
+        summary: "Ping nhẹ để verify key còn hợp lệ + lấy key_prefix / name. Không burn quota. Match flowgrok.plxeditor.com legacy.",
+        curl: `curl https://flowgrok-v2.plxeditor.com/api/client/verify \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: `{
+  "status": "ok",
+  "name": "production-key",
+  "key_prefix": "uxpm_live_rxWqzFwn"
+}`,
+      },
+      {
+        title: "Chat (Pure HTTP, no browser) ⚡ NEW",
+        method: "POST",
+        path: "/api/client/chat",
+        auth: "apikey",
+        summary: "Text chat với Grok-3, response 2-4s. Hoạt động 100% qua HTTP (không qua browser), dùng curl_cffi giả mạo Chrome TLS fingerprint. Reuse cookies của profile đã logged_in. Trả về message + metadata sync (không async như /generate).",
+        parameters: [
+          { name: "prompt", type: "string", required: true, description: "Câu hỏi / yêu cầu. 1-16000 ký tự." },
+          { name: "model", type: "string | null", description: "vd \"grok-3\", \"grok-2-mini\". Bỏ trống = default." },
+          { name: "profile_id", type: "uuid | null", description: "Pin profile. Bỏ trống = auto-pick logged_in." },
+          { name: "project_id", type: "string | null", description: "Scope conversation vào 1 Grok project." },
+        ],
+        request: `{
+  "prompt": "Viết 3 câu giới thiệu Hà Nội",
+  "model": "grok-3"
+}`,
+        curl: `curl -X POST https://flowgrok-v2.plxeditor.com/api/client/chat \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"prompt":"Viết 3 câu giới thiệu Hà Nội"}'`,
+        response: `{
+  "message": "Hà Nội là thủ đô của Việt Nam, nổi tiếng với lịch sử lâu đời và vẻ đẹp cổ kính. Thành phố này sở hữu nhiều di tích lịch sử như Hồ Hoàn Kiếm, Phố Cổ và Văn Miếu Quốc Tử Giám. Hà Nội có khí hậu bốn mùa rõ rệt, với mùa thu se lạnh.",
+  "conversation_id": "3ae48fea-e2f4-4df8-bf4b-a262c8ff0c7d",
+  "response_id": "e9a0676b-f842-471a-b3c2-56dc764ccbba",
+  "model": "grok-3",
+  "latency_ms": 3762
+}`,
+        notes: "Khác /generate ở chỗ: trả response SYNC (không cần poll). Latency 2-4s với key/profile khỏe. Lỗi: 401 invalid key, 404 không có profile logged_in, 403 Grok session expired (cần re-login).",
+      },
+      {
         title: "Generate (Image / Video)",
         method: "POST",
         path: "/api/client/generate",
@@ -368,12 +411,12 @@ const GROUPS: EndpointGroup[] = [
         summary: "Endpoint dành cho partner — payload đơn giản (target/prompt/ratio/count/…). Cả image và video gửi cùng URL, phân biệt bằng field `target`. Trả task_id rồi poll status.",
         parameters: [
           { name: "target", type: "\"image\" | \"video\"", required: true, description: "Loại task." },
-          { name: "prompt", type: "string", required: true, description: "Mô tả nội dung, 1-4000 ký tự." },
+          { name: "prompt", type: "string", required: true, description: "Mô tả nội dung, 1-16000 ký tự (bumped từ 4000 để hỗ trợ director-style prompts)." },
           { name: "negative_prompt", type: "string | null", description: "Mô tả những thứ KHÔNG muốn xuất hiện. Có thể bỏ trống." },
           { name: "count", type: "integer", description: "Số biến thể, 1-10. Mặc định 1." },
           { name: "ratio", type: "string | null", description: "Tỉ lệ khung hình: \"1:1\", \"16:9\", \"9:16\", \"4:3\", \"3:4\"..." },
-          { name: "quality", type: "string | null", description: "\"standard\" | \"high\". Mặc định standard." },
-          { name: "reference_images", type: "string[] | null", description: "URL ảnh tham chiếu, tối đa 8. Có = I2I/I2V, không có = T2I/T2V." },
+          { name: "quality", type: "string | null", description: "\"standard\" / \"high\" / \"low\" hoặc literal \"480p\" / \"720p\" / \"1080p\" (chỉ video). Mặc định standard (=720p video)." },
+          { name: "reference_images", type: "string[] | null", description: "URL hoặc file_id ảnh tham chiếu, tối đa 4. Có = I2I/I2V, không có = T2I/T2V. Backend tự fetch URL hoặc đọc từ file_id." },
           { name: "duration", type: "integer | null", description: "Chỉ video — độ dài giây (vd 5, 10)." },
           { name: "profile_id", type: "uuid | null", description: "Pin profile cụ thể. Null = auto pick." },
         ],
@@ -413,7 +456,7 @@ const GROUPS: EndpointGroup[] = [
   "duration": 10,
   "reference_images": ["https://your.cdn/image.jpg"]
 }`,
-        curl: `curl -X POST https://flowgrok.plxeditor.com/api/client/generate \\
+        curl: `curl -X POST https://flowgrok-v2.plxeditor.com/api/client/generate \\
   -H "Authorization: Bearer uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -438,7 +481,7 @@ const GROUPS: EndpointGroup[] = [
         parameters: [
           { name: "task_id", type: "uuid", required: true, description: "task_id trả về từ /generate." },
         ],
-        curl: `curl https://flowgrok.plxeditor.com/api/client/tasks/<task_id>/status \\
+        curl: `curl https://flowgrok-v2.plxeditor.com/api/client/tasks/<task_id>/status \\
   -H "Authorization: Bearer uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
         response: `# Đang chạy
 {
@@ -459,10 +502,10 @@ const GROUPS: EndpointGroup[] = [
   "status": "success",
   "target": "video",
   "image_urls": [],
-  "video_urls": ["https://flowgrok.plxeditor.com/api/files/<id>/download"],
+  "video_urls": ["https://flowgrok-v2.plxeditor.com/api/files/<id>/download"],
   "result": {
     "image_urls": [],
-    "video_urls": ["https://flowgrok.plxeditor.com/api/files/<id>/download"]
+    "video_urls": ["https://flowgrok-v2.plxeditor.com/api/files/<id>/download"]
   },
   "error_message": null,
   "created_at": "...",
@@ -897,6 +940,17 @@ export function ApiDocsPage() {
         </p>
       </div>
 
+      <section className="card space-y-3 border-l-4 border-emerald-500">
+        <h2 className="font-semibold text-emerald-700">⚡ What's new (2026-05-22)</h2>
+        <ul className="text-sm text-slate-700 space-y-1 list-disc ml-5">
+          <li><strong>NEW</strong>: <code>POST /api/client/chat</code> — text chat với Grok-3, response 2-4s, 100% pure HTTP (không qua browser).</li>
+          <li><strong>Speed boost</strong>: T2I/I2I giờ chạy qua HTTP API thuần (curl_cffi Chrome impersonation) — giảm 9-17× so với browser path. T2I fresh: 17-26s, I2I + 7MB ref: 14-25s.</li>
+          <li><strong>Prompt limit</strong>: bumped 4000 → <strong>16000 chars</strong> (hỗ trợ prompt director-style dài).</li>
+          <li><strong>Multi-reference</strong>: <code>reference_images</code> giờ accept tối đa 4 ảnh (URL hoặc file_id) — phân vai @IMAGE_1, @IMAGE_2 trong prompt.</li>
+          <li><strong>Reliability</strong>: pool keeper auto-respawn VNC, worker retry trên TargetClosedError, fast-fail 45s khi Grok shadow-block.</li>
+        </ul>
+      </section>
+
       <section className="card space-y-3">
         <h2 className="font-semibold">{t("grok.apidocs_section_authentication")}</h2>
         <div className="grid md:grid-cols-2 gap-3 text-sm">
@@ -908,6 +962,8 @@ export function ApiDocsPage() {
           <div className="border-l-4 border-purple-400 pl-3">
             <div className="font-semibold text-purple-700 mb-1">{t("grok.apidocs_auth_apikey_title")}</div>
             <p className="text-slate-600">{t("grok.apidocs_auth_apikey_desc")}</p>
+            <code className="text-xs">X-API-Key: uxpm_live_xxx</code>
+            <span className="text-xs text-slate-500"> hoặc </span>
             <code className="text-xs">Authorization: Bearer uxpm_live_xxx</code>
           </div>
         </div>
