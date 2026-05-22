@@ -204,6 +204,188 @@ async def delete_user(user_id: uuid.UUID, admin: AdminUser, db: DbSession) -> No
     await db.commit()
 
 
+from pydantic import BaseModel, EmailStr, Field
+from app.models import ApiKey, Domain
+from app.core.security import generate_api_key
+
+
+class QuickProvisionNewDomain(BaseModel):
+    """Inline domain creation alongside the user. Use this when the
+    customer needs their own scoped pool/quota and no existing domain
+    fits."""
+    hostname: str = Field(min_length=1, max_length=255)
+    label: str | None = None
+    jobs_quota_per_day: int | None = Field(default=None, ge=0)
+
+
+class QuickProvisionIn(BaseModel):
+    """One-shot bundle to provision a customer in 1 round-trip:
+    [optional new domain] + user + [optional API key].
+
+    Use cases this collapses:
+      - reseller onboards 1 customer → would otherwise be 3-4 separate
+        admin clicks (create domain, create plan if needed, create user,
+        create API key)
+      - QA / sales demo → spin up a sandbox account with a key in seconds
+    """
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str = Field(min_length=1, max_length=255)
+    role: str = Field(default="user", pattern="^(user|admin|support)$")
+    plan_id: uuid.UUID | None = None
+
+    # Exactly one of these — caller picks an existing domain OR creates
+    # a fresh one inline. Both empty = put the user on "no domain" (only
+    # super_admin can do that, otherwise inherits admin's domain).
+    domain_id: uuid.UUID | None = None
+    new_domain: QuickProvisionNewDomain | None = None
+
+    # API key options. When create_api_key=true an `uxpm_live_*` key is
+    # generated and returned in plaintext exactly ONCE in the response.
+    create_api_key: bool = False
+    api_key_name: str = Field(default="default", min_length=1, max_length=120)
+    api_key_providers: list[str] = Field(default_factory=lambda: ["grok"])
+    api_key_job_types: list[str] = Field(default_factory=lambda: ["image", "video"])
+    api_key_daily_limit: int = Field(default=1000, ge=1, le=100000)
+
+
+class QuickProvisionOut(BaseModel):
+    user_id: uuid.UUID
+    user_email: str
+    domain_id: uuid.UUID | None
+    domain_hostname: str | None
+    api_key: str | None = None
+    api_key_id: uuid.UUID | None = None
+    api_key_prefix: str | None = None
+    login_url: str
+    note: str
+
+
+@router.post("/users/quick-provision", response_model=QuickProvisionOut, status_code=status.HTTP_201_CREATED)
+async def quick_provision(
+    payload: QuickProvisionIn, admin: AdminUser, db: DbSession,
+) -> QuickProvisionOut:
+    """1-click customer onboard. Wraps create-domain + create-user +
+    create-api-key in a single transaction so a partial failure rolls
+    back everything (e.g. duplicate email won't leave an orphan domain).
+    """
+    if payload.domain_id and payload.new_domain:
+        raise InvalidPayload("Chọn domain_id HOẶC new_domain, không cả hai")
+
+    # Pre-check duplicate email so we don't waste a domain insert on it.
+    existing = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+    if existing:
+        raise InvalidPayload(f"Email {payload.email} đã tồn tại")
+
+    if payload.plan_id and not await db.get(Plan, payload.plan_id):
+        raise InvalidPayload("Plan không tồn tại")
+
+    # Role / domain rules mirror create_user() above.
+    if admin.role != "super_admin":
+        if payload.role == "super_admin":
+            raise PermissionDenied("Không có quyền tạo super_admin")
+        if payload.new_domain:
+            raise PermissionDenied("Chỉ super_admin được tạo domain mới")
+        target_domain = admin.domain_id
+    else:
+        target_domain = payload.domain_id
+
+    # Inline domain creation (super_admin only).
+    new_domain_row: Domain | None = None
+    if payload.new_domain:
+        # Conflict check on hostname so the unique-index error becomes a
+        # clean 400 instead of a 500.
+        dup = (await db.execute(
+            select(Domain).where(Domain.hostname == payload.new_domain.hostname)
+        )).scalar_one_or_none()
+        if dup:
+            raise InvalidPayload(
+                f"Domain {payload.new_domain.hostname} đã tồn tại — dùng domain_id thay vì new_domain"
+            )
+        new_domain_row = Domain(
+            hostname=payload.new_domain.hostname,
+            label=payload.new_domain.label or payload.new_domain.hostname,
+            status="active",
+            jobs_quota_per_day=payload.new_domain.jobs_quota_per_day,
+        )
+        db.add(new_domain_row)
+        await db.flush()
+        target_domain = new_domain_row.id
+
+    user = User(
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        full_name=payload.full_name,
+        role=payload.role,
+        status="active",
+        plan_id=payload.plan_id,
+        domain_id=target_domain,
+    )
+    db.add(user)
+    await db.flush()
+
+    full_key: str | None = None
+    key_id: uuid.UUID | None = None
+    key_prefix: str | None = None
+    if payload.create_api_key:
+        full_key, key_prefix, key_hash = generate_api_key()
+        api_key = ApiKey(
+            user_id=user.id,
+            name=payload.api_key_name,
+            key_prefix=key_prefix,
+            key_hash=key_hash,
+            allowed_providers=payload.api_key_providers,
+            allowed_job_types=payload.api_key_job_types,
+            daily_limit=payload.api_key_daily_limit,
+        )
+        db.add(api_key)
+        await db.flush()
+        key_id = api_key.id
+
+    await audit.log_action(
+        db, user_id=admin.id, action="admin_quick_provision",
+        target_type="user", target_id=user.id,
+        metadata={
+            "email": user.email,
+            "role": user.role,
+            "plan_id": str(payload.plan_id) if payload.plan_id else None,
+            "domain_id": str(target_domain) if target_domain else None,
+            "new_domain": payload.new_domain.hostname if payload.new_domain else None,
+            "with_api_key": payload.create_api_key,
+        },
+    )
+    await db.commit()
+
+    # Build the login URL. Prefer the new/picked domain's hostname so the
+    # link the reseller copies points at the right tenant. Falls back to
+    # the admin's own domain — last resort is just "/" (caller knows host).
+    host: str | None = None
+    if new_domain_row:
+        host = new_domain_row.hostname
+    elif target_domain:
+        d = await db.get(Domain, target_domain)
+        host = d.hostname if d else None
+    login_url = f"https://{host}/" if host else "/"
+
+    note = (
+        "Lưu lại api_key — chỉ hiện 1 lần. Gửi cho khách kèm login_url + email/password."
+        if full_key
+        else "Gửi khách: login_url + email + password tạm. Khách đổi password lần đầu."
+    )
+
+    return QuickProvisionOut(
+        user_id=user.id,
+        user_email=user.email,
+        domain_id=target_domain,
+        domain_hostname=host,
+        api_key=full_key,
+        api_key_id=key_id,
+        api_key_prefix=key_prefix,
+        login_url=login_url,
+        note=note,
+    )
+
+
 @router.get("/users/{user_id}/effective-entitlements", response_model=EffectiveEntitlementsOut)
 async def user_effective_entitlements(
     user_id: uuid.UUID, admin: AdminUser, db: DbSession,

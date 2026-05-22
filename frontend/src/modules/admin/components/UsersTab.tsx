@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Sliders, Ban, UserCheck, Trash2, UserPlus } from "lucide-react";
+import { Sliders, Ban, UserCheck, Trash2, UserPlus, Wand2 } from "lucide-react";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { toast } from "@/components/ui/Toast";
 import type { AdminUser } from "../models/user";
@@ -9,6 +9,7 @@ import type { Plan } from "../models/plan";
 import { usersService } from "../services/users.service";
 import { plansService } from "../services/plans.service";
 import { CreateUserModal } from "./CreateUserModal";
+import { QuickProvisionModal } from "./QuickProvisionModal";
 import { UserPermissionsModal } from "./UserPermissionsModal";
 
 // ============================================================================
@@ -26,6 +27,7 @@ export function UsersTab({ meId }: { meId: string }) {
     queryFn: () => plansService.list(),
   });
   const [open, setOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
 
   const planByCode = useMemo(() => {
@@ -38,10 +40,20 @@ export function UsersTab({ meId }: { meId: string }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800">Users</h2>
-        <button onClick={() => setOpen(true)} className="btn-primary inline-flex items-center gap-1.5">
-          <UserPlus size={16} />
-          {t("common.create_user")}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setQuickOpen(true)}
+            className="btn-secondary inline-flex items-center gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+            title="Gộp Domain + User + API Key 1 bước"
+          >
+            <Wand2 size={16} />
+            Cấp nhanh
+          </button>
+          <button onClick={() => setOpen(true)} className="btn-primary inline-flex items-center gap-1.5">
+            <UserPlus size={16} />
+            {t("common.create_user")}
+          </button>
+        </div>
       </div>
       {isLoading ? (
         <p className="text-slate-500">{t("common.loading")}</p>
@@ -75,6 +87,7 @@ export function UsersTab({ meId }: { meId: string }) {
         </div>
       )}
       {open && <CreateUserModal plans={plans ?? []} onClose={() => setOpen(false)} />}
+      {quickOpen && <QuickProvisionModal plans={plans ?? []} onClose={() => setQuickOpen(false)} />}
       {editingUser && (
         <UserPermissionsModal
           user={editingUser}
