@@ -47,6 +47,16 @@ _COOKIES_TTL_S = 600.0  # 10 min — short enough that stale cookies are
 # while the others wait; they then all see the warm cache.
 _STATSIG_LOCKS: dict[str, _asyncio_for_lock.Lock] = {}
 
+# Per-profile "API path is unhealthy" sticky flag. Set when the HTTP API
+# attempt (/conversations/new) returns provider_blocked / 403 — for the
+# next GROK_API_BLOCK_COOLDOWN_SEC seconds every job on this profile
+# skips the API attempt and goes straight to the Playwright browser
+# fallback. Eliminates the ~15s wasted on the doomed API round-trip.
+# Cleared automatically by the cooldown expiring; a successful API
+# call (none observed during cooldown) would also clear it implicitly
+# the next time the entry's timestamp is older than cooldown.
+_API_BLOCKED_UNTIL: dict[str, float] = {}
+
 
 def _statsig_lock(cache_key: str) -> _asyncio_for_lock.Lock:
     lk = _STATSIG_LOCKS.get(cache_key)
@@ -199,7 +209,14 @@ class GrokProvider(Provider):
             # RAM. The path returns None on any setup failure (cookie
             # extraction, CDP not ready) so a failure here never strands
             # the job — the Playwright flows below pick up cleanly.
-            if job.job_type == "image":
+            #
+            # ...unless this profile got a 403 / provider_blocked from the
+            # API path within the last GROK_API_BLOCK_COOLDOWN_SEC seconds.
+            # In that case skip the API attempt outright — it's near-
+            # certain to 403 again, and the ~15s round-trip to find out
+            # is pure waste on the critical path. Browser fallback takes
+            # over immediately.
+            if job.job_type == "image" and not self._api_path_blocked(job.profile_path):
                 api_result = await self._run_image_via_api(job)
                 if api_result is not None:
                     return api_result
@@ -246,6 +263,37 @@ class GrokProvider(Provider):
     @staticmethod
     def _profile_id_from_path(profile_path: str) -> str:
         return profile_path.rstrip("/").split("/")[-1]
+
+    @staticmethod
+    def _api_path_blocked(profile_path: str) -> bool:
+        """True iff this profile is in the post-403 cooldown window.
+
+        Cooldown duration tunable via GROK_API_BLOCK_COOLDOWN_SEC
+        (default 300s = 5 min). Cleared lazily — if the recorded
+        timestamp + cooldown is in the past, the entry is removed
+        and we return False.
+        """
+        profile_id = profile_path.rstrip("/").split("/")[-1]
+        deadline = _API_BLOCKED_UNTIL.get(profile_id)
+        if deadline is None:
+            return False
+        if time.monotonic() >= deadline:
+            _API_BLOCKED_UNTIL.pop(profile_id, None)
+            return False
+        return True
+
+    @staticmethod
+    def _mark_api_blocked(profile_path: str) -> None:
+        """Record that this profile just got a 403 / provider_blocked on
+        the API path. Subsequent jobs within the cooldown window skip
+        the API attempt and go straight to the Playwright fallback."""
+        profile_id = profile_path.rstrip("/").split("/")[-1]
+        cooldown = float(os.environ.get("GROK_API_BLOCK_COOLDOWN_SEC", "300"))
+        _API_BLOCKED_UNTIL[profile_id] = time.monotonic() + cooldown
+        print(
+            f"[grok][api:{profile_id[:8]}] marked api-blocked for {int(cooldown)}s",
+            flush=True,
+        )
 
     @staticmethod
     def _log(tag: str, *args) -> None:
@@ -698,6 +746,11 @@ class GrokProvider(Provider):
             _STATSIG_CACHE.pop(profile_id, None)
             _STATSIG_CACHE.pop(f"{profile_id}:video", None)
             _COOKIES_CACHE.pop(profile_id, None)
+            if exc.code == "provider_blocked":
+                # CF / statsig saying no. Mark this profile so the next
+                # several minutes of jobs skip the API attempt entirely
+                # — saves ~15s/job on the critical path.
+                self._mark_api_blocked(job.profile_path)
             if exc.code == "cookie_expired":
                 return JobResult(
                     success=False,
@@ -991,17 +1044,25 @@ class GrokProvider(Provider):
 
                 # Pull the image bytes through the SAME Chromium so it
                 # carries the auth cookies Grok requires on its asset CDN.
+                # Tightened timeout 60s -> 25s and split into connect/read
+                # phases — a stalled CDN connect used to occupy a worker
+                # for the full minute, blocking sibling jobs even when
+                # the asset would have failed instantly.
+                download_t0 = time.monotonic()
                 try:
                     cookies = await ctx.cookies("https://grok.com")
                     jar = {c["name"]: c["value"] for c in cookies}
-                    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as cli:
+                    timeout_cfg = httpx.Timeout(connect=8.0, read=25.0, write=25.0, pool=8.0)
+                    async with httpx.AsyncClient(timeout=timeout_cfg, follow_redirects=True) as cli:
                         r = await cli.get(found_url, cookies=jar)
+                    dl_sec = int(time.monotonic() - download_t0)
                     if r.status_code != 200 or not r.content:
                         return JobResult(
                             success=False, error_code="network_error",
-                            error_message=f"Image download {r.status_code} (len={len(r.content)})",
+                            error_message=f"Image download {r.status_code} (len={len(r.content)}) after {dl_sec}s",
                             retryable=True,
                         )
+                    self._log(tag, f"image downloaded in {dl_sec}s ({len(r.content)} bytes)")
                     mime = r.headers.get("content-type", "image/png").split(";")[0]
                     ext = mime.split("/")[-1] or "png"
                     return JobResult(
@@ -1014,9 +1075,10 @@ class GrokProvider(Provider):
                         )],
                     )
                 except Exception as exc:  # noqa: BLE001
+                    dl_sec = int(time.monotonic() - download_t0)
                     return JobResult(
                         success=False, error_code="network_error",
-                        error_message=f"download failed: {exc}",
+                        error_message=f"download failed after {dl_sec}s: {exc}",
                         retryable=True,
                     )
             finally:
