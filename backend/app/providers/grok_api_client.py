@@ -262,77 +262,103 @@ class GrokAPIClient:
         final_message: str | None = None
         soft_stopped = False
 
-        async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
-            **_httpx_proxy_kwargs(),
-        ) as client:
-            async with client.stream(
-                "POST",
-                GROK_BASE + ENDPOINT_NEW_CONVERSATION,
-                headers=self._headers(referer_path),
-                json=body,
-            ) as resp:
+        # curl_cffi mimics Chrome's TLS fingerprint + HTTP/2 frame order,
+        # which is what Cloudflare actually checks on grok.com — plain
+        # httpx 403's reliably even with the right cookies. Falls back
+        # to httpx if curl_cffi isn't installed (dev / offline runs).
+        try:
+            from curl_cffi.requests import AsyncSession  # type: ignore
+            use_curl_cffi = True
+        except ImportError:
+            use_curl_cffi = False
+
+        async def _process_stream_text_iter(text_iter):
+            nonlocal final_message, model_used, conversation_id, response_id, soft_stopped
+            buf = ""
+            async for chunk in text_iter:
+                buf += chunk if isinstance(chunk, str) else chunk.decode("utf-8", errors="replace")
+                last_end = 0
+                for obj_text, end in _iter_complete_json(buf):
+                    last_end = end
+                    try:
+                        evt = json.loads(obj_text)
+                    except json.JSONDecodeError:
+                        continue
+                    result = evt.get("result") or {}
+                    conv = result.get("conversation") or {}
+                    if conv.get("conversationId") and not conversation_id:
+                        conversation_id = conv["conversationId"]
+                    response = result.get("response") or {}
+                    if not response_id and response.get("responseId"):
+                        response_id = response["responseId"]
+                    if (
+                        response.get("token")
+                        and response.get("messageTag") == "final"
+                        and not response.get("isThinking")
+                    ):
+                        chunks.append(response["token"])
+                    mr = response.get("modelResponse") or {}
+                    if mr.get("message"):
+                        final_message = mr["message"]
+                        model_used = mr.get("model") or model_used
+                    if response.get("isSoftStop"):
+                        soft_stopped = True
+                if last_end:
+                    buf = buf[last_end:]
+                if soft_stopped and final_message:
+                    return
+
+        if use_curl_cffi:
+            async with AsyncSession(impersonate="chrome124") as client:  # type: ignore
+                resp = await client.post(
+                    GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+                    headers=self._headers(referer_path),
+                    cookies=self.cookies,
+                    json=body,
+                    timeout=self.timeout,
+                    stream=True,
+                )
                 if resp.status_code == 401:
-                    raise GrokAPIError(
-                        "cookie_expired",
-                        "401 from /conversations/new — session cookie invalid",
-                    )
+                    raise GrokAPIError("cookie_expired", "401 from /conversations/new — session cookie invalid")
                 if resp.status_code == 403:
-                    raise GrokAPIError(
-                        "provider_blocked",
-                        "403 — Cloudflare or statsig challenge",
-                        retryable=True,
-                    )
+                    raise GrokAPIError("provider_blocked", "403 — Cloudflare or statsig challenge", retryable=True)
                 if resp.status_code == 429:
-                    raise GrokAPIError(
-                        "rate_limited", "429 — Grok rate limit", retryable=True
-                    )
+                    raise GrokAPIError("rate_limited", "429 — Grok rate limit", retryable=True)
                 if resp.status_code >= 400:
-                    snippet = (await resp.aread())[:200]
+                    body_bytes = await resp.acontent()
                     raise GrokAPIError(
                         "unknown_error",
-                        f"{resp.status_code}: {snippet.decode('utf-8', errors='replace')!r}",
+                        f"{resp.status_code}: {body_bytes[:200].decode('utf-8', errors='replace')!r}",
                     )
 
-                buf = ""
-                async for chunk in resp.aiter_text():
-                    buf += chunk
-                    last_end = 0
-                    for obj_text, end in _iter_complete_json(buf):
-                        last_end = end
-                        try:
-                            evt = json.loads(obj_text)
-                        except json.JSONDecodeError:
-                            continue
-                        result = evt.get("result") or {}
-                        conv = result.get("conversation") or {}
-                        if conv.get("conversationId") and not conversation_id:
-                            conversation_id = conv["conversationId"]
-                        response = result.get("response") or {}
-                        if not response_id and response.get("responseId"):
-                            response_id = response["responseId"]
-                        # Reassemble final visible tokens — skip the
-                        # "isThinking" header that streams "Thinking
-                        # about your request" before the real reply.
-                        if (
-                            response.get("token")
-                            and response.get("messageTag") == "final"
-                            and not response.get("isThinking")
-                        ):
-                            chunks.append(response["token"])
-                        # Capture the canonical assembled message from the
-                        # closing modelResponse event — falls back to the
-                        # chunks list if Grok omits it.
-                        mr = response.get("modelResponse") or {}
-                        if mr.get("message"):
-                            final_message = mr["message"]
-                            model_used = mr.get("model") or model_used
-                        if response.get("isSoftStop"):
-                            soft_stopped = True
-                    if last_end:
-                        buf = buf[last_end:]
-                    if soft_stopped and final_message:
-                        break
+                async def _iter():
+                    async for chunk in resp.aiter_content():
+                        yield chunk
+                await _process_stream_text_iter(_iter())
+        else:
+            async with httpx.AsyncClient(
+                timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
+                **_httpx_proxy_kwargs(),
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+                    headers=self._headers(referer_path),
+                    json=body,
+                ) as resp:
+                    if resp.status_code == 401:
+                        raise GrokAPIError("cookie_expired", "401 from /conversations/new — session cookie invalid")
+                    if resp.status_code == 403:
+                        raise GrokAPIError("provider_blocked", "403 — Cloudflare or statsig challenge", retryable=True)
+                    if resp.status_code == 429:
+                        raise GrokAPIError("rate_limited", "429 — Grok rate limit", retryable=True)
+                    if resp.status_code >= 400:
+                        snippet = (await resp.aread())[:200]
+                        raise GrokAPIError(
+                            "unknown_error",
+                            f"{resp.status_code}: {snippet.decode('utf-8', errors='replace')!r}",
+                        )
+                    await _process_stream_text_iter(resp.aiter_text())
 
         latency_ms = int((time.monotonic() - t0) * 1000)
         message = final_message or "".join(chunks)

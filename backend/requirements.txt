@@ -16,6 +16,11 @@ cryptography==43.0.1
 redis==5.0.8
 rq==1.16.2
 httpx[socks]==0.27.2
+# curl_cffi mimics Chrome's TLS fingerprint (JA3, HTTP/2 frame order,
+# header casing) so Cloudflare lets requests through that plain httpx
+# 403s on. Used by the chat / image-gen API paths when our extracted
+# cookies are valid but CF still blocks raw httpx connections.
+curl_cffi==0.7.4
 python-multipart==0.0.10
 email-validator==2.2.0
 playwright==1.49.1
