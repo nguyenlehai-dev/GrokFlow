@@ -9,7 +9,7 @@ within ~1 minute of a push.
 | Branch | Purpose | Auto-deploy? | Stability |
 |---|---|---|---|
 | `dev` | Daily development. Push frequently. | No | Unstable, may break |
-| `staging` | Optional pre-prod gate (manual). | Manual via GitHub Actions `workflow_dispatch` | Should be working |
+| `staging` | Pre-prod gate. QA / smoke-test before merging to prod. | **Yes — VPS polls every 1 min** (separate env on same VPS) | Should be working |
 | `prod` | Live site. Every commit is deployed. | **Yes — VPS polls every 1 min** | Must be working |
 
 `prod` is **protected** logically: only fast-forward merges from `dev` after
@@ -80,50 +80,132 @@ No SSH key to the VPS needed. The VPS polls GitHub on its own.
 
 ## VPS auto-deploy daemon — how it works
 
-The daemon is a single bash script run by `cron` every minute:
-[`deploy/auto_deploy.sh`](../deploy/auto_deploy.sh)
+The daemon is a single bash script run by `cron` every minute, parametrised
+by branch ([`deploy/auto_deploy.sh`](../deploy/auto_deploy.sh)):
+
+```
+* * * * * /home/vpsroot/grokflow/deploy/auto_deploy.sh prod    >> /home/vpsroot/grokflow-deploy.log 2>&1
+* * * * * /home/vpsroot/grokflow-staging/deploy/auto_deploy.sh staging >> /home/vpsroot/grokflow-deploy-staging.log 2>&1
+```
 
 For each tick:
 
-1. **Lock check.** If a previous deploy is still running, exit.
-2. **Fetch origin/prod.**
-3. **Compare hashes.** If `git rev-parse prod == origin/prod`, exit silently.
-4. **Diff to see what changed.** Decide whether to rebuild backend
+1. **Lock check** (per-branch). If a previous deploy of the same branch is
+   still running, exit.
+2. **Fetch origin/&lt;branch&gt;.**
+3. **Compare hashes.** If local == remote, exit silently.
+4. **Save current commit** to `.last-good-commit` so we can roll back.
+5. **Diff to see what changed.** Decide whether to rebuild backend
    (`backend/*` or `docker-compose*.yml` changed) and/or frontend
    (`frontend/*` changed).
-5. **Disk safety.** If `/` is ≥ 90% full, run emergency Docker prune.
-6. **Hard reset to origin/prod.** Untracked files (`.env.prod`,
-   `browser_profiles/`, `storage/`) are preserved by `git reset --hard`
-   because they're in `.gitignore`.
-7. **Rebuild + restart only what changed.** No full-stack rebuild for
+6. **Disk safety.** If `/` is ≥ 90% full, run emergency Docker prune.
+7. **Hard reset to origin/&lt;branch&gt;.** Untracked files (`.env.*`,
+   `browser_profiles/`, `storage/`) are preserved.
+8. **Rebuild + restart only what changed.** No full-stack rebuild for
    a frontend-only change.
-8. **Run alembic upgrade head** (idempotent).
-9. **Post-deploy prune** of cache older than 2h.
-10. **Log everything to `/var/log/grokflow-deploy.log`.**
+9. **Run alembic upgrade head** (idempotent).
+10. **Health check** against `backend:/health` (up to `HEALTH_TIMEOUT_SEC`,
+    default 90 s).
+11. **Auto-rollback** to the previous commit if health fails (configurable
+    via `ROLLBACK_ON_FAIL=false`).
+12. **Post-deploy prune** of cache older than 2h.
+13. **Webhook notification** (Discord-compatible) on every transition:
+    start / success / fail / rollback. Set `DEPLOY_WEBHOOK_URL` in the
+    branch's env file (`.env.prod` / `.env.staging`).
+14. **Log everything to `/home/vpsroot/grokflow-deploy[-<branch>].log`.**
 
 ## Initial VPS setup (run once)
 
+### Prod
+
 ```bash
-ssh vpsroot@192.168.1.15
+ssh vpsroot@192.168.1.11
 cd /home/vpsroot/grokflow
-bash deploy/install_auto_deploy.sh
+bash deploy/install_auto_deploy.sh           # defaults to --branch prod
 ```
 
-This:
-- Initializes a git repo in the existing dir (preserves `.env.prod`)
-- Sets origin to the public GitHub repo
-- Checks out `prod` branch
-- Installs a cron entry that runs every minute
+### Staging (separate env, same VPS)
 
-After that, you can disable it via `crontab -e` and remove the
-`auto_deploy.sh` line.
+```bash
+ssh vpsroot@192.168.1.11
+sudo mkdir -p /home/vpsroot/grokflow-staging && sudo chown vpsroot: /home/vpsroot/grokflow-staging
+cd /home/vpsroot/grokflow-staging
+
+# Pull the installer from any reachable source — easiest is to copy from prod:
+cp /home/vpsroot/grokflow/deploy/install_auto_deploy.sh .
+bash install_auto_deploy.sh --branch staging
+
+# The installer seeds .env.staging from .env.prod.example. EDIT IT before
+# the next cron tick — at minimum change:
+#   POSTGRES_PASSWORD       (different from prod)
+#   JWT_SECRET              (different from prod)
+#   ENCRYPTION_KEY          (different from prod)
+#   DOMAIN / API_DOMAIN     (e.g. test.nexoratech.com.vn)
+#   PUBLIC_API_URL          (https://<domain>)
+#   CORS_ORIGINS            (match staging domain)
+#   BACKEND_HOST_PORT=18000 # default-driven via compose, avoids :8000 clash
+#   FRONTEND_HOST_PORT=15173
+```
+
+### Wiring staging to a public domain
+
+Once the staging stack is running on host ports `18000/15173`, expose it
+publicly so testers can reach it:
+
+1. **Add an nginx vhost** that proxies the staging domain to those ports.
+   Drop a file into `/etc/nginx/grokflow-vhosts/` — the inotify reloader
+   service picks it up automatically (`grokflow-nginx-reloader.service`).
+   The current staging file lives at
+   `/etc/nginx/grokflow-vhosts/grokflow-test_nexoratech_com_vn.conf` —
+   clone it for a different staging domain.
+
+2. **HTTP basic auth.** The staging vhost includes an `auth_basic` gate so
+   only people with the staging creds can reach the app. Manage the
+   credentials file at `/etc/nginx/grokflow-vhosts/.htpasswd-staging`:
+   ```bash
+   # Add a user
+   openssl passwd -apr1   # paste the password, append "USER:<hash>" to the file
+   ```
+   `/health` is exempt so external monitors still work.
+
+3. **Cloudflare Tunnel.** The tunnel running on the VPS is configured via
+   the dashboard (token-based — config isn't in any file on disk).
+   In **Cloudflare → Zero Trust → Networks → Tunnels → \<your tunnel\>
+   → Public Hostnames**, add:
+   - Subdomain: `test` (or whatever)
+   - Domain: `nexoratech.com.vn`
+   - Type: `HTTP`, URL: `localhost:80`
+
+4. **Seed the first admin** (alembic only creates schema, not rows):
+   ```bash
+   docker exec \
+     -e INITIAL_ADMIN_EMAIL=admin@staging.local \
+     -e INITIAL_ADMIN_PASSWORD='<strong>' \
+     -e INITIAL_DOMAIN_LABEL=Staging \
+     grokflow-staging-backend-1 python -m app.scripts.seed_first_run
+   ```
+   Idempotent — re-running is safe.
+
+Each install adds its own `auto_deploy.sh <branch>` cron line — prod and
+staging coexist without stepping on each other (separate lock files,
+separate docker project names).
+
+To disable a branch: `crontab -e` and remove its line.
 
 ## CI / GitHub Actions
 
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | Push to `dev` / PR to any branch | Backend pytest + frontend `tsc -b && npm run build` |
-| `deploy.yml` | Push to `prod` / `staging`, or `workflow_dispatch` | Optional SSH-based deploy. Currently **disabled** in favor of the VPS-side cron daemon (more reliable when GitHub runners can't reach the LAN VPS). |
+| `deploy.yml` | Push to `prod` / `staging`, or `workflow_dispatch` | Audit-only: logs the deploy intent in GitHub Actions and (optionally) pings a public `/health` URL 90 s after push. Does **not** SSH — the VPS cron pulls on its own. |
+
+### Optional GitHub secrets
+
+| Secret | Purpose |
+|---|---|
+| `HEALTH_URL_PROD` | Public health URL for prod, e.g. `flowgrok.vpspanel.io.vn` (no scheme). |
+| `HEALTH_URL_STAGING` | Public health URL for staging. |
+| `HEALTH_URL` | Fallback used when the per-branch secret is unset. |
 
 ## Commit conventions
 
@@ -153,10 +235,36 @@ The VPS cron picks the revert/reset up within a minute.
 
 ## What the daemon does NOT do
 
-- It will never `git clean -fdx` (so `.env.prod`, `storage/`, `browser_profiles/`
+- It will never `git clean -fdx` (so `.env.*`, `storage/`, `browser_profiles/`
   are safe).
 - It will never restart the VNC profile container (those persist across
   deploys so you don't lose Grok cookies).
-- It will never run with two instances at once (lock file).
-- It will never deploy from a non-prod branch unless you manually call
-  `bash deploy/auto_deploy.sh staging`.
+- It will never run two instances of the same branch at once (per-branch lock).
+
+## Auto-rollback
+
+After a deploy the daemon polls `backend:/health` inside the docker network
+for up to `HEALTH_TIMEOUT_SEC` seconds (default 90). If the endpoint never
+returns `{"status":"ok"}`, the daemon:
+
+1. Reads the saved previous commit from `.last-good-commit`.
+2. `git reset --hard <prev>` and rebuilds.
+3. Sends a `:leftwards_arrow_with_hook:` webhook on completion.
+
+Disable per-environment by setting `ROLLBACK_ON_FAIL=false` in that
+branch's env file (handy when you want a broken commit to stay live on
+staging so you can debug it).
+
+## Deploy notifications
+
+The daemon POSTs a Discord-compatible payload (`{"content": "..."}`) on
+every transition (started / succeeded / failed / rolled back). To enable,
+set in the branch's env file:
+
+```
+DEPLOY_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>
+```
+
+Discord webhooks work directly; for Slack, use an `incoming-webhook` URL —
+the JSON payload is compatible because Slack treats unknown keys as text.
+For Telegram or email, point this at a small proxy.

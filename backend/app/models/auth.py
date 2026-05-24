@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._base import Base, JSONType, TimestampMixin, UUIDType, _uuid
@@ -55,6 +55,12 @@ class User(Base, TimestampMixin):
     # don't have to bump a column every time a new event type is added.
     locale: Mapped[str | None] = mapped_column(String(10))
     notification_prefs: Mapped[dict | None] = mapped_column(JSONType)
+    # 2FA TOTP: secret Fernet-encrypted khi lưu, plaintext khi read qua
+    # helper trong app/core/totp.py. backup_codes = list[SHA256(code)]
+    # one-time use. enabled gate ở /login → yêu cầu totp_code khi true.
+    totp_secret: Mapped[str | None] = mapped_column(Text)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    totp_backup_codes: Mapped[list | None] = mapped_column(JSONType)
 
     plan: Mapped["Plan | None"] = relationship()  # noqa: F821
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")

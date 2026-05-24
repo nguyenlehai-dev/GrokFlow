@@ -54,4 +54,10 @@ def get_provider(vendor_code: str) -> "VendorProvider | None":
     if vendor_code in ("replicate",):
         from .replicate_provider import ReplicateProvider
         return ReplicateProvider()
+    if vendor_code in ("grok", "xai"):
+        # Grok via a GrokFlow-as-backend pool. Pool keys carry
+        # `metadata.url` pointing at a GrokFlow instance + an api_key
+        # that authenticates to /api/jobs there.
+        from .grok_provider import GrokProvider
+        return GrokProvider()
     return None

@@ -12,7 +12,7 @@ name: Deploy
 
 on:
   push:
-    branches: [prod]
+    branches: [prod, staging]
   workflow_dispatch:
 
 concurrency:
@@ -38,14 +38,24 @@ jobs:
 
       - name: Public health check (optional)
         env:
+          # Branch-specific secret takes precedence so staging can point at a
+          # different URL than prod. Falls back to HEALTH_URL for compat.
+          HEALTH_URL_PROD: ${{ secrets.HEALTH_URL_PROD }}
+          HEALTH_URL_STAGING: ${{ secrets.HEALTH_URL_STAGING }}
           HEALTH_URL: ${{ secrets.HEALTH_URL }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ -z "$HEALTH_URL" ]; then
-            echo "HEALTH_URL secret not set — skipping smoke check."
+          case "$REF_NAME" in
+            prod)    URL="${HEALTH_URL_PROD:-$HEALTH_URL}" ;;
+            staging) URL="${HEALTH_URL_STAGING:-$HEALTH_URL}" ;;
+            *)       URL="$HEALTH_URL" ;;
+          esac
+          if [ -z "$URL" ]; then
+            echo "No health URL configured for branch '$REF_NAME' — skipping smoke check."
             exit 0
           fi
           for i in $(seq 1 10); do
-            if curl -fsS --max-time 10 "https://$HEALTH_URL/health" 2>&1 | grep -q '"status":"ok"'; then
+            if curl -fsS --max-time 10 "https://$URL/health" 2>&1 | grep -q '"status":"ok"'; then
               echo "Health check passed on attempt $i"
               exit 0
             fi

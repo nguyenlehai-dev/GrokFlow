@@ -77,22 +77,34 @@ async def create_job(
     if payload.n != 1: options["n"] = payload.n
     if payload.seed is not None: options["seed"] = payload.seed
     if payload.input_image_file_id: options["input_image_file_id"] = str(payload.input_image_file_id)
+    if payload.reference_images:
+        options["reference_images"] = [str(r) for r in payload.reference_images]
 
-    # If the caller references an input file, validate it exists + belongs to
-    # them BEFORE we burn a quota check and create the job row. Avoids the
-    # orphan case where a job ends up pointing at a deleted/missing file_id.
+    # If the caller references input file(s), validate each exists + belongs
+    # to them BEFORE we burn a quota check and create the job row. Avoids
+    # the orphan case where a job ends up pointing at a deleted/missing
+    # file_id. Single-ref (input_image_file_id) and multi-ref
+    # (reference_images) are both checked; the worker later merges them.
+    from app.models import File as FileModel
+    file_ids_to_check: list[uuid.UUID] = []
     if payload.input_image_file_id:
-        from app.models import File as FileModel
-        f = await db.get(FileModel, payload.input_image_file_id)
+        file_ids_to_check.append(payload.input_image_file_id)
+    if payload.reference_images:
+        file_ids_to_check.extend(payload.reference_images)
+    for fid in file_ids_to_check:
+        f = await db.get(FileModel, fid)
         if not f or f.user_id != user.id:
-            raise InvalidPayload("input_image_file_id không tồn tại hoặc không thuộc về bạn")
+            raise InvalidPayload(f"reference file {fid} không tồn tại hoặc không thuộc về bạn")
 
     eff = await get_effective_entitlements(db, user)
     try:
         assert_job_options(
             eff,
             job_type=payload.job_type,
-            has_input_image=payload.input_image_file_id is not None,
+            has_input_image=(
+                payload.input_image_file_id is not None
+                or bool(payload.reference_images)
+            ),
             options=options,
         )
         await assert_concurrent_jobs(db, user, eff)
@@ -294,6 +306,47 @@ async def edit_job(
         return job
     db.add(JobLog(job_id=job.id, level="info",
                   message=f"Job edited by user: {','.join(changed)}"))
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+class JobTagsIn(BaseModel):
+    """Replaces the full tag set on a job. To add one tag without nuking
+    the others, the client should read tags first, append, then PUT."""
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+@router.put("/{job_id}/tags", response_model=JobOut)
+async def set_job_tags(
+    job_id: uuid.UUID, payload: JobTagsIn, user: CurrentUser, db: DbSession,
+) -> Job:
+    job = await service.assert_job_owner(db, job_id, user.id, user.role == "admin")
+    # Dedupe + strip whitespace + drop empty. Keep client-supplied order
+    # so the UI's drag-reorder gesture is preserved on save.
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for raw in payload.tags:
+        t = (raw or "").strip()
+        if not t or t in seen or len(t) > 50:
+            continue
+        seen.add(t)
+        cleaned.append(t)
+    job.tags = cleaned
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+@router.post("/{job_id}/favorite", response_model=JobOut)
+async def toggle_favorite(
+    job_id: uuid.UUID, user: CurrentUser, db: DbSession,
+) -> Job:
+    """Flip the favorite bit. Idempotent on either branch — the value
+    reflects the *post-toggle* state so the UI can rely on the response
+    instead of double-tracking optimistically."""
+    job = await service.assert_job_owner(db, job_id, user.id, user.role == "admin")
+    job.is_favorite = not job.is_favorite
     await db.commit()
     await db.refresh(job)
     return job

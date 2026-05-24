@@ -5,6 +5,14 @@ import httpProxy from "http-proxy";
 
 const VNC_ROUTE = /^\/vnc\/([a-f0-9]+)(\/.*)?$/;
 
+// Module marketplace iframe routing. Production nginx handles this via a
+// vhost the backend writes at install time; dev runs without nginx so we
+// proxy /m/<slug>/api/* → grokflow-mod-<slug>-be:8000 and /m/<slug>/* →
+// grokflow-mod-<slug>-fe:80 from the vite dev server. Requires this dev
+// container to be on the `grokflow_default` docker network so DNS resolves.
+const MODULE_API_ROUTE = /^\/m\/([a-z][a-z0-9_]*)\/api(\/.*)?$/;
+const MODULE_FE_ROUTE  = /^\/m\/([a-z][a-z0-9_]*)(\/.*)?$/;
+
 function vncProxyPlugin(): PluginOption {
   return {
     name: "grokflow-vnc-proxy",
@@ -34,8 +42,40 @@ function vncProxyPlugin(): PluginOption {
   };
 }
 
+function moduleProxyPlugin(): PluginOption {
+  return {
+    name: "grokflow-module-proxy",
+    configureServer(server) {
+      const proxy = httpProxy.createProxyServer({ changeOrigin: true });
+      proxy.on("error", (err, _req, res) => {
+        if (res && "writeHead" in res && !res.headersSent) {
+          (res as import("http").ServerResponse).writeHead(502);
+          (res as import("http").ServerResponse).end(`module proxy error: ${err.message}`);
+        }
+      });
+      server.middlewares.use((req, res, next) => {
+        if (!req.url) return next();
+        // /m/<slug>/api/* → BE — match API path first (longest-prefix wins).
+        const a = req.url.match(MODULE_API_ROUTE);
+        if (a) {
+          req.url = a[2] || "/";
+          proxy.web(req, res, { target: `http://grokflow-mod-${a[1]}-be:8000` });
+          return;
+        }
+        const f = req.url.match(MODULE_FE_ROUTE);
+        if (f) {
+          req.url = f[2] || "/";
+          proxy.web(req, res, { target: `http://grokflow-mod-${f[1]}-fe:80` });
+          return;
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), vncProxyPlugin()],
+  plugins: [react(), vncProxyPlugin(), moduleProxyPlugin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -53,6 +93,11 @@ export default defineConfig({
     // Cap individual chunks at 600 KB; warn instead of error so a one-off
     // big chunk doesn't fail CI.
     chunkSizeWarningLimit: 600,
+    // Source maps temporarily ON để debug "Cannot read properties of
+    // undefined (reading 'name')" crash trong CVP panel. Tăng ~30%
+    // bundle size nhưng error stack hiện đúng file/line gốc thay vì
+    // minified bytes 41507. Tắt lại sau khi fix xong.
+    sourcemap: true,
     rollupOptions: {
       output: {
         // Split heavy libraries off the main app chunk so first-paint pulls

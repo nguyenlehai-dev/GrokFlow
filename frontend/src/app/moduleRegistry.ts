@@ -11,6 +11,7 @@ import { moduleManifest as gateway } from "@/modules/gateway/router";
 import { moduleManifest as servers } from "@/modules/servers/router";
 import { moduleManifest as tool } from "@/modules/tool/router";
 import { moduleManifest as toolDistribution } from "@/modules/tool_distribution/router";
+import { moduleManifest as account } from "@/modules/account/router";
 
 /** The single source of truth for which modules are loaded into the app.
  *
@@ -30,6 +31,7 @@ import { moduleManifest as toolDistribution } from "@/modules/tool_distribution/
  *  see app/router.tsx for the split. */
 export const MODULES: FrontendModule[] = [
   admin,    // Dashboard / ApiKeys / Billing / AuditLog / Settings / Admin tools
+  account,  // Self-service /account (profile + password), no nav entry
   grok,     // Profiles / Jobs / API Docs
   flow,     // Video tools
   gateway,  // LLM Gateway

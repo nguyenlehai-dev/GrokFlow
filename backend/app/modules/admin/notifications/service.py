@@ -114,10 +114,49 @@ async def notify_admins_async(
             )
             count += 1
         # Caller commits.
+        # Bonus: bắn webhook external (Discord/Slack-compat) cho event
+        # critical, để super_admin nhận biết khi offline khỏi web. Đọc
+        # URL từ env ADMIN_ALERT_WEBHOOK_URL — bỏ trống = skip silent.
+        # Chỉ fire cho severity warning/error (info quá noisy cho Discord).
+        if severity in ("warning", "error"):
+            await _send_external_alert(kind, title, body, severity, target_url)
         return count
     except Exception:
         logger.exception("notify_admins failed kind=%s domain_id=%s", kind, domain_id)
         return 0
+
+
+async def _send_external_alert(
+    kind: str, title: str, body: str | None,
+    severity: str, target_url: str | None,
+) -> None:
+    """Fire-and-forget POST tới Discord/Slack webhook (Discord-compat
+    format). Bất cứ lỗi gì (URL sai, network down, rate-limited) đều
+    swallow — alert là supplement, không break notification chính.
+
+    Env vars:
+      ADMIN_ALERT_WEBHOOK_URL — Discord/Slack webhook (Discord JSON)
+      ADMIN_ALERT_USER_MENTION — optional, vd "<@123456789>" để @ ai đó
+    """
+    import os
+    url = os.environ.get("ADMIN_ALERT_WEBHOOK_URL", "").strip()
+    if not url:
+        return
+    mention = os.environ.get("ADMIN_ALERT_USER_MENTION", "")
+    emoji = "⚠️" if severity == "warning" else "🚨"
+    lines = [f"{emoji} **{title}**", f"`kind={kind}`"]
+    if body:
+        lines.append(f"```{body[:1500]}```")
+    if target_url:
+        lines.append(f"→ {target_url}")
+    if mention and severity == "error":
+        lines.insert(0, mention)
+    payload = {"content": "\n".join(lines)}
+    try:
+        from app.core.http_client import get_http
+        await get_http().post(url, json=payload, timeout=5.0)
+    except Exception:  # noqa: BLE001
+        logger.exception("external alert failed kind=%s", kind)
 
 
 def log_notification_sync(

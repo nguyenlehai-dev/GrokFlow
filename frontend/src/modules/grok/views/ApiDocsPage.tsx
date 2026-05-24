@@ -16,7 +16,7 @@ type EndpointGroup = {
 
 type Endpoint = {
   title: string;                    // e.g. "Create Image Job"
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   auth: "jwt" | "apikey" | "any" | "admin";
   summary: string;
@@ -28,7 +28,160 @@ type Endpoint = {
   notes?: string;
 };
 
+// Customer-facing endpoint reference. The full admin/JWT surface lives
+// in the source (see modules/grok/jobs/router.py et al) — partners only
+// ever touch the 5 client endpoints below to go from API key to
+// finished asset, so we don't dump the other 25 on them.
 const GROUPS: EndpointGroup[] = [
+  {
+    title: "1. Verify your key",
+    endpoints: [
+      {
+        title: "Verify",
+        method: "GET",
+        path: "/api/client/verify",
+        auth: "apikey",
+        summary: "Sanity-check API key. Trả 200 + key_prefix khi key OK, 401 khi sai/revoked. Không tốn quota.",
+        curl: `curl https://flowgrok-v2.plxeditor.com/api/client/verify \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: `{
+  "status": "ok",
+  "name": "production-key",
+  "key_prefix": "uxpm_live_xxxxxxxx"
+}`,
+      },
+    ],
+  },
+  {
+    title: "2. Chat (pure HTTP, sync, ~2-4s)",
+    endpoints: [
+      {
+        title: "Chat with Grok",
+        method: "POST",
+        path: "/api/client/chat",
+        auth: "apikey",
+        summary: "Gửi text → nhận reply ngay (sync, không cần poll). Latency 2-4s. Tốt cho chat bot, dịch thuật, tóm tắt, etc.",
+        parameters: [
+          { name: "prompt", type: "string", required: true, description: "Câu hỏi / yêu cầu. Tối đa 16000 ký tự." },
+          { name: "model", type: "string?", description: "vd \"grok-3\". Bỏ trống = default." },
+          { name: "project_id", type: "string?", description: "Scope vào 1 Grok project (rare)." },
+        ],
+        curl: `curl -X POST https://flowgrok-v2.plxeditor.com/api/client/chat \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"prompt":"Viết 1 câu giới thiệu Hà Nội"}'`,
+        response: `{
+  "message": "Hà Nội là thủ đô của Việt Nam, nổi tiếng với lịch sử lâu đời và vẻ đẹp cổ kính.",
+  "conversation_id": "3ae48fea-e2f4-4df8-bf4b-a262c8ff0c7d",
+  "model": "grok-3",
+  "latency_ms": 3762
+}`,
+      },
+    ],
+  },
+  {
+    title: "3. Generate image / video (async, poll status)",
+    endpoints: [
+      {
+        title: "Generate (T2I / I2I / T2V / I2V)",
+        method: "POST",
+        path: "/api/client/generate",
+        auth: "apikey",
+        summary: "Submit job → nhận task_id ngay → poll /tasks/{id}/status cho đến khi success. Image typical 17-26s, video 60-90s.",
+        parameters: [
+          { name: "target", type: "\"image\" | \"video\"", required: true, description: "Loại output." },
+          { name: "prompt", type: "string", required: true, description: "Mô tả nội dung. Tối đa 16000 ký tự." },
+          { name: "ratio", type: "string?", description: "\"1:1\", \"16:9\", \"9:16\", \"4:3\", \"3:4\". Default \"1:1\"." },
+          { name: "count", type: "int?", description: "Số biến thể, 1-10. Default 1." },
+          { name: "quality", type: "string?", description: "\"standard\" / \"high\" / \"low\" hoặc \"720p\"/\"1080p\" (video). Default standard." },
+          { name: "duration", type: "int?", description: "CHỈ video: số giây 5 hoặc 10." },
+          { name: "reference_images", type: "string[]?", description: "URL ảnh tham chiếu (tối đa 4). Có = I2I/I2V, không có = T2I/T2V." },
+        ],
+        request: `# T2I — text → image
+{ "target":"image", "prompt":"a cat in space", "ratio":"1:1" }
+
+# I2I — image → image
+{ "target":"image",
+  "prompt":"đổi áo sang màu đỏ",
+  "reference_images":["https://your-cdn.com/photo.jpg"] }
+
+# T2V — text → video
+{ "target":"video", "prompt":"a butterfly on flower",
+  "ratio":"16:9", "duration":5 }
+
+# I2V — image → video
+{ "target":"video", "prompt":"make it move slowly",
+  "reference_images":["https://your-cdn.com/photo.jpg"],
+  "ratio":"9:16", "duration":5 }`,
+        curl: `curl -X POST https://flowgrok-v2.plxeditor.com/api/client/generate \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"target":"image","prompt":"a cat in space","ratio":"1:1"}'`,
+        response: `{
+  "task_id": "22d8dda7-f31b-4f03-9a16-b3cf04f6a554",
+  "status": "queued",
+  "target": "image"
+}`,
+        notes: "Status code 201 khi đã nhận. Bước tiếp theo: poll /tasks/{task_id}/status mỗi 2-5 giây.",
+      },
+    ],
+  },
+  {
+    title: "4. Poll status & lấy URL kết quả",
+    endpoints: [
+      {
+        title: "Get task status",
+        method: "GET",
+        path: "/api/client/tasks/{task_id}/status",
+        auth: "apikey",
+        summary: "Poll mỗi 2-5s đến khi status=success → đọc image_urls / video_urls. Status=failed → đọc error_message.",
+        parameters: [
+          { name: "task_id", type: "uuid", required: true, description: "Lấy từ response của /generate." },
+        ],
+        curl: `curl https://flowgrok-v2.plxeditor.com/api/client/tasks/<task_id>/status \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: `# Đang chạy
+{ "task_id":"...", "status":"processing_provider",
+  "target":"image", "image_urls":[], "video_urls":[],
+  "result":null, "error_message":null }
+
+# Xong
+{ "task_id":"...", "status":"success", "target":"image",
+  "image_urls":["https://flowgrok-v2.plxeditor.com/api/files/<file_id>"],
+  "video_urls":[], "result":{"image_urls":[...], "video_urls":[]},
+  "error_message":null }
+
+# Fail
+{ "task_id":"...", "status":"failed",
+  "error_message":"Profile cookies expired — admin cần Auto-login lại." }`,
+        notes: "Status flow: queued → processing_provider → success | failed. Image typical 17-26s, video 60-90s. Poll mỗi 2-5s là đủ.",
+      },
+    ],
+  },
+  {
+    title: "5. Download asset",
+    endpoints: [
+      {
+        title: "Download file",
+        method: "GET",
+        path: "/api/files/{file_id}",
+        auth: "apikey",
+        summary: "Tải file binary (image jpeg / video mp4). URL này lấy từ image_urls / video_urls trong response của /tasks/{id}/status. Cần API key trong header — paste URL trực tiếp vào browser sẽ 404.",
+        curl: `curl -o output.jpg \\
+  https://flowgrok-v2.plxeditor.com/api/files/<file_id> \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: "<binary jpeg/mp4>",
+      },
+    ],
+  },
+];
+
+
+// Original full admin/JWT reference kept below (hidden by default —
+// flip _SHOW_ADMIN_DOCS=true to render). Partners don't need any of
+// these calls; they're documented in modules/grok/jobs/router.py.
+const _SHOW_ADMIN_DOCS = false;
+const _LEGACY_GROUPS: EndpointGroup[] = _SHOW_ADMIN_DOCS ? [
   {
     title: "Authentication",
     endpoints: [
@@ -85,7 +238,10 @@ const GROUPS: EndpointGroup[] = [
           { name: "job_type", type: "string", required: true, description: "\"image\" hoặc \"video\"." },
           { name: "prompt", type: "string", required: true, description: "Mô tả bằng tiếng Anh, tối đa 2000 ký tự." },
           { name: "profile_id", type: "uuid | null", description: "Null = auto pick profile ít load nhất. Nếu profile được chỉ định ở chế độ image-only (allows_video=false) mà job_type=video → 422." },
+          { name: "project_id", type: "uuid | null", description: "Pin GrokProject cụ thể trên profile. Null = priority: per-user pin → domain assignment → first project." },
           { name: "model", type: "string", description: "Grok: aurora | grok-2-image | grok-3-image." },
+          { name: "size", type: "string", description: "Pixel size, vd \"1024x1024\". Optional — `options.aspect` được ưu tiên hơn." },
+          { name: "style", type: "string", description: "Style hint cho provider, vd \"cinematic\", \"anime\"." },
           { name: "n", type: "integer", description: "Số variant trả về (1-4). Mặc định 1." },
           { name: "seed", type: "integer | null", description: "Seed cố định nếu cần deterministic." },
           { name: "input_image_file_id", type: "uuid | null", description: "File_id từ /api/jobs/upload-input (image-to-X)." },
@@ -282,13 +438,15 @@ const GROUPS: EndpointGroup[] = [
           { name: "max_concurrent_jobs", type: "integer", description: "1-16. Mỗi tab ~150MB RAM." },
           { name: "max_concurrent_video", type: "integer", description: "1-12. Cap riêng cho video tabs (Playwright). Mặc định 4." },
           { name: "allows_video", type: "boolean", description: "True (mặc định) = nhận cả image + video. False = profile chỉ ảnh, resolver bỏ qua khi pick job video." },
+          { name: "tier", type: "string", description: "free | plus | super_grok | super_grok_heavy. Map plan của Grok account; resolver dùng để filter khi job yêu cầu tier tối thiểu (vd Spicy mode cần super_grok_heavy)." },
         ],
         request: `{
   "name": "menu-types",
   "provider": "grok",
   "max_concurrent_jobs": 3,
   "max_concurrent_video": 4,
-  "allows_video": true
+  "allows_video": true,
+  "tier": "super_grok"
 }`,
         response: "<ProfileOut>",
       },
@@ -349,6 +507,175 @@ const GROUPS: EndpointGroup[] = [
         auth: "admin",
         summary: "Dừng hẳn VNC container (giải phóng ~1.5GB RAM). Cookies giữ trong volume.",
         response: "<ProfileOut> với status=need_login",
+      },
+    ],
+  },
+  {
+    title: "Client API (Partner)",
+    endpoints: [
+      {
+        title: "Verify API Key",
+        method: "GET",
+        path: "/api/client/verify",
+        auth: "apikey",
+        summary: "Ping nhẹ để verify key còn hợp lệ + lấy key_prefix / name. Không burn quota. Match flowgrok.plxeditor.com legacy.",
+        curl: `curl https://flowgrok-v2.plxeditor.com/api/client/verify \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: `{
+  "status": "ok",
+  "name": "production-key",
+  "key_prefix": "uxpm_live_rxWqzFwn"
+}`,
+      },
+      {
+        title: "Chat (Pure HTTP, no browser) ⚡ NEW",
+        method: "POST",
+        path: "/api/client/chat",
+        auth: "apikey",
+        summary: "Text chat với Grok-3, response 2-4s. Hoạt động 100% qua HTTP (không qua browser), dùng curl_cffi giả mạo Chrome TLS fingerprint. Reuse cookies của profile đã logged_in. Trả về message + metadata sync (không async như /generate).",
+        parameters: [
+          { name: "prompt", type: "string", required: true, description: "Câu hỏi / yêu cầu. 1-16000 ký tự." },
+          { name: "model", type: "string | null", description: "vd \"grok-3\", \"grok-2-mini\". Bỏ trống = default." },
+          { name: "profile_id", type: "uuid | null", description: "Pin profile. Bỏ trống = auto-pick logged_in." },
+          { name: "project_id", type: "string | null", description: "Scope conversation vào 1 Grok project." },
+        ],
+        request: `{
+  "prompt": "Viết 3 câu giới thiệu Hà Nội",
+  "model": "grok-3"
+}`,
+        curl: `curl -X POST https://flowgrok-v2.plxeditor.com/api/client/chat \\
+  -H "X-API-Key: uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"prompt":"Viết 3 câu giới thiệu Hà Nội"}'`,
+        response: `{
+  "message": "Hà Nội là thủ đô của Việt Nam, nổi tiếng với lịch sử lâu đời và vẻ đẹp cổ kính. Thành phố này sở hữu nhiều di tích lịch sử như Hồ Hoàn Kiếm, Phố Cổ và Văn Miếu Quốc Tử Giám. Hà Nội có khí hậu bốn mùa rõ rệt, với mùa thu se lạnh.",
+  "conversation_id": "3ae48fea-e2f4-4df8-bf4b-a262c8ff0c7d",
+  "response_id": "e9a0676b-f842-471a-b3c2-56dc764ccbba",
+  "model": "grok-3",
+  "latency_ms": 3762
+}`,
+        notes: "Khác /generate ở chỗ: trả response SYNC (không cần poll). Latency 2-4s với key/profile khỏe. Lỗi: 401 invalid key, 404 không có profile logged_in, 403 Grok session expired (cần re-login).",
+      },
+      {
+        title: "Generate (Image / Video)",
+        method: "POST",
+        path: "/api/client/generate",
+        auth: "apikey",
+        summary: "Endpoint dành cho partner — payload đơn giản (target/prompt/ratio/count/…). Cả image và video gửi cùng URL, phân biệt bằng field `target`. Trả task_id rồi poll status.",
+        parameters: [
+          { name: "target", type: "\"image\" | \"video\"", required: true, description: "Loại task." },
+          { name: "prompt", type: "string", required: true, description: "Mô tả nội dung, 1-16000 ký tự (bumped từ 4000 để hỗ trợ director-style prompts)." },
+          { name: "negative_prompt", type: "string | null", description: "Mô tả những thứ KHÔNG muốn xuất hiện. Có thể bỏ trống." },
+          { name: "count", type: "integer", description: "Số biến thể, 1-10. Mặc định 1." },
+          { name: "ratio", type: "string | null", description: "Tỉ lệ khung hình: \"1:1\", \"16:9\", \"9:16\", \"4:3\", \"3:4\"..." },
+          { name: "quality", type: "string | null", description: "\"standard\" / \"high\" / \"low\" hoặc literal \"480p\" / \"720p\" / \"1080p\" (chỉ video). Mặc định standard (=720p video)." },
+          { name: "reference_images", type: "string[] | null", description: "URL hoặc file_id ảnh tham chiếu, tối đa 4. Có = I2I/I2V, không có = T2I/T2V. Backend tự fetch URL hoặc đọc từ file_id." },
+          { name: "duration", type: "integer | null", description: "Chỉ video — độ dài giây (vd 5, 10)." },
+          { name: "profile_id", type: "uuid | null", description: "Pin profile cụ thể. Null = auto pick." },
+        ],
+        request: `# Tạo ảnh (T2I)
+{
+  "target": "image",
+  "prompt": "a futuristic city at sunset",
+  "negative_prompt": "blurry, watermark",
+  "count": 1,
+  "ratio": "1:1",
+  "quality": "standard"
+}
+
+# Tạo ảnh từ ảnh tham chiếu (I2I)
+{
+  "target": "image",
+  "prompt": "make it watercolor style",
+  "ratio": "1:1",
+  "reference_images": ["https://your.cdn/image.jpg"]
+}
+
+# Tạo video text-to-video (T2V)
+{
+  "target": "video",
+  "prompt": "a whale jumping out of water",
+  "ratio": "16:9",
+  "quality": "high",
+  "duration": 5
+}
+
+# Tạo video từ ảnh (I2V)
+{
+  "target": "video",
+  "prompt": "make it dance",
+  "ratio": "9:16",
+  "quality": "high",
+  "duration": 10,
+  "reference_images": ["https://your.cdn/image.jpg"]
+}`,
+        curl: `curl -X POST https://flowgrok-v2.plxeditor.com/api/client/generate \\
+  -H "Authorization: Bearer uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "target": "image",
+    "prompt": "a cat in space",
+    "ratio": "1:1",
+    "count": 1
+  }'`,
+        response: `{
+  "task_id": "22d8dda7-f31b-4f03-9a16-b3cf04f6a554",
+  "status": "queued",
+  "target": "image"
+}`,
+        notes: "Auth: Authorization: Bearer <uxpm_live_*>. Status code 201 khi job được nhận, 401 nếu thiếu/sai key, 422 nếu pool không có Grok profile logged_in (admin cần Auto-login trước).",
+      },
+      {
+        title: "Poll Task Status",
+        method: "GET",
+        path: "/api/client/tasks/{task_id}/status",
+        auth: "apikey",
+        summary: "Poll trạng thái task. Khi status=success → đọc image_urls/video_urls. Khi status=failed → đọc error_message.",
+        parameters: [
+          { name: "task_id", type: "uuid", required: true, description: "task_id trả về từ /generate." },
+        ],
+        curl: `curl https://flowgrok-v2.plxeditor.com/api/client/tasks/<task_id>/status \\
+  -H "Authorization: Bearer uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"`,
+        response: `# Đang chạy
+{
+  "task_id": "22d8dda7-f31b-4f03-9a16-b3cf04f6a554",
+  "status": "processing_provider",
+  "target": "image",
+  "image_urls": [],
+  "video_urls": [],
+  "result": null,
+  "error_message": null,
+  "created_at": "2026-05-18T16:52:31.846044Z",
+  "completed_at": null
+}
+
+# Thành công
+{
+  "task_id": "...",
+  "status": "success",
+  "target": "video",
+  "image_urls": [],
+  "video_urls": ["https://flowgrok-v2.plxeditor.com/api/files/<id>/download"],
+  "result": {
+    "image_urls": [],
+    "video_urls": ["https://flowgrok-v2.plxeditor.com/api/files/<id>/download"]
+  },
+  "error_message": null,
+  "created_at": "...",
+  "completed_at": "..."
+}
+
+# Thất bại
+{
+  "task_id": "...",
+  "status": "failed",
+  "target": "image",
+  "image_urls": [], "video_urls": [],
+  "result": null,
+  "error_message": "Profile cookies expired — admin cần Auto-login lại.",
+  "completed_at": "..."
+}`,
+        notes: "Status values: queued | running | processing_provider | uploading_result | success | failed | cancelled. Poll mỗi 2-5s. Video có thể mất 2-5 phút. URL kết quả có thể là tuyệt đối (https://...) hoặc tương đối (/api/files/<id>/download — gắn base URL trước khi tải).",
       },
     ],
   },
@@ -531,26 +858,66 @@ file: <binary>`,
     title: "Webhooks",
     endpoints: [
       {
-        title: "Set Webhook URL",
-        method: "PATCH",
-        path: "/api/auth/me/webhook",
+        title: "Get Webhook Config",
+        method: "GET",
+        path: "/api/settings/webhook",
         auth: "jwt",
-        summary: "Set webhook URL nhận event job.success / job.failed / job.cancelled.",
-        parameters: [
-          { name: "webhook_url", type: "string", required: true, description: "HTTPS URL nhận POST." },
-          { name: "webhook_secret", type: "string", required: true, description: "Secret để verify HMAC-SHA256." },
-        ],
-        request: `{
+        summary: "Lấy webhook config hiện tại của user. `has_secret=true` nếu đã có secret được mint.",
+        response: `{
   "webhook_url": "https://your.app/grokflow-callback",
-  "webhook_secret": "your-shared-secret"
+  "has_secret": true,
+  "new_secret": null
 }`,
-        response: "<UserResponse>",
+      },
+      {
+        title: "Set / Rotate Webhook",
+        method: "PUT",
+        path: "/api/settings/webhook",
+        auth: "jwt",
+        summary: "Set webhook URL (server tự mint secret) hoặc rotate secret. Secret CHỈ trả 1 lần duy nhất khi mint/rotate — lưu ngay.",
+        parameters: [
+          { name: "webhook_url", type: "string | null", required: true, description: "HTTPS URL nhận POST event. Pass null để xoá webhook." },
+          { name: "rotate_secret", type: "boolean", description: "true = mint secret mới (cũ vô hiệu). Lần set URL đầu tiên tự mint secret kể cả không pass rotate_secret. Mặc định false." },
+        ],
+        request: `# Lần đầu set URL — server tự mint secret
+{
+  "webhook_url": "https://your.app/grokflow-callback"
+}
+
+# Đổi URL, giữ secret cũ
+{
+  "webhook_url": "https://your.app/new-callback"
+}
+
+# Rotate secret (URL không đổi cũng được)
+{
+  "webhook_url": "https://your.app/grokflow-callback",
+  "rotate_secret": true
+}
+
+# Xoá webhook
+{ "webhook_url": null }`,
+        response: `# Khi mint hoặc rotate — new_secret trả về MỘT LẦN
+{
+  "webhook_url": "https://your.app/grokflow-callback",
+  "has_secret": true,
+  "new_secret": "whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}
+
+# Khi chỉ đổi URL, không rotate
+{
+  "webhook_url": "https://your.app/new-callback",
+  "has_secret": true,
+  "new_secret": null
+}`,
         notes:
-          "Payload: { event, job_id, user_id, status, result_url, error_message, signature }. Verify HMAC-SHA256 với webhook_secret.",
+          "Payload server bắn về URL: { event, job_id, user_id, status, result_url, error_message, signature }. Verify HMAC-SHA256(payload_body, your_secret) === signature. Secret lưu HỆ chỉ 1 lần — đánh mất → phải rotate.",
       },
     ],
   },
-];
+] : [];
+// Reference the legacy var to keep TS happy even though we don't render it.
+void _LEGACY_GROUPS;
 
 const BADGES: Record<Endpoint["auth"], { label: string; cls: string }> = {
   jwt:    { label: "JWT",    cls: "bg-blue-100 text-blue-700" },
@@ -562,6 +929,7 @@ const BADGES: Record<Endpoint["auth"], { label: string; cls: string }> = {
 const METHOD_CLS: Record<Endpoint["method"], string> = {
   GET:    "bg-emerald-500 text-white",
   POST:   "bg-blue-500 text-white",
+  PUT:    "bg-amber-600 text-white",
   PATCH:  "bg-amber-500 text-white",
   DELETE: "bg-rose-500 text-white",
 };
@@ -721,25 +1089,48 @@ export function ApiDocsPage() {
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
-        <h1 className="page-title">{t("grok.apidocs_title")}</h1>
+        <h1 className="page-title">API Reference</h1>
         <p className="text-sm text-slate-500 mt-1">
-          {t("grok.apidocs_subtitle")}
+          5 endpoint partners cần. Pure HTTP, không cần SDK. Tất cả ví dụ là curl chạy được liền.
         </p>
       </div>
 
-      <section className="card space-y-3">
-        <h2 className="font-semibold">{t("grok.apidocs_section_authentication")}</h2>
-        <div className="grid md:grid-cols-2 gap-3 text-sm">
-          <div className="border-l-4 border-blue-400 pl-3">
-            <div className="font-semibold text-blue-700 mb-1">{t("grok.apidocs_auth_jwt_title")}</div>
-            <p className="text-slate-600">{t("grok.apidocs_auth_jwt_desc")}</p>
-            <code className="text-xs">Authorization: Bearer eyJhbGc...</code>
-          </div>
-          <div className="border-l-4 border-purple-400 pl-3">
-            <div className="font-semibold text-purple-700 mb-1">{t("grok.apidocs_auth_apikey_title")}</div>
-            <p className="text-slate-600">{t("grok.apidocs_auth_apikey_desc")}</p>
-            <code className="text-xs">Authorization: Bearer uxpm_live_xxx</code>
-          </div>
+      {/* Quick Start — đọc 30 giây, copy 3 lệnh, có ảnh ngay */}
+      <section className="card space-y-3 border-l-4 border-emerald-500">
+        <h2 className="font-semibold text-emerald-700">🚀 Quick start (3 lệnh, &lt; 30s)</h2>
+        <ol className="text-sm text-slate-700 space-y-3 list-decimal ml-5">
+          <li>
+            <div className="font-medium">Lấy API key từ admin panel → Section "API Keys" → Create new (prefix <code>uxpm_live_</code>).</div>
+          </li>
+          <li>
+            <div className="font-medium mb-1">Submit job:</div>
+            <CodeBlock>{`curl -X POST ${apiBase}/api/client/generate \\
+  -H "X-API-Key: $KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"target":"image","prompt":"a cat in space","ratio":"1:1"}'
+# → {"task_id":"abc-123","status":"queued",...}`}</CodeBlock>
+          </li>
+          <li>
+            <div className="font-medium mb-1">Poll cho đến khi xong (mỗi 3s):</div>
+            <CodeBlock>{`curl ${apiBase}/api/client/tasks/abc-123/status \\
+  -H "X-API-Key: $KEY"
+# → status:"success" + image_urls:["https://.../api/files/<id>"]`}</CodeBlock>
+          </li>
+        </ol>
+        <p className="text-xs text-slate-500 mt-2">
+          Image typical 17-26s · Video 60-90s · Chat sync 2-4s (không cần poll).
+        </p>
+      </section>
+
+      {/* Auth — 1 dòng, không bị block */}
+      <section className="card text-sm">
+        <h2 className="font-semibold text-slate-800 mb-2">🔑 Authentication</h2>
+        <p className="text-slate-600 mb-2">
+          Mọi request cần API key. 2 cách gửi đều work:
+        </p>
+        <div className="grid md:grid-cols-2 gap-3">
+          <code className="text-xs bg-slate-100 px-2 py-1 rounded block">X-API-Key: uxpm_live_xxx</code>
+          <code className="text-xs bg-slate-100 px-2 py-1 rounded block">Authorization: Bearer uxpm_live_xxx</code>
         </div>
       </section>
 
@@ -753,6 +1144,75 @@ export function ApiDocsPage() {
           </div>
         </section>
       ))}
+
+      {/* Code examples — full Python flow customers can copy-paste */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-slate-800">Code examples (full flow)</h2>
+        <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+          <h3 className="text-sm font-semibold text-slate-800">Python (requests)</h3>
+          <CodeBlock>{`import requests, time
+
+KEY  = "uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx"
+BASE = "${apiBase}/api/client"
+H    = {"X-API-Key": KEY, "Content-Type": "application/json"}
+
+# 1. Chat (sync)
+r = requests.post(f"{BASE}/chat", headers=H,
+                  json={"prompt": "Viết 1 câu giới thiệu Hà Nội"})
+print("chat:", r.json()["message"])
+
+# 2. Image — submit + poll
+r = requests.post(f"{BASE}/generate", headers=H, json={
+    "target": "image",
+    "prompt": "a cat in space",
+    "ratio": "1:1",
+})
+task_id = r.json()["task_id"]
+while True:
+    s = requests.get(f"{BASE}/tasks/{task_id}/status", headers=H).json()
+    if s["status"] in ("success", "failed"):
+        break
+    time.sleep(3)
+
+if s["status"] == "success":
+    url = s["image_urls"][0]
+    out = requests.get(url, headers={"X-API-Key": KEY}).content
+    open("output.jpg", "wb").write(out)
+    print(f"saved {len(out)} bytes")
+else:
+    print("error:", s["error_message"])`}</CodeBlock>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+          <h3 className="text-sm font-semibold text-slate-800">Node.js (fetch)</h3>
+          <CodeBlock>{`const KEY  = "uxpm_live_xxxxxxxxxxxxxxxxxxxxxxxxxx";
+const BASE = "${apiBase}/api/client";
+const H    = { "X-API-Key": KEY, "Content-Type": "application/json" };
+
+async function generate(payload) {
+  const r = await fetch(\`\${BASE}/generate\`, {
+    method: "POST", headers: H, body: JSON.stringify(payload)
+  });
+  const { task_id } = await r.json();
+  while (true) {
+    const s = await (await fetch(\`\${BASE}/tasks/\${task_id}/status\`,
+                                 { headers: H })).json();
+    if (s.status === "success") return s.image_urls[0] || s.video_urls[0];
+    if (s.status === "failed")  throw new Error(s.error_message);
+    await new Promise(r => setTimeout(r, 3000));
+  }
+}
+
+// I2I example
+const url = await generate({
+  target: "image",
+  prompt: "đổi áo sang màu đỏ",
+  reference_images: ["https://your-cdn.com/photo.jpg"],
+  ratio: "1:1",
+});
+console.log("done:", url);`}</CodeBlock>
+        </div>
+      </section>
 
       <section className="card space-y-2">
         <h2 className="font-semibold">{t("grok.apidocs_section_error_codes")}</h2>

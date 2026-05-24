@@ -178,6 +178,28 @@ async def create_domain(payload: DomainIn, admin: SuperAdminUser, db: DbSession)
     # Wildcard '*' has no vhost (it's the catch-all DB fallback, not a real host).
     if d.status == "active" and d.hostname != "*":
         nginx_sync.write_vhost(d.hostname)
+
+    # Auto-seed a default "Customer" Role so super_admin có sẵn role để
+    # assign khi cấp khách. Same set of pages migration 0049 seeded cho
+    # domains hiện có — giữ đồng bộ.
+    from app.models import Role as _Role
+    _customer_pages = [
+        "/create-video-pro",
+        "/create-video-pro/text-to-video",
+        "/create-video-pro/image-to-video",
+        "/create-video-pro/character-sync",
+        "/create-video-pro/image-sync",
+        "/create-video-pro/image-direct",
+        "/jobs", "/gallery", "/gallery/images", "/gallery/videos",
+        "/gallery/prompts", "/api-keys", "/api-docs", "/account",
+    ]
+    db.add(_Role(
+        domain_id=d.id,
+        name="Customer",
+        description="Default role cho khách dùng tool desktop / web.",
+        allowed_pages=_customer_pages,
+        status="active",
+    ))
     await audit.log_action(
         db, user_id=admin.id, action="admin_create_domain",
         target_type="domain", target_id=d.id, metadata={"hostname": hostname},

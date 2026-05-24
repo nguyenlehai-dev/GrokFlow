@@ -21,6 +21,7 @@ from .routers import (
     plans,
     stats,
     subscriptions,
+    system_heal,
     users,
 )
 
@@ -32,3 +33,4 @@ router.include_router(plans.router)
 router.include_router(subscriptions.router)
 router.include_router(payments.router)
 router.include_router(invoices.router)
+router.include_router(system_heal.router)

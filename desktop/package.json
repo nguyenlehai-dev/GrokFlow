@@ -1,7 +1,7 @@
 {
   "name": "grokflow-desktop",
   "productName": "GrokFlow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "GrokFlow Desktop — AI tool client.",
   "author": {
     "name": "Nexora Tech",
@@ -34,7 +34,6 @@
     },
     "files": [
       "src/**/*",
-      "build/icon.*",
       "package.json"
     ],
     "win": {
@@ -46,7 +45,6 @@
           ]
         }
       ],
-      "icon": "build/icon.ico",
       "publisherName": "Nexora Tech",
       "signAndEditExecutable": false
     },
@@ -57,8 +55,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "GrokFlow",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
       "deleteAppDataOnUninstall": false,
       "artifactName": "GrokFlow-Setup-${version}.${ext}"
     },

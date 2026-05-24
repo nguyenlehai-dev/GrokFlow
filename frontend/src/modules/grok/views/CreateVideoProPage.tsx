@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
-  Menu, Settings as Cog, ChevronLeft, ChevronRight,
+  Menu, Settings as Cog,
   Type as TypeIcon, Image as ImageIcon, Users, Camera, Aperture, LogIn,
   ArrowLeft, LogOut, Sparkles, Zap,
 } from "lucide-react";
@@ -15,6 +15,7 @@ import { ImageSyncPanel } from "./cvp-panels/ImageSyncPanel";
 import { ImageDirectPanel } from "./cvp-panels/ImageDirectPanel";
 import { AutoLoginPanel } from "./cvp-panels/AutoLoginPanel";
 import { QuotaPill } from "./cvp-panels/QuotaPill";
+import { PanelErrorBoundary } from "./cvp-panels/PanelErrorBoundary";
 
 /** "Create Video Pro" — Tech Studio premium workspace for batch AI
  *  video/image generation. Lives at /create-video-pro (top-level route,
@@ -96,52 +97,43 @@ export function CreateVideoProPage() {
   const ActivePanel = PANELS[activeKey];
 
   return (
-    <div className="min-h-screen cvp-skin">
-      <div className="flex">
-        {sidebarOpen && (
-          <ToolSidebar
-            tools={visibleTools}
-            activeKey={activeKey}
-            onSelect={setActiveKey}
-            onClose={() => setSidebarOpen(false)}
-          />
-        )}
+    // h-screen + overflow-hidden trên outer = "viewport-frame" cố định.
+    // Cả 3 vùng (sidebar, header, content) chia nhau viewport, chỉ
+    // content được phép scroll. Trước đó dùng min-h-screen → cả trang
+    // scroll, sidebar + header trôi theo nội dung khi cuộn xuống.
+    //
+    // CSS var --cvp-main-left expose sidebar width (16rem khi mở, 0 khi
+    // đóng) để PreviewModal có thể "nằm trong main" thay vì che cả app.
+    <div
+      className="h-screen overflow-hidden cvp-skin flex"
+      style={{ "--cvp-main-left": sidebarOpen ? "16rem" : "0px" } as React.CSSProperties}
+    >
+      {sidebarOpen && (
+        <ToolSidebar
+          tools={visibleTools}
+          activeKey={activeKey}
+          onSelect={setActiveKey}
+        />
+      )}
 
-        <div className="flex-1 flex flex-col relative min-w-0">
-          <TopBar
-            onToggleSidebar={() => setSidebarOpen((v) => !v)}
-            sidebarOpen={sidebarOpen}
-          />
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        <TopBar
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          sidebarOpen={sidebarOpen}
+        />
 
-          <div className="flex-1 cvp-panel-border p-4 sm:p-5">
-            {visibleTools.length === 0 ? (
-              <NoPanelsAccess />
-            ) : (
+        <div className="flex-1 cvp-panel-border p-4 sm:p-5 overflow-y-auto">
+          {visibleTools.length === 0 ? (
+            <NoPanelsAccess />
+          ) : (
+            <PanelErrorBoundary key={activeKey} name={activeKey}>
               <ActivePanel />
-            )}
-          </div>
-
-          {/* Floating side arrows for quick tool nav. Hidden on auto-login
-              since it's a management surface, not a flow. */}
-          {activeKey !== "auto_login" && visibleTools.length > 1 && (
-            <>
-              <NavArrow side="left"  onClick={() => navigateTool(visibleTools, activeKey, -1, setActiveKey)} />
-              <NavArrow side="right" onClick={() => navigateTool(visibleTools, activeKey, +1, setActiveKey)} />
-            </>
+            </PanelErrorBoundary>
           )}
         </div>
       </div>
     </div>
   );
-}
-
-function navigateTool(
-  tools: SidebarItem[], current: ToolKey, delta: number, set: (k: ToolKey) => void,
-) {
-  if (tools.length === 0) return;
-  const idx = tools.findIndex((t) => t.key === current);
-  const next = (idx + delta + tools.length) % tools.length;
-  set(tools[next].key);
 }
 
 function NoPanelsAccess() {
@@ -164,12 +156,11 @@ function NoPanelsAccess() {
 // ─── Sidebar ───────────────────────────────────────────────────────────────
 
 function ToolSidebar({
-  tools, activeKey, onSelect, onClose,
+  tools, activeKey, onSelect,
 }: {
   tools: SidebarItem[];
   activeKey: ToolKey;
   onSelect: (k: ToolKey) => void;
-  onClose: () => void;
 }) {
   const grouped = useMemo(() => {
     const groups: Record<string, SidebarItem[]> = {};
@@ -178,7 +169,7 @@ function ToolSidebar({
   }, [tools]);
 
   return (
-    <aside className="w-64 shrink-0 cvp-sidebar px-3 py-4 space-y-4">
+    <aside className="w-64 shrink-0 cvp-sidebar px-3 py-4 space-y-4 h-full overflow-y-auto">
       <header className="flex items-center gap-2 px-2 pb-3 border-b border-white/5">
         <div className="w-8 h-8 rounded-lg grid place-items-center"
              style={{
@@ -195,13 +186,6 @@ function ToolSidebar({
             AI Studio
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="text-slate-500 hover:text-cyan-300 transition-colors p-1"
-          aria-label="Collapse sidebar"
-        >
-          <Menu size={14} />
-        </button>
       </header>
 
       {Object.entries(grouped).map(([groupName, items]) => (
@@ -249,6 +233,7 @@ function TopBar({
 }: { onToggleSidebar: () => void; sidebarOpen: boolean }) {
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
+  const navigate = useNavigate();
   const isToolUser = !!user?.tool_install_id;
   return (
     <header className="cvp-topbar flex items-center justify-between px-4 py-3">
@@ -292,24 +277,28 @@ function TopBar({
         >
           <LogOut size={12} /> Logout
         </button>
-        <button className="text-slate-400 hover:text-cyan-300 transition-colors p-1.5 rounded-md hover:bg-white/5">
+        <button
+          type="button"
+          onClick={() => {
+            // Cố tình dùng useNavigate + fallback window.location vì:
+            // (1) <Link> trước đó "chóp chóp" — navigate firing nhưng
+            //     route guard hoặc Electron sandbox can thiệp.
+            // (2) Nếu React Router fail (vd HashRouter mismatch trong
+            //     Electron file:// load), window.location đảm bảo
+            //     navigation luôn xảy ra.
+            try {
+              navigate("/account");
+            } catch {
+              window.location.href = "/account";
+            }
+          }}
+          className="text-slate-400 hover:text-cyan-300 transition-colors p-1.5 rounded-md hover:bg-white/5"
+          title="Tài khoản — đổi thông tin / mật khẩu"
+        >
           <Cog size={16} />
         </button>
       </div>
     </header>
-  );
-}
-
-function NavArrow({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
-  const Icon = side === "left" ? ChevronLeft : ChevronRight;
-  return (
-    <button
-      onClick={onClick}
-      className={`absolute top-1/2 -translate-y-1/2 ${side === "left" ? "left-4" : "right-4"} z-10 grid place-items-center w-9 h-9 rounded-full bg-slate-900/60 text-slate-300 ring-1 ring-cyan-500/20 backdrop-blur hover:bg-cyan-500/15 hover:text-cyan-200 hover:ring-cyan-400/50 hover:shadow-[0_0_24px_-4px_rgba(6,182,212,0.5)] transition-all`}
-      aria-label={side}
-    >
-      <Icon size={18} />
-    </button>
   );
 }
 

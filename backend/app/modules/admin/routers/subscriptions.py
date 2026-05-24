@@ -52,7 +52,8 @@ async def create_subscription_admin(
     payload: AdminSubscriptionCreate, admin: AdminUser, db: DbSession,
 ) -> AdminSubscriptionOut:
     """Admin creates a subscription directly (e.g. manual gift, comp, migrated user)."""
-    if not await db.get(User, payload.user_id):
+    target_user = await db.get(User, payload.user_id)
+    if not target_user:
         raise NotFound("user")
     await assert_billing_owner_in_admin_domain(db, admin, payload.user_id)
     if not await db.get(Plan, payload.plan_id):
@@ -63,6 +64,10 @@ async def create_subscription_admin(
         amount=payload.amount, currency=payload.currency,
         current_period_start=payload.current_period_start,
         current_period_end=payload.current_period_end,
+        # Denormalise scope từ owning user. Migration 0050 backfill cho
+        # row đã có; new row đi qua đây.
+        domain_id=target_user.domain_id,
+        tool_install_id=target_user.tool_install_id,
     )
     db.add(sub)
     await db.flush()

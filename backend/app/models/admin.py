@@ -205,3 +205,70 @@ class GitRepo(Base, TimestampMixin):
     env_file: Mapped[str | None] = mapped_column(String(255))
     services: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
+class AdminModule(Base, TimestampMixin):
+    """An installed third-party module ("plugin").
+
+    Each row tracks one module installed via /admin/modules: the source
+    git repo, the docker containers we spawned for its FE+BE, the
+    dedicated postgres schema/user we provisioned, the service token it
+    uses to call back into core /api/sdk/*, and a snapshot of its
+    manifest at install time.
+
+    See docs/MODULE-MARKETPLACE.md for the full design.
+    """
+    __tablename__ = "admin_modules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    # Identity
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Source
+    git_url: Mapped[str] = mapped_column(Text, nullable=False)
+    git_ref: Mapped[str] = mapped_column(String(128), nullable=False)
+    git_token_enc: Mapped[str | None] = mapped_column(Text)
+    # Manifest snapshot (menu, permissions, resources, …)
+    manifest: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    # Runtime
+    fe_container_id: Mapped[str | None] = mapped_column(String(128))
+    be_container_id: Mapped[str | None] = mapped_column(String(128))
+    fe_image_tag: Mapped[str | None] = mapped_column(String(256))
+    be_image_tag: Mapped[str | None] = mapped_column(String(256))
+    db_schema: Mapped[str] = mapped_column(String(64), nullable=False)
+    db_user: Mapped[str] = mapped_column(String(64), nullable=False)
+    db_password_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    service_token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    # Lifecycle
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="installing")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    # Per-module settings blob (matches manifest.settings_schema if any).
+    settings: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    # Audit
+    installed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    installed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"),
+    )
+
+
+class TenantModule(Base):
+    """Many-to-many: which tenants (domains) have a module enabled.
+
+    Phase 3 multi-tenant scoping. Without a row in this table for a given
+    domain × module pair, the module's sidebar entry is hidden for users
+    on that domain — super_admin always sees everything regardless.
+    """
+    __tablename__ = "tenant_modules"
+
+    domain_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="CASCADE"), primary_key=True,
+    )
+    module_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("admin_modules.id", ondelete="CASCADE"), primary_key=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )

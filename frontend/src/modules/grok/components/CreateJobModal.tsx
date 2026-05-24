@@ -14,6 +14,7 @@ import { ASPECT_OPTIONS, SIZES_FROM_ASPECT } from "../configs/aspects";
 import type { CreateJobForm } from "./CreateJobForm.types";
 import { CreateJobReferenceImagePicker, type InputImage } from "./CreateJobReferenceImagePicker";
 import { CreateJobImageFields } from "./CreateJobImageFields";
+import { PromptHistoryDropdown, rememberPrompt } from "./PromptHistoryDropdown";
 import {
   CreateJobVideoResolutionAndDuration,
   CreateJobVideoModeField,
@@ -24,10 +25,25 @@ import {
 // JobCreate payload validates, but they're hidden from the UI to match
 // Grok's actual prompt bar.
 
-export function CreateJobModal({ onClose }: { onClose: () => void }) {
+export function CreateJobModal({
+  onClose,
+  cloneFrom,
+}: {
+  onClose: () => void;
+  cloneFrom?: { prompt: string; provider: string; job_type: string };
+}) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [inputImage, setInputImage] = useState<InputImage | null>(null);
+  // Multi-reference picker (up to 4). Single-ref legacy users see no
+  // change — they upload one image, the array is length 1, the submit
+  // path still produces a usable job.
+  const [inputImages, setInputImages] = useState<InputImage[]>([]);
+  // True while ANY reference-image upload is in flight. The Submit
+  // button reads this to refuse firing — without the gate, operators
+  // hit Submit before /api/jobs/upload-input returns, the job row is
+  // created with no file_id attached, and Grok ends up asking the
+  // user for the image they thought they sent (see job 9914a926).
+  const [uploadPending, setUploadPending] = useState(false);
 
   // Entitlements — gate UI options to what the user's plan allows.
   const canImage = useFeature(FEATURE_KEYS.jobImage);
@@ -48,7 +64,10 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
 
   const { register, handleSubmit, watch, control, setValue, formState: { isSubmitting } } = useForm<CreateJobForm>({
     defaultValues: {
-      provider: "grok", job_type: "image", profile_id: "", project_id: "",
+      provider: (cloneFrom?.provider as "grok" | "flow") ?? "grok",
+      job_type: (cloneFrom?.job_type as "image" | "video") ?? "image",
+      prompt: cloneFrom?.prompt ?? "",
+      profile_id: "", project_id: "",
       size: "1024x1024", aspect: "1:1",
       quality: "speed",                  // image-only
       resolution: "720p", duration: 6,   // video-only
@@ -113,6 +132,11 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     }
   }, [aspect, setValue]);
 
+  // Pre-filter: only profiles for the chosen provider. The dropdown
+  // further narrows down to "selectable" ones (status ready, video flag
+  // if needed) — non-selectable profiles are hidden entirely rather
+  // than shown greyed-out, since they're noise to end users who can't
+  // do anything about them anyway.
   const eligibleProfiles = (profiles ?? []).filter((p) => p.provider === provider);
 
   // Preview which profile the backend WOULD pick when "Auto pick" is
@@ -146,6 +170,12 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
   })();
 
   const onSubmit = async (v: CreateJobForm) => {
+    // Hard refuse if a reference upload is still in flight — see the
+    // uploadPending state above for context.
+    if (uploadPending) {
+      toast("Đang upload ảnh tham chiếu — chờ xong rồi submit lại", "info");
+      return;
+    }
     const payload: any = {
       provider: v.provider, job_type: v.job_type, prompt: v.prompt,
       size: v.size, model: v.model, style: v.style, n: Number(v.n),
@@ -168,9 +198,17 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
     if (v.profile_id) payload.profile_id = v.profile_id;
     if (v.project_id) payload.project_id = v.project_id;
     if (v.seed != null && Number(v.seed) > 0) payload.seed = Number(v.seed);
-    if (inputImage) payload.input_image_file_id = inputImage.file_id;
+    if (inputImages.length === 1) {
+      // Stay on the single-ref field so legacy parts of the system
+      // (entitlement checks, status formatters that read input_image_file_id)
+      // keep behaving exactly the same for the common 1-image case.
+      payload.input_image_file_id = inputImages[0].file_id;
+    } else if (inputImages.length > 1) {
+      payload.reference_images = inputImages.map((i) => i.file_id);
+    }
     try {
       await jobsService.create(payload);
+      rememberPrompt(v.prompt, v.job_type);
     } catch (e: any) {
       const msg = e?.response?.data?.detail?.message ?? e?.message ?? t("grok.create_job_error");
       toast(msg, "error");
@@ -253,31 +291,22 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
               render={({ field }) => (
                 <select className="input" {...field}>
                   <option value="">{t("grok.create_job_auto_pick")}</option>
-                  {eligibleProfiles.map((p) => {
-                    const ready = p.status === "logged_in" || p.status === "running_job";
-                    const imageOnlyForVideo =
-                      jobType === "video" && p.allows_video === false;
-                    const selectable = profileSelectable(p);
-                    const slots = `${p.active_jobs}/${p.max_concurrent_jobs}`;
-                    const full = p.active_jobs >= p.max_concurrent_jobs;
-                    // Reason annotation in the option label so the user
-                    // understands why some entries are greyed out. Order
-                    // matters: image-only takes precedence over "full"
-                    // (the latter doesn't help if the profile flat-out
-                    // can't accept this job type).
-                    const note = !ready
-                      ? ` — ${p.status}`
-                      : imageOnlyForVideo
-                        ? ` — ${t("grok.create_job_profile_image_only")}`
-                        : full
-                          ? ` — ${t("grok.create_job_full_will_queue")}`
-                          : "";
-                    return (
-                      <option key={p.id} value={p.id} disabled={!selectable}>
-                        {p.name} [{slots}{note}]
-                      </option>
-                    );
-                  })}
+                  {eligibleProfiles
+                    .filter(profileSelectable)
+                    .map((p) => {
+                      const slots = `${p.active_jobs}/${p.max_concurrent_jobs}`;
+                      const full = p.active_jobs >= p.max_concurrent_jobs;
+                      // Selectable profiles can still be "full" — let the
+                      // user know the job will queue rather than start
+                      // immediately. Other states are hidden by the filter
+                      // above so don't need annotation here.
+                      const note = full ? ` — ${t("grok.create_job_full_will_queue")}` : "";
+                      return (
+                        <option key={p.id} value={p.id}>
+                          {p.name} [{slots}{note}]
+                        </option>
+                      );
+                    })}
                 </select>
               )}
             />
@@ -330,11 +359,17 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div>
-          <label className="text-sm font-medium">{t("grok.create_job_prompt")}</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-sm font-medium">{t("grok.create_job_prompt")}</label>
+            <PromptHistoryDropdown
+              jobType={jobType}
+              onPick={(p) => setValue("prompt", p, { shouldDirty: true })}
+            />
+          </div>
           <textarea
             className="input min-h-[100px]"
             placeholder={t("grok.create_job_prompt_placeholder")}
-            {...register("prompt", { required: true, maxLength: 4000 })}
+            {...register("prompt", { required: true, maxLength: 16000 })}
           />
         </div>
 
@@ -342,8 +377,9 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
           <CreateJobReferenceImagePicker
             jobType={jobType}
             allowed={jobType === "image" ? canImg2Img : canImg2Vid}
-            value={inputImage}
-            onChange={setInputImage}
+            value={inputImages}
+            onChange={setInputImages}
+            onPendingChange={setUploadPending}
           />
         )}
 
@@ -386,8 +422,12 @@ export function CreateJobModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex justify-end gap-2 pt-3 border-t">
           <button type="button" onClick={onClose} className="btn-ghost">{t("grok.create_job_cancel")}</button>
-          <button className="btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? t("grok.create_job_submitting") : t("grok.create_job_submit")}
+          <button className="btn-primary" disabled={isSubmitting || uploadPending}>
+            {uploadPending
+              ? "Đang upload ảnh…"
+              : isSubmitting
+              ? t("grok.create_job_submitting")
+              : t("grok.create_job_submit")}
           </button>
         </div>
       </form>

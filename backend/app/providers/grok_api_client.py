@@ -29,6 +29,7 @@ import asyncio
 import base64
 import json
 import os
+import time
 import uuid
 from typing import Any, Callable
 
@@ -52,6 +53,204 @@ def _httpx_proxy_kwargs() -> dict:
     """
     proxy = os.environ.get("GROK_HTTP_PROXY")
     return {"proxy": proxy} if proxy else {}
+
+
+# ----------------------------------------------------------------------
+# HTTP backend selection — curl_cffi (Chrome TLS impersonation) by
+# default, with httpx as fallback when the lib isn't installed.
+# ----------------------------------------------------------------------
+# Cloudflare on grok.com inspects TLS hello + HTTP/2 frame order, not
+# just headers. Plain httpx looks nothing like a browser at that layer
+# and gets hard 403s for /conversations/new, /upload-file, and the
+# asset CDN even when our extracted cookies are valid. curl_cffi wraps
+# libcurl-impersonate so the connection's wire fingerprint matches a
+# real Chrome 124 build.
+#
+# Env flags:
+#   GROK_HTTP_BACKEND=httpx        force httpx (debug / smoke)
+#   GROK_HTTP_BACKEND=curl_cffi    force curl_cffi (raise if missing)
+#   (default)                      curl_cffi if importable, else httpx
+
+try:
+    from curl_cffi.requests import AsyncSession as _CurlCffiAsyncSession  # type: ignore
+    _HAS_CURL_CFFI = True
+except ImportError:
+    _HAS_CURL_CFFI = False
+    _CurlCffiAsyncSession = None  # type: ignore
+
+_HTTP_BACKEND_PREF = os.environ.get("GROK_HTTP_BACKEND", "").lower()
+
+
+def _use_curl_cffi() -> bool:
+    if _HTTP_BACKEND_PREF == "httpx":
+        return False
+    if _HTTP_BACKEND_PREF == "curl_cffi":
+        if not _HAS_CURL_CFFI:
+            raise RuntimeError(
+                "GROK_HTTP_BACKEND=curl_cffi but curl_cffi not installed"
+            )
+        return True
+    return _HAS_CURL_CFFI
+
+
+_IMPERSONATE = os.environ.get("GROK_CURL_IMPERSONATE", "chrome124")
+
+
+class _StreamCtx:
+    """Common shape returned by both backends for a streamed POST.
+
+    Lets the per-endpoint code stay backend-agnostic: status_code is
+    raised into provider errors before the iterator is consumed.
+    """
+    def __init__(self, status_code: int, text_iter, error_body: bytes | None = None):
+        self.status_code = status_code
+        self.text_iter = text_iter
+        self.error_body = error_body
+
+
+async def _post_stream(
+    url: str, *, headers: dict, cookies: dict, json_body: dict, timeout: float,
+) -> _StreamCtx:
+    """Backend-agnostic streaming POST. Yields chunks as str via .text_iter
+    (decoded from bytes if needed). For non-2xx the body is already in
+    .error_body so callers can format an error message."""
+    if _use_curl_cffi():
+        session = _CurlCffiAsyncSession(impersonate=_IMPERSONATE)  # type: ignore
+        resp = await session.post(
+            url, headers=headers, cookies=cookies, json=json_body,
+            timeout=timeout, stream=True,
+        )
+        if resp.status_code >= 400:
+            body_bytes = await resp.acontent()
+            await session.close()
+            return _StreamCtx(resp.status_code, _empty_aiter(), body_bytes)
+        async def _iter():
+            try:
+                async for chunk in resp.aiter_content():
+                    yield chunk if isinstance(chunk, str) else chunk.decode("utf-8", errors="replace")
+            finally:
+                await session.close()
+        return _StreamCtx(resp.status_code, _iter())
+    # httpx fallback
+    client = httpx.AsyncClient(
+        timeout=timeout, cookies=cookies, follow_redirects=True,
+        **_httpx_proxy_kwargs(),
+    )
+    resp_ctx = client.stream("POST", url, headers=headers, json=json_body)
+    resp = await resp_ctx.__aenter__()
+    if resp.status_code >= 400:
+        body_bytes = await resp.aread()
+        await resp_ctx.__aexit__(None, None, None)
+        await client.aclose()
+        return _StreamCtx(resp.status_code, _empty_aiter(), body_bytes)
+    async def _iter_h():
+        try:
+            async for chunk in resp.aiter_text():
+                yield chunk
+        finally:
+            await resp_ctx.__aexit__(None, None, None)
+            await client.aclose()
+    return _StreamCtx(resp.status_code, _iter_h())
+
+
+async def _empty_aiter():
+    if False:
+        yield ""
+
+
+async def _http_get(
+    url: str, *, headers: dict, cookies: dict, timeout: float,
+) -> tuple[int, bytes, dict]:
+    """Backend-agnostic GET, returns (status, body_bytes, headers).
+    Used for asset (image / video) downloads from the Grok CDN."""
+    if _use_curl_cffi():
+        async with _CurlCffiAsyncSession(impersonate=_IMPERSONATE) as session:  # type: ignore
+            r = await session.get(url, headers=headers, cookies=cookies, timeout=timeout)
+            return r.status_code, r.content, dict(r.headers)
+    async with httpx.AsyncClient(
+        timeout=timeout, cookies=cookies, follow_redirects=True,
+        **_httpx_proxy_kwargs(),
+    ) as client:
+        r = await client.get(url, headers=headers)
+        return r.status_code, r.content, dict(r.headers)
+
+
+async def _http_post_multipart(
+    url: str, *, headers: dict, cookies: dict, files: list, data: dict | None, timeout: float,
+) -> tuple[int, bytes]:
+    """Backend-agnostic multipart POST for upload-file. files is a list of
+    tuples (fieldname, (filename, bytes, content_type)). Returns (status, body)."""
+    if _use_curl_cffi():
+        async with _CurlCffiAsyncSession(impersonate=_IMPERSONATE) as session:  # type: ignore
+            r = await session.post(
+                url, headers=headers, cookies=cookies, files=files, data=data,
+                timeout=timeout,
+            )
+            return r.status_code, r.content
+    async with httpx.AsyncClient(
+        timeout=timeout, cookies=cookies, follow_redirects=True,
+        **_httpx_proxy_kwargs(),
+    ) as client:
+        r = await client.post(url, headers=headers, files=files, data=data)
+        return r.status_code, r.content
+
+
+async def _http_post_json(
+    url: str, *, headers: dict, cookies: dict, json_body: dict, timeout: float,
+) -> tuple[int, bytes]:
+    """Backend-agnostic single-shot JSON POST (no streaming). Returns
+    (status, body). Used for /upload-file where the response is one JSON
+    blob, not an SSE stream."""
+    if _use_curl_cffi():
+        async with _CurlCffiAsyncSession(impersonate=_IMPERSONATE) as session:  # type: ignore
+            r = await session.post(
+                url, headers=headers, cookies=cookies, json=json_body, timeout=timeout,
+            )
+            return r.status_code, r.content
+    async with httpx.AsyncClient(
+        timeout=timeout, cookies=cookies, follow_redirects=True,
+        **_httpx_proxy_kwargs(),
+    ) as client:
+        r = await client.post(url, headers=headers, json=json_body)
+        return r.status_code, r.content
+
+# Pinned body fields for plain text-chat (no image gen), captured from a
+# real /conversations/new request that produced a streamed text reply.
+# Same shape as image but with enableImageGeneration off and
+# imageGenerationCount=0 — Grok then runs the text-completion path
+# instead of the diffusion pipeline.
+_CHAT_BODY: dict[str, Any] = {
+    "temporary": False,
+    "fileAttachments": [],
+    "imageAttachments": [],
+    "disableSearch": False,
+    "enableImageGeneration": False,
+    "returnImageBytes": False,
+    "returnRawGrokInXaiRequest": False,
+    "enableImageStreaming": False,
+    "imageGenerationCount": 0,
+    "forceConcise": False,
+    "enableSideBySide": True,
+    "sendFinalMetadata": True,
+    "disableTextFollowUps": False,
+    "responseMetadata": {},
+    "disableMemory": False,
+    "forceSideBySide": False,
+    "isAsyncChat": False,
+    "disableSelfHarmShortCircuit": False,
+    "collectionIds": [],
+    "disabledConnectorIds": [],
+    "deviceEnvInfo": {
+        "darkModeEnabled": False,
+        "devicePixelRatio": 1,
+        "screenWidth": 1920,
+        "screenHeight": 1080,
+        "viewportWidth": 1920,
+        "viewportHeight": 533,
+    },
+    "modeId": "fast",
+}
+
 
 # Pinned body fields for IMAGE jobs, from a verified working request.
 _IMAGE_BODY: dict[str, Any] = {
@@ -182,6 +381,214 @@ class GrokAPIClient:
             h["x-statsig-id"] = self.x_statsig_id
         return h
 
+    async def chat(
+        self,
+        prompt: str,
+        project_id: str | None = None,
+        model: str | None = None,
+        log: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """Plain text chat against /conversations/new — no image / no
+        upload — and return the streamed message reassembled.
+
+        Captures the streaming pattern observed in the wild:
+          - one or more `{result.response.token: "<chunk>"}` events
+            with `messageTag = "final"` carry the user-visible text
+          - the closing `{result.response.modelResponse: {...}}` event
+            carries the full assembled message + metadata
+          - `{result.response.isSoftStop: true}` is the soft EOF
+
+        Returns: {message, conversation_id, response_id, model, latency_ms}.
+        """
+        body = dict(_CHAT_BODY)
+        body["message"] = prompt
+        body["workspaceIds"] = [project_id] if project_id else []
+        if model:
+            # Grok also accepts a top-level "modelOverride"; this is
+            # passed through verbatim so callers can request grok-3,
+            # grok-2-mini, etc., when the profile has access.
+            body["modelOverride"] = model
+        referer_path = f"/project/{project_id}" if project_id else "/"
+
+        def _emit(msg: str) -> None:
+            if log:
+                log(msg)
+
+        t0 = time.monotonic()
+        chunks: list[str] = []
+        conversation_id: str | None = None
+        response_id: str | None = None
+        model_used: str | None = None
+        final_message: str | None = None
+        soft_stopped = False
+
+        ctx = await _post_stream(
+            GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+            headers=self._headers(referer_path),
+            cookies=self.cookies,
+            json_body=body,
+            timeout=self.timeout,
+        )
+        if ctx.status_code == 401:
+            raise GrokAPIError("cookie_expired", "401 from /conversations/new — session cookie invalid")
+        if ctx.status_code == 403:
+            raise GrokAPIError("provider_blocked", "403 — Cloudflare or statsig challenge", retryable=True)
+        if ctx.status_code == 429:
+            raise GrokAPIError("rate_limited", "429 — Grok rate limit", retryable=True)
+        if ctx.status_code >= 400:
+            raise GrokAPIError(
+                "unknown_error",
+                f"{ctx.status_code}: {(ctx.error_body or b'')[:200].decode('utf-8', errors='replace')!r}",
+            )
+
+        buf = ""
+        async for chunk in ctx.text_iter:
+            buf += chunk
+            last_end = 0
+            for obj_text, end in _iter_complete_json(buf):
+                last_end = end
+                try:
+                    evt = json.loads(obj_text)
+                except json.JSONDecodeError:
+                    continue
+                result = evt.get("result") or {}
+                conv = result.get("conversation") or {}
+                if conv.get("conversationId") and not conversation_id:
+                    conversation_id = conv["conversationId"]
+                response = result.get("response") or {}
+                if not response_id and response.get("responseId"):
+                    response_id = response["responseId"]
+                if (
+                    response.get("token")
+                    and response.get("messageTag") == "final"
+                    and not response.get("isThinking")
+                ):
+                    chunks.append(response["token"])
+                mr = response.get("modelResponse") or {}
+                if mr.get("message"):
+                    final_message = mr["message"]
+                    model_used = mr.get("model") or model_used
+                if response.get("isSoftStop"):
+                    soft_stopped = True
+            if last_end:
+                buf = buf[last_end:]
+            if soft_stopped and final_message:
+                break
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        message = final_message or "".join(chunks)
+        _emit(f"chat done: {len(message)} chars in {latency_ms}ms")
+        return {
+            "message": message,
+            "conversation_id": conversation_id,
+            "response_id": response_id,
+            "model": model_used or model or "grok-3",
+            "latency_ms": latency_ms,
+        }
+
+    async def chat_stream(
+        self,
+        prompt: str,
+        project_id: str | None = None,
+        model: str | None = None,
+    ):
+        """Streaming variant of chat() — yields dicts as events arrive.
+
+        Each yielded event is one of:
+          { "type": "token", "text": "<chunk>" }                — partial text
+          { "type": "meta",  "conversation_id": "...", "response_id": "..." }
+          { "type": "done",  "message": "<full>", "model": "...",
+            "latency_ms": <int> }
+
+        Caller decides how to encode them on the wire (SSE / NDJSON / WS).
+        Raises GrokAPIError on 4xx/5xx the same way chat() does.
+        """
+        body = dict(_CHAT_BODY)
+        body["message"] = prompt
+        body["workspaceIds"] = [project_id] if project_id else []
+        if model:
+            body["modelOverride"] = model
+        referer_path = f"/project/{project_id}" if project_id else "/"
+
+        t0 = time.monotonic()
+        chunks: list[str] = []
+        conversation_id: str | None = None
+        response_id: str | None = None
+        model_used: str | None = None
+        final_message: str | None = None
+        soft_stopped = False
+        meta_emitted = False
+
+        ctx = await _post_stream(
+            GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+            headers=self._headers(referer_path),
+            cookies=self.cookies,
+            json_body=body,
+            timeout=self.timeout,
+        )
+        if ctx.status_code == 401:
+            raise GrokAPIError("cookie_expired", "401 from /conversations/new — session cookie invalid")
+        if ctx.status_code == 403:
+            raise GrokAPIError("provider_blocked", "403 — Cloudflare or statsig challenge", retryable=True)
+        if ctx.status_code == 429:
+            raise GrokAPIError("rate_limited", "429 — Grok rate limit", retryable=True)
+        if ctx.status_code >= 400:
+            raise GrokAPIError(
+                "unknown_error",
+                f"{ctx.status_code}: {(ctx.error_body or b'')[:200].decode('utf-8', errors='replace')!r}",
+            )
+
+        buf = ""
+        async for chunk in ctx.text_iter:
+            buf += chunk
+            last_end = 0
+            for obj_text, end in _iter_complete_json(buf):
+                last_end = end
+                try:
+                    evt = json.loads(obj_text)
+                except json.JSONDecodeError:
+                    continue
+                result = evt.get("result") or {}
+                conv = result.get("conversation") or {}
+                if conv.get("conversationId") and not conversation_id:
+                    conversation_id = conv["conversationId"]
+                response = result.get("response") or {}
+                if not response_id and response.get("responseId"):
+                    response_id = response["responseId"]
+                # Emit the meta event once both IDs are known so the
+                # client can persist them before token streaming starts.
+                if (not meta_emitted) and conversation_id and response_id:
+                    meta_emitted = True
+                    yield {"type": "meta", "conversation_id": conversation_id, "response_id": response_id}
+                if (
+                    response.get("token")
+                    and response.get("messageTag") == "final"
+                    and not response.get("isThinking")
+                ):
+                    tok = response["token"]
+                    chunks.append(tok)
+                    yield {"type": "token", "text": tok}
+                mr = response.get("modelResponse") or {}
+                if mr.get("message"):
+                    final_message = mr["message"]
+                    model_used = mr.get("model") or model_used
+                if response.get("isSoftStop"):
+                    soft_stopped = True
+            if last_end:
+                buf = buf[last_end:]
+            if soft_stopped and final_message:
+                break
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        yield {
+            "type": "done",
+            "message": final_message or "".join(chunks),
+            "conversation_id": conversation_id,
+            "response_id": response_id,
+            "model": model_used or model or "grok-3",
+            "latency_ms": latency_ms,
+        }
+
     async def imagine(
         self,
         prompt: str,
@@ -263,38 +670,33 @@ class GrokAPIClient:
         )
 
         results: list[dict[str, Any]] = []
-        async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
-            **_httpx_proxy_kwargs(),
-        ) as client:
-            for url in urls:
-                full = f"{ASSETS_BASE}/{url.lstrip('/')}"
-                try:
-                    r = await client.get(
-                        full,
-                        headers={
-                            "user-agent": self.user_agent,
-                            "referer": f"{GROK_BASE}/",
-                        },
-                    )
-                except httpx.HTTPError:
-                    continue
-                if r.status_code != 200:
-                    continue
-                # imageUrl format: users/<uid>/generated/<image_uuid>/image.jpg
-                # Pull the UUID segment out — Grok uses it for parentPostId
-                # in the subsequent video gen.
-                parts = url.split("/")
-                image_uuid = ""
-                if "generated" in parts:
-                    idx = parts.index("generated")
-                    if idx + 1 < len(parts):
-                        image_uuid = parts[idx + 1]
-                results.append({
-                    "bytes": r.content,
-                    "image_url": url,
-                    "image_uuid": image_uuid,
-                })
+        for url in urls:
+            full = f"{ASSETS_BASE}/{url.lstrip('/')}"
+            try:
+                status, content, _hdrs = await _http_get(
+                    full,
+                    headers={
+                        "user-agent": self.user_agent,
+                        "referer": f"{GROK_BASE}/",
+                    },
+                    cookies=self.cookies,
+                    timeout=self.timeout,
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            if status != 200:
+                continue
+            parts = url.split("/")
+            image_uuid = ""
+            if "generated" in parts:
+                idx = parts.index("generated")
+                if idx + 1 < len(parts):
+                    image_uuid = parts[idx + 1]
+            results.append({
+                "bytes": content,
+                "image_url": url,
+                "image_uuid": image_uuid,
+            })
         if not results:
             raise GrokAPIError(
                 "unknown_error", "all imagine assets failed to download",
@@ -332,55 +734,67 @@ class GrokAPIClient:
             "fileSource": "IMAGINE_SELF_UPLOAD_FILE_SOURCE",
             "content": encoded,
         }
-        async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
-            **_httpx_proxy_kwargs(),
-        ) as client:
-            try:
-                resp = await client.post(
-                    GROK_BASE + ENDPOINT_UPLOAD_FILE,
-                    headers=self._headers("/imagine"),
-                    json=body,
+        try:
+            status, body_bytes = await _http_post_json(
+                GROK_BASE + ENDPOINT_UPLOAD_FILE,
+                headers=self._headers("/imagine"),
+                cookies=self.cookies,
+                json_body=body,
+                timeout=self.timeout,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise GrokAPIError(
+                "network_error", f"upload-file HTTP error: {exc}", retryable=True
+            ) from exc
+
+        class _Resp:
+            def __init__(self, s, b):
+                self.status_code = s
+                self._b = b
+            @property
+            def content(self):
+                return self._b
+            @property
+            def text(self):
+                return self._b.decode("utf-8", errors="replace") if self._b else ""
+            def json(self):
+                return json.loads(self._b)
+        resp = _Resp(status, body_bytes)
+        if resp.status_code == 401:
+            raise GrokAPIError("cookie_expired", "401 from upload-file")
+        if resp.status_code == 403:
+            raise GrokAPIError(
+                "provider_blocked", "403 from upload-file", retryable=True
+            )
+        if resp.status_code >= 400:
+            # Grok content moderation rejects ảnh nhạy cảm BEFORE the
+            # prompt runs. Surface it as a terminal error so the user
+            # gets the "đổi ảnh khác" message in the UI instead of
+            # silently retrying for 30 minutes.
+            body = resp.text or ""
+            if "content-moderated" in body.lower() or "content is moderated" in body.lower():
+                raise GrokAPIError(
+                    "content_moderated",
+                    "Ảnh upload vi phạm Grok content policy — đổi ảnh khác.",
                 )
-            except httpx.HTTPError as exc:
-                raise GrokAPIError(
-                    "network_error", f"upload-file HTTP error: {exc}", retryable=True
-                ) from exc
-            if resp.status_code == 401:
-                raise GrokAPIError("cookie_expired", "401 from upload-file")
-            if resp.status_code == 403:
-                raise GrokAPIError(
-                    "provider_blocked", "403 from upload-file", retryable=True
-                )
-            if resp.status_code >= 400:
-                # Grok content moderation rejects ảnh nhạy cảm BEFORE the
-                # prompt runs. Surface it as a terminal error so the user
-                # gets the "đổi ảnh khác" message in the UI instead of
-                # silently retrying for 30 minutes.
-                body = resp.text or ""
-                if "content-moderated" in body.lower() or "content is moderated" in body.lower():
-                    raise GrokAPIError(
-                        "content_moderated",
-                        "Ảnh upload vi phạm Grok content policy — đổi ảnh khác.",
-                    )
-                raise GrokAPIError(
-                    "unknown_error",
-                    f"upload-file {resp.status_code}: {resp.text[:200]!r}",
-                )
-            try:
-                data = resp.json()
-            except json.JSONDecodeError as exc:
-                raise GrokAPIError(
-                    "unknown_error", f"upload-file bad JSON: {exc}"
-                ) from exc
-            if not data.get("fileMetadataId") or not data.get("fileUri"):
-                raise GrokAPIError(
-                    "unknown_error",
-                    f"upload-file missing ids: {data!r}",
-                )
-            if log:
-                log(f"uploaded {filename} → {data['fileMetadataId']}")
-            return data
+            raise GrokAPIError(
+                "unknown_error",
+                f"upload-file {resp.status_code}: {resp.text[:200]!r}",
+            )
+        try:
+            data = resp.json()
+        except json.JSONDecodeError as exc:
+            raise GrokAPIError(
+                "unknown_error", f"upload-file bad JSON: {exc}"
+            ) from exc
+        if not data.get("fileMetadataId") or not data.get("fileUri"):
+            raise GrokAPIError(
+                "unknown_error",
+                f"upload-file missing ids: {data!r}",
+            )
+        if log:
+            log(f"uploaded {filename} → {data['fileMetadataId']}")
+        return data
 
     async def videoize(
         self,
@@ -506,79 +920,77 @@ class GrokAPIClient:
         urls: list[str] = []
         soft_stopped = False
 
-        async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
-            **_httpx_proxy_kwargs(),
-        ) as client:
-            try:
-                async with client.stream(
-                    "POST",
-                    GROK_BASE + ENDPOINT_NEW_CONVERSATION,
-                    headers=self._headers(referer_path),
-                    json=body,
-                ) as resp:
-                    if resp.status_code == 401:
-                        raise GrokAPIError(
-                            "cookie_expired",
-                            "401 from /conversations/new — session cookie invalid",
-                        )
-                    if resp.status_code == 403:
-                        raise GrokAPIError(
-                            "provider_blocked",
-                            "403 — Cloudflare or statsig challenge",
-                            retryable=True,
-                        )
-                    if resp.status_code == 429:
-                        raise GrokAPIError(
-                            "rate_limited", "429 — Grok rate limit", retryable=True
-                        )
-                    if resp.status_code >= 400:
-                        snippet = (await resp.aread())[:200]
-                        snippet_text = snippet.decode("utf-8", errors="replace")
-                        if "invalid-parent-post" in snippet_text:
-                            raise GrokAPIError(
-                                "rate_limited",
-                                "Grok video quota exhausted on this profile "
-                                "— switch to another profile in the pool",
-                                retryable=True,
-                            )
-                        raise GrokAPIError(
-                            "unknown_error", f"{resp.status_code}: {snippet!r}"
-                        )
+        try:
+            ctx = await _post_stream(
+                GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+                headers=self._headers(referer_path),
+                cookies=self.cookies,
+                json_body=body,
+                timeout=self.timeout,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise GrokAPIError(
+                "network_error", f"HTTP error: {exc}", retryable=True
+            ) from exc
 
-                    buf = ""
-                    async for chunk in resp.aiter_text():
-                        buf += chunk
-                        last_end = 0
-                        for obj_text, end in _iter_complete_json(buf):
-                            last_end = end
-                            try:
-                                evt = json.loads(obj_text)
-                            except json.JSONDecodeError:
-                                continue
-                            url = extract_asset(evt)
-                            if url and url not in urls:
-                                urls.append(url)
-                                _emit(f"{asset_label} done: {url}")
-                            response = (evt.get("result") or {}).get("response") or {}
-                            if response.get("isSoftStop"):
-                                soft_stopped = True
-                        if last_end:
-                            buf = buf[last_end:]
-                        if soft_stopped and urls:
-                            break
-            except httpx.HTTPError as exc:
+        if ctx.status_code == 401:
+            raise GrokAPIError(
+                "cookie_expired",
+                "401 from /conversations/new — session cookie invalid",
+            )
+        if ctx.status_code == 403:
+            raise GrokAPIError(
+                "provider_blocked",
+                "403 — Cloudflare or statsig challenge",
+                retryable=True,
+            )
+        if ctx.status_code == 429:
+            raise GrokAPIError(
+                "rate_limited", "429 — Grok rate limit", retryable=True
+            )
+        if ctx.status_code >= 400:
+            snippet = (ctx.error_body or b"")[:200]
+            snippet_text = snippet.decode("utf-8", errors="replace")
+            if "invalid-parent-post" in snippet_text:
                 raise GrokAPIError(
-                    "network_error", f"HTTP error: {exc}", retryable=True
-                ) from exc
-
-            if not urls:
-                raise GrokAPIError(
-                    "unknown_error",
-                    f"stream ended without a completed {asset_label}",
+                    "rate_limited",
+                    "Grok video quota exhausted on this profile "
+                    "— switch to another profile in the pool",
                     retryable=True,
                 )
-            return urls
+            raise GrokAPIError(
+                "unknown_error", f"{ctx.status_code}: {snippet!r}"
+            )
+
+        buf = ""
+        async for chunk in ctx.text_iter:
+            buf += chunk
+            last_end = 0
+            for obj_text, end in _iter_complete_json(buf):
+                last_end = end
+                try:
+                    evt = json.loads(obj_text)
+                except json.JSONDecodeError:
+                    continue
+                url = extract_asset(evt)
+                if url and url not in urls:
+                    urls.append(url)
+                    _emit(f"{asset_label} done: {url}")
+                response = (evt.get("result") or {}).get("response") or {}
+                if response.get("isSoftStop"):
+                    soft_stopped = True
+            if last_end:
+                buf = buf[last_end:]
+            if soft_stopped and urls:
+                break
+
+        if not urls:
+            raise GrokAPIError(
+                "unknown_error",
+                f"stream ended without a completed {asset_label}",
+                retryable=True,
+            )
+        return urls
 
     async def _submit_and_collect(
         self,
@@ -598,110 +1010,138 @@ class GrokAPIClient:
         urls: list[str] = []
         soft_stopped = False
 
-        async with httpx.AsyncClient(
-            timeout=self.timeout, cookies=self.cookies, follow_redirects=True,
-            **_httpx_proxy_kwargs(),
-        ) as client:
-            try:
-                async with client.stream(
-                    "POST",
-                    GROK_BASE + ENDPOINT_NEW_CONVERSATION,
-                    headers=self._headers(referer_path),
-                    json=body,
-                ) as resp:
-                    if resp.status_code == 401:
-                        raise GrokAPIError(
-                            "cookie_expired",
-                            "401 from /conversations/new — session cookie invalid",
-                        )
-                    if resp.status_code == 403:
-                        raise GrokAPIError(
-                            "provider_blocked",
-                            "403 — Cloudflare or statsig challenge",
-                            retryable=True,
-                        )
-                    if resp.status_code == 429:
-                        raise GrokAPIError(
-                            "rate_limited", "429 — Grok rate limit", retryable=True
-                        )
-                    if resp.status_code >= 400:
-                        snippet = (await resp.aread())[:200]
-                        snippet_text = snippet.decode("utf-8", errors="replace")
-                        # `invalid-parent-post` is Grok's signal that the
-                        # profile has hit its per-account video quota —
-                        # the upload succeeded but the account can't start
-                        # a new video gen. Surface as rate_limited so the
-                        # ProfilesPage banner directs admin to switch.
-                        if "invalid-parent-post" in snippet_text:
-                            raise GrokAPIError(
-                                "rate_limited",
-                                "Grok video quota exhausted on this profile "
-                                "— switch to another profile in the pool",
-                                retryable=True,
-                            )
-                        raise GrokAPIError(
-                            "unknown_error", f"{resp.status_code}: {snippet!r}"
-                        )
+        try:
+            ctx = await _post_stream(
+                GROK_BASE + ENDPOINT_NEW_CONVERSATION,
+                headers=self._headers(referer_path),
+                cookies=self.cookies,
+                json_body=body,
+                timeout=self.timeout,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise GrokAPIError(
+                "network_error", f"HTTP error: {exc}", retryable=True
+            ) from exc
 
-                    buf = ""
-                    async for chunk in resp.aiter_text():
-                        buf += chunk
-                        last_end = 0
-                        for obj_text, end in _iter_complete_json(buf):
-                            last_end = end
-                            try:
-                                evt = json.loads(obj_text)
-                            except json.JSONDecodeError:
-                                continue
-                            url = extract_asset(evt)
-                            if url and url not in urls:
-                                urls.append(url)
-                                _emit(f"{asset_label} done: {url}")
-                            response = (evt.get("result") or {}).get("response") or {}
-                            if response.get("isSoftStop"):
-                                soft_stopped = True
-                        if last_end:
-                            buf = buf[last_end:]
-                        if soft_stopped and urls:
-                            break
-            except httpx.HTTPError as exc:
+        if ctx.status_code == 401:
+            raise GrokAPIError(
+                "cookie_expired",
+                "401 from /conversations/new — session cookie invalid",
+            )
+        if ctx.status_code == 403:
+            raise GrokAPIError(
+                "provider_blocked",
+                "403 — Cloudflare or statsig challenge",
+                retryable=True,
+            )
+        if ctx.status_code == 429:
+            raise GrokAPIError(
+                "rate_limited", "429 — Grok rate limit", retryable=True
+            )
+        if ctx.status_code >= 400:
+            snippet = (ctx.error_body or b"")[:200]
+            snippet_text = snippet.decode("utf-8", errors="replace")
+            if "invalid-parent-post" in snippet_text:
                 raise GrokAPIError(
-                    "network_error", f"HTTP error: {exc}", retryable=True
-                ) from exc
+                    "rate_limited",
+                    "Grok video quota exhausted on this profile "
+                    "— switch to another profile in the pool",
+                    retryable=True,
+                )
+            raise GrokAPIError(
+                "unknown_error", f"{ctx.status_code}: {snippet!r}"
+            )
 
-            if not urls:
+        buf = ""
+        event_count = 0
+        first_event_keys: list[str] = []
+        last_error_keys: list[str] = []
+        last_response_keys: list[str] = []
+        last_response_message: str = ""
+        async for chunk in ctx.text_iter:
+            buf += chunk
+            last_end = 0
+            for obj_text, end in _iter_complete_json(buf):
+                last_end = end
+                try:
+                    evt = json.loads(obj_text)
+                except json.JSONDecodeError:
+                    continue
+                event_count += 1
+                if event_count == 1:
+                    first_event_keys = list(evt.keys())
+                err = evt.get("error")
+                if err:
+                    last_error_keys = list(err.keys()) if isinstance(err, dict) else ["<non-dict>"]
+                resp_obj = (evt.get("result") or {}).get("response") or {}
+                if resp_obj:
+                    last_response_keys = list(resp_obj.keys())
+                    token = resp_obj.get("token") or ""
+                    if token and len(last_response_message) < 200:
+                        last_response_message += token
+                url = extract_asset(evt)
+                if url and url not in urls:
+                    urls.append(url)
+                    _emit(f"{asset_label} done: {url}")
+                if resp_obj.get("isSoftStop"):
+                    soft_stopped = True
+            if last_end:
+                buf = buf[last_end:]
+            if soft_stopped and urls:
+                break
+
+        if True:  # preserve original indentation depth for the diagnostic block
+         if not urls:
+                # Embed diagnostic context in the error message so we don't
+                # need to add a separate _emit() chain. event_count==0 →
+                # empty stream (CF cut, auth fail). event_count>0 + non-empty
+                # response.token → model returned text instead of image (free
+                # tier, moderation, prompt misunderstood).
+                diag = (
+                    f"events={event_count}"
+                    f" first_keys={first_event_keys}"
+                    f" resp_keys={last_response_keys}"
+                    + (f" err_keys={last_error_keys}" if last_error_keys else "")
+                    + (
+                        f" msg={last_response_message[:120]!r}"
+                        if last_response_message
+                        else ""
+                    )
+                )
                 raise GrokAPIError(
                     "unknown_error",
-                    f"stream ended without a completed {asset_label}",
+                    f"stream ended without a completed {asset_label} | {diag}",
                     retryable=True,
                 )
 
-            # Download each asset. Reusing the same cookie jar lets
-            # assets.grok.com authorize the fetch under the user's session
-            # (the URL contains the user UUID).
-            results: list[bytes] = []
-            for url in urls:
-                full = f"{ASSETS_BASE}/{url.lstrip('/')}"
-                try:
-                    r = await client.get(
-                        full,
-                        headers={
-                            "user-agent": self.user_agent,
-                            "referer": f"{GROK_BASE}/",
-                        },
-                    )
-                except httpx.HTTPError as exc:
-                    _emit(f"asset fetch failed {full}: {exc}")
-                    continue
-                if r.status_code != 200:
-                    _emit(f"asset {full} → HTTP {r.status_code}")
-                    continue
-                results.append(r.content)
-            if not results:
-                raise GrokAPIError(
-                    "unknown_error", "all asset downloads failed", retryable=True
+         # Download each asset. Reusing the same cookie jar lets
+         # assets.grok.com authorize the fetch under the user's session
+         # (the URL contains the user UUID).
+         results: list[bytes] = []
+         for url in urls:
+            full = f"{ASSETS_BASE}/{url.lstrip('/')}"
+            try:
+                status, content, _hdrs = await _http_get(
+                    full,
+                    headers={
+                        "user-agent": self.user_agent,
+                        "referer": f"{GROK_BASE}/",
+                    },
+                    cookies=self.cookies,
+                    timeout=self.timeout,
                 )
-            return results
+            except Exception as exc:  # noqa: BLE001
+                _emit(f"asset fetch failed {full}: {exc}")
+                continue
+            if status != 200:
+                _emit(f"asset {full} → HTTP {status}")
+                continue
+            results.append(content)
+         if not results:
+            raise GrokAPIError(
+                "unknown_error", "all asset downloads failed", retryable=True
+            )
+         return results
 
 
 def _extract_image_url(evt: dict) -> str | None:

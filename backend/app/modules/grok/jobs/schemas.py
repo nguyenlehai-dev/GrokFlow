@@ -26,7 +26,7 @@ STYLE_OPTIONS = ["natural", "vivid", "anime", "photographic"]
 class JobCreate(BaseModel):
     provider: str = Field(pattern="^(grok|flow)$")
     job_type: str = Field(pattern="^(image|video)$")
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=16000)
     profile_id: uuid.UUID | None = None
     # Explicit per-job project override. When set, the auto-pick rules in
     # service._create_job are skipped and this project is used verbatim.
@@ -39,12 +39,21 @@ class JobCreate(BaseModel):
     style: str | None = Field(default=None)
     n: int = Field(default=1, ge=1, le=4, description="Number of variants")
     seed: int | None = Field(default=None)
-    input_image_file_id: uuid.UUID | None = Field(default=None, description="Reference image (image-to-image)")
+    input_image_file_id: uuid.UUID | None = Field(default=None, description="Reference image (image-to-image, single-ref legacy)")
+    reference_images: list[uuid.UUID] | None = Field(
+        default=None, max_length=4,
+        description=(
+            "Up to 4 reference image file_ids for multi-reference jobs (face source, "
+            "outfit source, background, etc.). Worker passes ALL of them to Grok's "
+            "chat upload widget. Coexists with input_image_file_id — both lists are "
+            "merged + de-duped, max 4 retained."
+        ),
+    )
     options: dict[str, Any] | None = None
 
 
 class JobUpdate(BaseModel):
-    prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+    prompt: str | None = Field(default=None, min_length=1, max_length=16000)
     options: dict[str, Any] | None = None
 
 
@@ -63,6 +72,8 @@ class JobOut(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
+    is_favorite: bool = False
+    tags: list[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

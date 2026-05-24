@@ -106,22 +106,39 @@ async def revoke_gateway_key(key_id: uuid.UUID, admin: AdminUser, db: DbSession)
 
 @router.post("/gateway-keys/verify", response_model=s.GatewayKeyVerifyResponse)
 async def verify_gateway_key(
-    payload: s.GatewayKeyVerifyRequest, user: CurrentUser, db: DbSession,
+    payload: s.GatewayKeyVerifyRequest, db: DbSession,
 ) -> s.GatewayKeyVerifyResponse:
-    """Used by the Playground to verify a key before letting the user run.
-    Lookup by prefix, then bcrypt-verify the full key.
+    """Verify a gateway API key — used by Playground + partner sanity
+    checks. Public; no Authorization header required.
+
+    Legacy gateway.plxeditor.com clients post `{"gateway_api_key": "..."}`,
+    v2 clients post `{"key": "..."}` — schema accepts both via
+    effective_key.
+
+    On success: 200 with `{verified: true, label, allowed_functions}`.
+    On failure: 401 with `{"detail": "Invalid gateway API key"}` — same
+    shape as the legacy product so customer code that branches on
+    status code or `detail` string keeps working.
     """
-    prefix = payload.key[:12]
-    rows = (await db.execute(
-        select(GwGatewayKey).where(GwGatewayKey.prefix == prefix, GwGatewayKey.status == "active")
-    )).scalars().all()
-    for k in rows:
-        try:
-            if verify_password(payload.key, k.key_hash):
-                return s.GatewayKeyVerifyResponse(
-                    verified=True, label=k.label,
-                    allowed_functions=k.allowed_functions,
-                )
-        except Exception:  # noqa: BLE001
-            continue
-    return s.GatewayKeyVerifyResponse(verified=False)
+    key_value = payload.effective_key
+    if key_value:
+        prefix = key_value[:12]
+        rows = (await db.execute(
+            select(GwGatewayKey).where(GwGatewayKey.prefix == prefix, GwGatewayKey.status == "active")
+        )).scalars().all()
+        for k in rows:
+            try:
+                if verify_password(key_value, k.key_hash):
+                    return s.GatewayKeyVerifyResponse(
+                        verified=True, label=k.label,
+                        allowed_functions=k.allowed_functions,
+                    )
+            except Exception:  # noqa: BLE001
+                continue
+    # Match legacy: invalid (or empty) keys → 401 with string detail.
+    from fastapi import HTTPException, status as http_status
+    raise HTTPException(
+        status_code=http_status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid gateway API key",
+        headers={"X-Error-Code": "invalid_gateway_key"},
+    )

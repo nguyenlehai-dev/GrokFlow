@@ -1,18 +1,28 @@
 import { Navigate } from "react-router-dom";
-import { Video, FileText, Activity } from "lucide-react";
+import { Video, FileText, Activity, Briefcase } from "lucide-react";
 
 import type { FrontendModule } from "@/app/types";
 import { TOOLS, TOOL_BY_SLUG } from "../configs/tools";
 import { VideoToolPage } from "../views/VideoToolPage";
 import { FlowApiDocsPage } from "../views/FlowApiDocsPage";
 import { FlowRequestsPage } from "../views/FlowRequestsPage";
+import { ApiKeyGuard } from "../components/ApiKeyGuard";
 
 /** Flow video-tools module.
  *
- *  Every tool is rendered by the same `VideoToolPage` driven by `tools.ts`
- *  — adding a new tool is a one-line addition to TOOLS, not a new React
- *  page. Same-origin API by default; override with VITE_MODULE_FLOW_API
- *  when the proxy is hosted out-of-process. */
+ *  Sidebar layout (after the API-key gating):
+ *
+ *    Flow
+ *    └─ Jobs                                 ← only navigable with ≥ 1 API key
+ *       ├─ Cắt video, Ghép video, …          ← the 8 tool pages
+ *       └─ Requests (REQ)
+ *    └─ Flow API Docs                        ← always visible (read-only docs)
+ *
+ *  The Jobs items live in a nested NavGroup so they collapse together;
+ *  Flow API Docs sits next to that group so a new user can read the docs
+ *  before deciding to mint a key. The actual access gate is enforced
+ *  client-side by `ApiKeyGuard` (HTTP equivalent guard is the X-API-Key
+ *  header check on /api/v1/video/*). */
 export const moduleManifest: FrontendModule = {
   name: "flow",
   label: "Quản lý Flow",
@@ -21,9 +31,21 @@ export const moduleManifest: FrontendModule = {
     { path: "flow", element: <Navigate to="/flow/cut" replace /> },
     ...TOOLS.map((t) => ({
       path: `flow/${t.slug}`,
-      element: <VideoToolPage tool={TOOL_BY_SLUG[t.slug]} />,
+      element: (
+        <ApiKeyGuard workspaceLabel={t.shortLabel}>
+          <VideoToolPage tool={TOOL_BY_SLUG[t.slug]} />
+        </ApiKeyGuard>
+      ),
     })),
-    { path: "flow/requests", element: <FlowRequestsPage /> },
+    {
+      path: "flow/requests",
+      element: (
+        <ApiKeyGuard workspaceLabel="Requests">
+          <FlowRequestsPage />
+        </ApiKeyGuard>
+      ),
+    },
+    // Docs page intentionally NOT gated — pre-signup readers should browse.
     { path: "flow/docs", element: <FlowApiDocsPage /> },
   ],
   nav: [
@@ -33,20 +55,25 @@ export const moduleManifest: FrontendModule = {
       label: "Quản lý Flow",
       icon: Video,
       items: [
-        ...TOOLS.map((t) => ({
-          type: "link" as const,
-          to: `/flow/${t.slug}`,
-          label: t.label,
-          icon: t.icon,
-        })),
-        // "Requests" sits between the tool list and Docs as a stable
-        // operator surface: open this tab + filter by status to see every
-        // failed encode at a glance, retry with one click, download output.
         {
-          type: "link" as const,
-          to: "/flow/requests",
-          label: "Requests (REQ)",
-          icon: Activity,
+          type: "group",
+          key: "flow-jobs",
+          label: "Jobs",
+          icon: Briefcase,
+          items: [
+            ...TOOLS.map((t) => ({
+              type: "link" as const,
+              to: `/flow/${t.slug}`,
+              label: t.label,
+              icon: t.icon,
+            })),
+            {
+              type: "link" as const,
+              to: "/flow/requests",
+              label: "Requests (REQ)",
+              icon: Activity,
+            },
+          ],
         },
         {
           type: "link" as const,

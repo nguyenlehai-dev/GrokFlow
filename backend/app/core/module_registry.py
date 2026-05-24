@@ -96,19 +96,23 @@ def _load_modules() -> list[ModuleManifest]:
     from app.modules.admin.roles import manifest as roles
     from app.modules.admin.settings import manifest as settings
     from app.modules.admin.tools import manifest as admin_tools
-    from app.modules.flow import manifest as flow
+    from app.modules.admin_modules import manifest as admin_modules
+    from app.modules.sdk import manifest as sdk
+    from app.modules.flow import manifest as flow, manifest_v1 as flow_v1
     from app.modules.gateway import manifest as gateway
     from app.modules.grok.files import manifest as grok_files
     from app.modules.grok.jobs import manifest as grok_jobs
     from app.modules.grok.profiles import manifest as grok_profiles
     from app.modules.grok.projects import manifest as grok_projects
     from app.modules.landing.billing import manifest as billing
+    from app.modules.landing.client_api import manifest as client_api
     from app.modules.landing.plans_public import manifest as plans_public
     from app.modules.landing.public_try import manifest as public_try
     from app.modules.landing.public_v1 import manifest as public_v1
     from app.modules.servers import manifest as servers
     from app.modules.tool import manifest as tool
     from app.modules.tool_install import manifest as tool_install
+    from app.modules.prompt_history import manifest as prompt_history
 
     # Order is preserved to keep OpenAPI tag ordering stable across deploys.
     return [
@@ -130,9 +134,12 @@ def _load_modules() -> list[ModuleManifest]:
         roles,
         settings,
         admin_tools,
+        admin_modules,
+        sdk,
         git_admin,
         # Other products
         flow,
+        flow_v1,
         gateway,
         # Server management (super_admin)
         servers,
@@ -140,10 +147,13 @@ def _load_modules() -> list[ModuleManifest]:
         tool,
         # Tool installs — desktop client registry under Auth admin
         tool_install,
+        # Per-user prompt history (replaces localStorage)
+        prompt_history,
         # Public / landing
         billing,
         plans_public,
         public_v1,
+        client_api,
         public_try,
     ]
 

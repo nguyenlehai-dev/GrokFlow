@@ -111,6 +111,7 @@ async def _release_slot(db: AsyncSession, profile_id: uuid.UUID,
     profile.active_jobs = max(0, profile.active_jobs - 1)
     if job_type == "video":
         profile.active_video_jobs = max(0, profile.active_video_jobs - 1)
+    prev_profile_status = profile.status
     if profile.active_jobs == 0:
         profile.status = new_status or "logged_in"
     elif new_status and new_status != "logged_in":
@@ -121,6 +122,29 @@ async def _release_slot(db: AsyncSession, profile_id: uuid.UUID,
         # echo back tokens, query params with keys, etc.
         profile.error_message = scrub_secrets(error_message)
     profile.last_used_at = datetime.now(timezone.utc)
+
+    # Alert admins khi profile chuyển sang terminal status cần can thiệp
+    # (need_login / blocked / expired). Bỏ qua khi chỉ chuyển về
+    # logged_in / running_job — đó là healthy transitions.
+    _NOTIFY_PROFILE_STATES = {"need_login", "blocked", "expired", "quota_exhausted"}
+    if (
+        profile.status in _NOTIFY_PROFILE_STATES
+        and profile.status != prev_profile_status
+    ):
+        try:
+            from app.modules.admin.notifications import service as _notif
+            owner = await db.get(User, profile.user_id)
+            await _notif.notify_admins_async(
+                db,
+                domain_id=owner.domain_id if owner else None,
+                kind="profile_needs_attention",
+                title=f"Profile {profile.name} cần xử lý: {profile.status}",
+                body=(profile.error_message or "")[:200],
+                target_url=f"/profiles?id={profile.id}",
+                severity="warning",
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _profile_status_after_error(error_code: str | None) -> str | None:
@@ -274,26 +298,74 @@ async def process_one(db: AsyncSession, job: Job) -> None:
         job.status = "processing_provider"
         await db.commit()
 
-        # Resolve attachments
+        # Resolve attachments. Two sources, both honoured:
+        #   - reference_images: list[uuid]   (multi-ref, max 4)
+        #   - input_image_file_id: uuid      (legacy single-ref)
+        # Both can be sent together; we de-dupe by file_id and keep order
+        # so the operator's first picker slot maps to Grok's first
+        # reference slot. Provider's _attach_files iterates the full
+        # list so all of them end up in the Grok chat upload.
         attachments: list = []
         opts = job.input_payload or {}
+        ref_ids: list[str] = []
+        raw_refs = opts.get("reference_images") or []
+        if isinstance(raw_refs, list):
+            for r in raw_refs:
+                if isinstance(r, str) and r and r not in ref_ids:
+                    ref_ids.append(r)
         input_id = opts.get("input_image_file_id")
-        if input_id:
+        if input_id and input_id not in ref_ids:
+            ref_ids.append(input_id)
+
+        if ref_ids:
+            import httpx
             from app.providers.base import InputAttachment
             from app.modules.grok.files import service as files_service_mod
             from app.models import File as FileModel
-            try:
-                f = await db.get(FileModel, uuid.UUID(input_id))
-                if f and f.user_id == job.user_id:
-                    data = await files_service_mod.read_file_bytes(f)
-                    attachments.append(InputAttachment(
-                        name=f.file_name, mime=f.mime_type or "image/png", bytes=data,
-                    ))
-                    db.add(JobLog(job_id=job.id, level="info",
-                                  message=f"Attached input {f.file_name} ({len(data)} bytes)"))
-            except Exception as exc:  # noqa: BLE001
-                db.add(JobLog(job_id=job.id, level="warning",
-                              message=f"Failed input image: {exc}"))
+            # Cap to 4 — matches the UI picker and stays well under Grok's
+            # observed limit of 8 chat attachments before the upload
+            # widget starts dropping files.
+            for rid in ref_ids[:4]:
+                # URL refs (http/https) — fetch bytes directly. Partners
+                # often pre-host their source images on a CDN and skip
+                # the upload-input round trip; the contract docs both
+                # "uuid file_id" and "https://… URL" for reference_images.
+                if isinstance(rid, str) and rid.startswith(("http://", "https://")):
+                    try:
+                        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cli:
+                            r = await cli.get(rid)
+                            r.raise_for_status()
+                        # Derive a sensible filename from the URL path
+                        # (fallback to "ref.jpg" so Grok's upload UI has
+                        # something to display).
+                        from urllib.parse import urlparse
+                        path = urlparse(rid).path
+                        name = path.rsplit("/", 1)[-1] or "ref.jpg"
+                        if "." not in name:
+                            name += ".jpg"
+                        mime = r.headers.get("content-type", "image/jpeg").split(";")[0]
+                        attachments.append(InputAttachment(
+                            name=name, mime=mime, bytes=r.content,
+                        ))
+                        db.add(JobLog(job_id=job.id, level="info",
+                                      message=f"Attached URL ref {name} ({len(r.content)} bytes from {rid[:60]}…)"))
+                    except Exception as exc:  # noqa: BLE001
+                        db.add(JobLog(job_id=job.id, level="warning",
+                                      message=f"URL ref download failed {rid[:60]}: {type(exc).__name__}: {exc}"))
+                    continue
+                # file_id (UUID) path — original behaviour.
+                try:
+                    f = await db.get(FileModel, uuid.UUID(rid))
+                    if f and f.user_id == job.user_id:
+                        data = await files_service_mod.read_file_bytes(f)
+                        attachments.append(InputAttachment(
+                            name=f.file_name, mime=f.mime_type or "image/png", bytes=data,
+                        ))
+                        db.add(JobLog(job_id=job.id, level="info",
+                                      message=f"Attached input {f.file_name} ({len(data)} bytes)"))
+                except Exception as exc:  # noqa: BLE001
+                    db.add(JobLog(job_id=job.id, level="warning",
+                                  message=f"Failed input image {rid}: {exc}"))
 
         # Hard wall-clock cap on the whole provider run. If anything
         # inside hangs (Chromium freeze, dead CDP, page.evaluate stuck,
@@ -303,12 +375,49 @@ async def process_one(db: AsyncSession, job: Job) -> None:
         # Look up the project slug (if scoped) so the worker hits
         # grok.com/project/<slug> instead of /imagine, keeping each
         # tenant's chat history separated.
+        #
+        # Cross-profile rotation guard: when an earlier retry rotated the
+        # job from profile A → B, `job.project_id` still references A's
+        # GrokProject row, whose `grok_project_id` slug exists only in
+        # A's Grok account. Passing it to B makes Grok's API return
+        # `404 Workspace not found` and forces the slower DOM fallback —
+        # which then often times out. Detect the mismatch and either
+        # pick a project that belongs to the current profile, or fall
+        # back to `None` (worker hits /imagine without a project pin,
+        # which is harmless — just loses per-tenant chat separation
+        # for this one job).
         grok_project_id: str | None = None
         if job.project_id:
             from app.models import GrokProject
             gp = await db.get(GrokProject, job.project_id)
-            if gp:
+            if gp and gp.profile_id == job.profile_id:
                 grok_project_id = gp.grok_project_id
+            elif gp:
+                # Mismatch — find ANY project on the current profile.
+                alt_gp = (await db.execute(
+                    select(GrokProject)
+                    .where(GrokProject.profile_id == job.profile_id)
+                    .limit(1)
+                )).scalar_one_or_none()
+                if alt_gp:
+                    grok_project_id = alt_gp.grok_project_id
+                    db.add(JobLog(
+                        job_id=job.id, level="info",
+                        message=(
+                            f"Project re-mapped after profile rotation: "
+                            f"{gp.grok_project_id[:8]}… (profile {str(gp.profile_id)[:8]}) "
+                            f"→ {alt_gp.grok_project_id[:8]}… (profile {str(job.profile_id)[:8]})"
+                        ),
+                    ))
+                else:
+                    db.add(JobLog(
+                        job_id=job.id, level="info",
+                        message=(
+                            f"Project {gp.grok_project_id[:8]}… doesn't belong to "
+                            f"rotated profile {str(job.profile_id)[:8]} and the "
+                            f"profile has no sibling project — falling back to /imagine"
+                        ),
+                    ))
 
         # Run provider as a task + watchdog that aborts on user cancel.
         provider_task = asyncio.create_task(provider.run(JobInput(
@@ -498,14 +607,68 @@ async def process_one(db: AsyncSession, job: Job) -> None:
                 )
 
     except Exception as exc:  # noqa: BLE001
-        job.status = "failed"
         # Same scrub as the provider-error branch — exception text can
         # contain credentials from connection strings / response bodies.
-        job.error_message = scrub_secrets(
+        err_text = scrub_secrets(
             f"Worker exception: {type(exc).__name__}: {exc}"
         )
-        job.completed_at = datetime.now(timezone.utc)
-        db.add(JobLog(job_id=job.id, level="error", message=job.error_message))
+        job.error_message = err_text
+        db.add(JobLog(job_id=job.id, level="error", message=err_text))
+
+        # Treat uncaught Playwright / Chromium crashes the same way the
+        # provider-error branch treats `tab_crashed`: rotate to a sibling
+        # profile if one's available and retries remain. Without this,
+        # any exception that escapes the provider's try/except — most
+        # commonly TargetClosedError when Chromium dies mid-setup —
+        # marks the job dead on first hit, ignoring max_retry entirely.
+        exc_name = type(exc).__name__
+        retryable_exc = (
+            exc_name in {"TargetClosedError", "Error"}
+            or "Target page, context or browser has been closed" in err_text
+            or "TargetClosedError" in err_text
+            or "browser has been closed" in err_text
+        )
+        if retryable_exc and job.retry_count < job.max_retry:
+            # Try to rotate to a sibling profile — same logic as the
+            # provider error branch, condensed inline.
+            job.retry_count += 1
+            payload = dict(job.input_payload or {})
+            banned = list(payload.get("_banned_profiles") or [])
+            pid_str = str(job.profile_id) if job.profile_id else None
+            alt = None
+            if pid_str:
+                try_skip = list(set(banned + [pid_str]))
+                try:
+                    alt = await jobs_service._resolve_profile_for_job(
+                        db, requested_id=None, user_id=job.user_id,
+                        provider=job.provider,
+                        excluded_profile_ids=try_skip,
+                        domain_id=getattr(job, "domain_id", None),
+                        job_type=job.job_type,
+                    )
+                except Exception:  # noqa: BLE001
+                    alt = None
+            if alt is not None and pid_str:
+                if pid_str not in banned:
+                    banned.append(pid_str)
+                payload["_banned_profiles"] = banned
+                job.input_payload = payload
+                job.profile_id = None
+                job.next_attempt_at = None
+                job.status = "queued"
+                db.add(JobLog(job_id=job.id, level="info",
+                              message=f"Worker-level rotate after {exc_name} ({job.retry_count}/{job.max_retry})"))
+            else:
+                # No alt available — backoff on same profile.
+                delay = BACKOFF_SECONDS[min(job.retry_count - 1, len(BACKOFF_SECONDS) - 1)]
+                job.next_attempt_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+                job.status = "queued"
+                db.add(JobLog(job_id=job.id, level="info",
+                              message=f"Worker-level retry on same after ~{delay}s ({job.retry_count}/{job.max_retry})"))
+        else:
+            # Either non-retryable exception (rare) or out of retries.
+            job.status = "failed"
+            job.completed_at = datetime.now(timezone.utc)
 
     finally:
         if slot_held:
@@ -515,6 +678,29 @@ async def process_one(db: AsyncSession, job: Job) -> None:
 
     if job.status in {"success", "failed", "cancelled"}:
         await _maybe_send_webhook(db, job)
+
+    # Notify domain admins + super_admin on terminal FAILURE so they
+    # can act (re-login profile, refund credit, contact customer).
+    # Skip success/cancelled — too noisy. Skip when retry will fire next
+    # because the user can't fix anything mid-retry; only the final
+    # status='failed' (no more retries) raises an admin alert.
+    if job.status == "failed":
+        try:
+            from app.modules.admin.notifications import service as _notif
+            user = await db.get(User, job.user_id)
+            domain_id = user.domain_id if user else None
+            err = (job.error_message or "")[:120]
+            await _notif.notify_admins_async(
+                db,
+                domain_id=domain_id,
+                kind="job_failed",
+                title=f"Job thất bại — {user.email if user else 'unknown'}",
+                body=f"#{str(job.id)[:8]} ({job.job_type}/{job.provider}): {err}",
+                target_url=f"/jobs?id={job.id}",
+                severity="warning",
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[worker] notify on fail err: {exc}", flush=True)
 
     await db.commit()
 
@@ -640,7 +826,11 @@ async def loop(job_type_filter: str | None = None) -> None:
                         job.status = "running"
                         claimed_id = job.id
             if not claimed_id:
-                await asyncio.sleep(2)
+                # Idle poll: 0.5s shaves up to 1.5s off the time-to-pickup
+                # for fresh jobs vs the previous 2s. At 16 workers × 2 req/s
+                # = 32 req/s steady-state DB load when the queue is empty,
+                # which is negligible compared to a single SELECT...LIMIT 1.
+                await asyncio.sleep(0.5)
                 continue
 
             async def _run(jid: uuid.UUID):

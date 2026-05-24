@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Key, CreditCard, ScrollText, Shield, Settings,
   UserCog, Globe, Wrench, Rocket, Images, Film, MessageSquare,
   Wallet, BadgeDollarSign, LogIn, Sparkles, Workflow, Music,
-  MonitorSmartphone,
+  MonitorSmartphone, Boxes,
 } from "lucide-react";
 
 import { FEATURE_KEYS } from "@/core/entitlements/catalog";
@@ -50,7 +50,9 @@ export const moduleManifest: FrontendModule = {
     { path: "admin/tool-installs", element: lazyPage(() => import("../views/AdminToolInstallsPage"), "AdminToolInstallsPage") },
     { path: "admin/login-templates", element: lazyPage(() => import("../views/AdminLoginTemplatesPage"), "AdminLoginTemplatesPage") },
     { path: "admin/git",       element: lazyPage(() => import("../views/AdminGitPage"), "AdminGitPage") },
-    { path: "admin/legacy",    element: lazyPage(() => import("../views/AdminPage"), "AdminPage") },
+    { path: "admin/modules",         element: lazyPage(() => import("../views/AdminModulesPage"), "AdminModulesPage") },
+    { path: "admin/modules/:slug",   element: lazyPage(() => import("../views/AdminModuleIframePage"), "AdminModuleIframePage") },
+    { path: "admin/legacy",          element: lazyPage(() => import("../views/AdminPage"), "AdminPage") },
   ],
   nav: [
     // Top-level entries (above the auth group)
@@ -147,6 +149,7 @@ export const moduleManifest: FrontendModule = {
       superOnly: true,
       items: [
         { type: "link", to: "/admin/git", label: "Git / Deploy", icon: Rocket, superOnly: true },
+        { type: "link", to: "/admin/modules", label: "Modules", icon: Boxes, superOnly: true },
       ],
     },
   ],

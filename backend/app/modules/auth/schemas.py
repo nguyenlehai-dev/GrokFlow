@@ -1,13 +1,30 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.types import PermissiveEmail
 
 
 class LoginRequest(BaseModel):
+    # Legacy gateway.plxeditor.com clients post {username, password}; v2
+    # uses {email, password}. Accept either — before-mode validator
+    # promotes a stray `username` into the `email` slot so the email
+    # validator still runs on whatever the client supplied.
     email: PermissiveEmail
     password: str
+    # 2FA: optional. Server returns 401 totp_required khi user có
+    # totp_enabled=true mà field này thiếu/sai. FE prompt nhập rồi
+    # POST lại cùng email+password+totp_code. Cũng chấp nhận backup
+    # code 10 ký tự ở field này (server tự phân biệt 6-digit vs
+    # 10-char alphanumeric).
+    totp_code: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_username_alias(cls, data):
+        if isinstance(data, dict) and "email" not in data and "username" in data:
+            return {**data, "email": data["username"]}
+        return data
 
 
 class RegisterRequest(BaseModel):

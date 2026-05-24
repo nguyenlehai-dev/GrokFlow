@@ -21,10 +21,20 @@ Lifecycle:
 import os
 import threading
 import time
+import traceback
 from typing import Any
 
 import docker
 from docker.errors import APIError, NotFound
+
+
+def _trace_destroy(where: str, name: str) -> None:
+    """Tag every VNC container removal with the calling code path.
+    When a VNC vanishes mysteriously this log is the only signal that
+    tells us WHICH branch did it — without the tag, vnc-events just
+    says 'destroy <name>' with no attribution to the Python caller."""
+    caller = "".join(traceback.format_stack(limit=10)[:-1])
+    print(f"[vnc] destroy via {where}: {name}\n{caller}", flush=True)
 
 VNC_IMAGE = os.environ.get("VNC_IMAGE", "grokflow/chrome-vnc:latest")
 NETWORK_NAME = os.environ.get("VNC_NETWORK", "grokflow_default")
@@ -100,6 +110,7 @@ def stop_for_profile(profile_id: str) -> None:
     name = _container_name(profile_id)
     try:
         c = cli.containers.get(name)
+        _trace_destroy("stop_for_profile", name)
         c.stop(timeout=5)
         c.remove(force=True)
     except NotFound:
@@ -137,11 +148,31 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         c = cli.containers.get(name)
         c.reload()
         # Anything that's running, just-created, restarting, or paused is
-        # something the caller should reuse — don't tear it down. Only
-        # "exited" / "dead" / "removing" warrant a fresh spawn.
+        # something the caller should reuse — don't tear it down.
         if c.status in ("running", "created", "restarting", "paused"):
             return _reuse_info(c)
+        # "exited" / "dead": try RESTART before destroy+recreate. The /config
+        # volume holds cookies + cf_clearance — restarting Chromium against
+        # the same volume resumes the logged-in Grok session instead of
+        # forcing the admin to Auto-login again. Only fall through to
+        # remove+create if restart itself fails (image gone, network
+        # removed, kernel oom-killed the container shell etc.).
         try:
+            print(f"[vnc] {name} status={c.status} — restarting in place to preserve session", flush=True)
+            c.restart(timeout=5)
+            # Give Chromium a moment to come back up before reporting reuse.
+            for _ in range(15):
+                c.reload()
+                if c.status == "running":
+                    break
+                time.sleep(1)
+            if c.status == "running":
+                return _reuse_info(c)
+            print(f"[vnc] {name} restart yielded status={c.status} — falling back to recreate", flush=True)
+        except APIError as exc:
+            print(f"[vnc] {name} restart failed: {exc} — falling back to recreate", flush=True)
+        try:
+            _trace_destroy("_start_locked pre-cleanup", name)
             c.remove(force=True)
         except (APIError, NotFound) as exc:
             print(f"[vnc] pre-cleanup remove failed for {name}: {exc}", flush=True)
@@ -165,15 +196,52 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         environment={
             "STARTUP_URL": provider_url,
             "TZ": "Asia/Ho_Chi_Minh",
-            # Propagate the host's GROK_HTTP_PROXY (typically a Cloudflare
-            # WARP SOCKS endpoint set up by deploy/install_warp_proxy.sh)
-            # so chromium inside the VNC container routes its traffic
-            # through it. Empty/unset = direct connection.
+            # Proxy strategy for the spawned VNC's Chromium:
+            #
+            # Default (no env override): the kasmweb base image runs
+            # `warp-svc` via supervisord, baking GROK_HTTP_PROXY=
+            # socks5://127.0.0.1:40000 into the container so Chromium
+            # routes through Cloudflare WARP. In practice WARP exits are
+            # 104.x.x.x/172.x.x.x IPs which Grok now 403-blocks +
+            # bursty connections through warp-svc see
+            # ERR_PROXY_CONNECTION_FAILED in Chromium.
+            #
+            # 2 escape hatches via backend env. DISABLE is checked first
+            # because backend's own entrypoint.sh also auto-exports
+            # GROK_HTTP_PROXY=socks5://… when its WARP daemon comes up
+            # — so if we honored that variable first the disable flag
+            # would never win in practice.
+            #
+            #   GROK_VNC_DISABLE_PROXY=1 — force Chromium direct (no
+            #     proxy). Beats any GROK_HTTP_PROXY value also present
+            #     in the parent env. Best when the VPS IP isn't yet
+            #     Grok-flagged and WARP IPs are blocked.
+            #
+            #   GROK_HTTP_PROXY=<scheme>://… — pass an explicit proxy
+            #     URL (residential / mobile). Only takes effect when
+            #     DISABLE is NOT set.
             **(
-                {"GROK_HTTP_PROXY": os.environ["GROK_HTTP_PROXY"]}
-                if os.environ.get("GROK_HTTP_PROXY")
-                else {}
+                # 'direct://' is Chromium syntax for "no proxy".
+                # /launch-chromium.sh tests `[[ -n "$GROK_HTTP_PROXY" ]]`
+                # so passing "" would fall through to the WARP fallback;
+                # 'direct://' is non-empty so the test passes and
+                # Chromium interprets the flag as bypass.
+                {"GROK_HTTP_PROXY": "direct://"}
+                if os.environ.get("GROK_VNC_DISABLE_PROXY") == "1"
+                else (
+                    {"GROK_HTTP_PROXY": os.environ["GROK_HTTP_PROXY"]}
+                    if os.environ.get("GROK_HTTP_PROXY")
+                    else {}
+                )
             ),
+            # V8 old-space cap for the renderer. 2048 MB lets Grok's React
+            # preview hold a 7-10 MB user upload without OOM-killing the
+            # page mid-job. Old 512 MB cap was crashing every image-to-image
+            # job with >5 MB inputs (TargetClosedError on Page.evaluate
+            # right after setInputFiles). Override via
+            # GROK_VNC_CHROMIUM_HEAP_MB on the backend for larger inputs
+            # or memory-constrained hosts.
+            "CHROMIUM_HEAP_MB": os.environ.get("GROK_VNC_CHROMIUM_HEAP_MB", "2048"),
         },
         volumes={
             host_profile_path: {"bind": "/config", "mode": "rw"},
@@ -200,6 +268,16 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
         devices=["/dev/net/tun:/dev/net/tun:rwm"],
     )
 
+    # Diagnostic: log the env dict actually being handed to docker-py so we
+    # can see whether the WARP-disable / custom-proxy override is winning
+    # the merge. Kept lightweight — only logs the proxy-relevant keys.
+    print(
+        f"[vnc] spawn name={name} env_proxy={run_kwargs['environment'].get('GROK_HTTP_PROXY', '<unset>')} "
+        f"(backend GROK_HTTP_PROXY={os.environ.get('GROK_HTTP_PROXY', '<unset>')}, "
+        f"GROK_VNC_DISABLE_PROXY={os.environ.get('GROK_VNC_DISABLE_PROXY', '<unset>')})",
+        flush=True,
+    )
+
     # 409 on create means a container with that name already exists. With
     # the per-profile lock this should be rare — but pre-cleanup can race
     # with `removing` state. Strategy: re-fetch the container; if it's
@@ -218,6 +296,7 @@ def _start_locked(profile_id: str, profile_path: str, provider_url: str) -> dict
                 print(f"[vnc] 409 on '{name}' — reusing healthy existing container ({existing.status})", flush=True)
                 return _reuse_info(existing)
             print(f"[vnc] 409 on '{name}' (state={existing.status}) — force-removing + retry", flush=True)
+            _trace_destroy("_start_locked 409-handler", name)
             existing.remove(force=True)
         except NotFound:
             print(f"[vnc] 409 on '{name}' but get() says NotFound — retrying", flush=True)
@@ -267,6 +346,7 @@ def stop() -> None:
     cli = _client()
     for c in cli.containers.list(all=True, filters={"name": "grokflow-vnc-"}):
         try:
+            _trace_destroy("stop() global reset", c.name)
             c.stop(timeout=5)
             c.remove(force=True)
         except APIError:
@@ -274,17 +354,32 @@ def stop() -> None:
 
 
 def reap_orphans(known_profile_ids: set[str]) -> list[str]:
-    """Stop/remove any grokflow-vnc-* container whose profile no longer exists.
+    """Stop/remove grokflow-vnc-* containers on THIS env's network whose
+    profile no longer exists in THIS env's DB.
+
+    Critical: only touches containers attached to `NETWORK_NAME` (the env's
+    VNC_NETWORK). Without this filter, the staging backend would see prod's
+    VNC containers and reap them as orphans (their profile_id isn't in
+    staging's DB) and vice-versa — every redeploy of either stack would
+    annihilate the other's live sessions.
 
     Returns the list of orphan container names that were reaped.
     """
     cli = _client()
     reaped: list[str] = []
     for c in cli.containers.list(all=True, filters={"name": "grokflow-vnc-"}):
+        nets = (c.attrs.get("NetworkSettings", {}) or {}).get("Networks") or {}
+        if NETWORK_NAME not in nets:
+            # Belongs to a different env (prod vs staging) — leave it alone.
+            continue
         label_pid = (c.labels or {}).get("grokflow.profile_id")
         if label_pid and label_pid in known_profile_ids:
             continue
-        # No profile_id label or profile_id not in DB → orphan.
+        # No profile_id label or profile_id not in DB → orphan for THIS env.
+        _trace_destroy(
+            f"reap_orphans(label_pid={label_pid!r}, known={len(known_profile_ids)})",
+            c.name,
+        )
         try:
             c.stop(timeout=3)
         except APIError:

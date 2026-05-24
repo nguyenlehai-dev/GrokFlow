@@ -31,7 +31,12 @@ export function PreviewModal({ url, kind, filename, caption, onClose }: PreviewM
 
   return (
     <div
-      className="fixed inset-0 z-[100] grid place-items-center bg-black/85 backdrop-blur-sm p-4"
+      // Modal "contained" trong main column thay vì che cả app. `left`
+      // đọc từ CSS var --cvp-main-left set ở CreateVideoProPage outer:
+      // bằng width sidebar khi sidebar mở (16rem), 0 khi đóng. Fallback
+      // = 0 nếu render ngoài context CVP (modal vẫn full-viewport).
+      className="fixed top-0 right-0 bottom-0 z-[100] grid place-items-center bg-black/85 backdrop-blur-sm p-4"
+      style={{ left: "var(--cvp-main-left, 0px)" }}
       onClick={onClose}
       role="dialog"
       aria-modal="true"

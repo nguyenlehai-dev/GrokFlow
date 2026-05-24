@@ -24,7 +24,7 @@ list is the only place that needs updating to expose it package-wide.
 
 from ._base import Base, JSONType, TimestampMixin, UUIDType, _uuid
 
-from .admin import AuditLog, Domain, DomainQuotaPeriod, GitRepo, Notification, Role
+from .admin import AdminModule, AuditLog, Domain, DomainQuotaPeriod, GitRepo, Notification, Role, TenantModule
 from .auth import ApiKey, User
 from .billing import Invoice, Payment, Plan, Subscription
 from .flow import FlowJob
@@ -56,12 +56,13 @@ from .servers import (
 from .tool import ChatSession, PromptTemplate
 from .tool_distribution import Tool, ToolAsset
 from .tool_install import ToolInstall, ToolInstallQuotaPeriod
+from .prompt_history import PromptHistory
 
 __all__ = [
     # Infrastructure
     "Base", "JSONType", "TimestampMixin", "UUIDType", "_uuid",
     # Admin / tenancy
-    "AuditLog", "Domain", "DomainQuotaPeriod", "GitRepo", "Notification", "Role",
+    "AdminModule", "AuditLog", "Domain", "DomainQuotaPeriod", "GitRepo", "Notification", "Role", "TenantModule",
     # Auth
     "ApiKey", "User",
     # Billing
@@ -81,4 +82,6 @@ __all__ = [
     "Tool", "ToolAsset",
     # Tool installs (desktop client registrations)
     "ToolInstall", "ToolInstallQuotaPeriod",
+    # Per-user prompt history (server-synced)
+    "PromptHistory",
 ]

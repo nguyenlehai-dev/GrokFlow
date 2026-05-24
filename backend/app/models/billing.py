@@ -54,6 +54,15 @@ class Subscription(Base, TimestampMixin):
     plan_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("plans.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    # Denormalised scope từ User cho query nhanh theo reseller. Mutex
+    # logic ở User level (domain XOR tool_install) tự nhiên truyền xuống
+    # đây. SET NULL khi domain/install bị xoá để row sub vẫn đứng được.
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="SET NULL"), index=True,
+    )
+    tool_install_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("tool_installs.id", ondelete="SET NULL"), index=True,
+    )
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
     billing_cycle: Mapped[str] = mapped_column(String(20), nullable=False, default="monthly")
     provider: Mapped[str] = mapped_column(String(50), nullable=False, default="manual")
@@ -114,6 +123,13 @@ class Invoice(Base, TimestampMixin):
     )
     payment_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("payments.id", ondelete="SET NULL")
+    )
+    # Cùng pattern Subscription — denormalised scope cho filter reseller.
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("domains.id", ondelete="SET NULL"), index=True,
+    )
+    tool_install_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("tool_installs.id", ondelete="SET NULL"), index=True,
     )
     invoice_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)

@@ -72,7 +72,7 @@ server {{
 
     # API + docs go to FastAPI. Listed first so they win the longest-prefix
     # match over the catch-all `/` location below.
-    location ~ ^/(api|openapi.json|docs|redoc)(/|$) {{
+    location ~ ^/(api|openapi.json|docs|redoc|f)(/|$) {{
         proxy_pass {BACKEND_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
@@ -129,21 +129,32 @@ server {{
 # Each kasmweb VNC container we spawn is named `grokflow-vnc-<short_id>` where
 # <short_id> is the first 12 hex of the profile's UUID. The vhost /vnc/<short>/
 # location proxies to the container's bridge IP via the nginx `map` defined
-# in `_vnc_map.conf`. We write the map at HTTP context (top-level conf in the
-# vhosts dir — included via /etc/nginx/conf.d/grokflow-vhosts.conf).
+# in `_vnc_map.conf` (file + nginx variable name configurable so prod and
+# staging stacks on the same host don't share map state).
+#
+# Per-env env vars (compose passes these in via .env.<env>):
+#   VNC_NETWORK   docker network to spawn VNC on  (default: grokflow_default)
+#   VNC_MAP_FILE  filename inside VHOSTS_DIR      (default: _vnc_map.conf)
+#   VNC_MAP_VAR   nginx variable name            (default: vnc_upstream)
 #
 # Called by:
 #   - profiles router on start-vnc-session / finish-vnc-session / stop-vnc
 #   - app startup (best-effort sync after a fresh container)
-VNC_MAP_PATH = VHOSTS_DIR / "_vnc_map.conf"
+_VNC_NETWORK = os.environ.get("VNC_NETWORK", "grokflow_default")
+_VNC_MAP_FILE = os.environ.get("VNC_MAP_FILE", "_vnc_map.conf")
+_VNC_MAP_VAR = os.environ.get("VNC_MAP_VAR", "vnc_upstream")
+VNC_MAP_PATH = VHOSTS_DIR / _VNC_MAP_FILE
 
 
 def _collect_vnc_entries() -> list[tuple[str, str]]:
-    """One pass over running VNC containers. Returns [(short_id, ip), ...].
+    """One pass over running VNC containers on THIS env's network.
 
-    Skips containers whose Network metadata is still empty (Docker can
-    return the container in `list()` a heartbeat before NetworkSettings
-    is fully populated, especially right after `docker run`).
+    Returns [(short_id, ip), ...]. Skips containers whose Network metadata
+    is still empty (Docker can return the container in `list()` a heartbeat
+    before NetworkSettings is fully populated, especially right after
+    `docker run`). Containers attached to a different docker network than
+    `VNC_NETWORK` are ignored so prod and staging stacks don't see each
+    other's VNCs (each env writes its own map file).
     """
     import docker
     client = docker.from_env()
@@ -152,26 +163,40 @@ def _collect_vnc_entries() -> list[tuple[str, str]]:
         if not c.name.startswith("grokflow-vnc-"):
             continue
         short = c.name[len("grokflow-vnc-"):]
-        # Prefer the IPv4 from the `grokflow_default` compose network.
-        # Iterating Networks keys in dict order can return a stale
-        # ipam-reserved IP from a previous network the container was
-        # briefly attached to (observed after `docker restart`), and
-        # nginx then proxies to a dead IP → 502.
         nets = c.attrs.get("NetworkSettings", {}).get("Networks") or {}
-        ip = None
-        for preferred in ("grokflow_default",):
-            if preferred in nets and nets[preferred].get("IPAddress"):
-                ip = nets[preferred]["IPAddress"]
-                break
-        if not ip:
-            for net in nets.values():
-                addr = net.get("IPAddress")
-                if addr:
-                    ip = addr
-                    break
+        # Strictly require the env's network — keeps prod and staging maps
+        # isolated. If a container is on the wrong network it's leftover
+        # from a previous config and not addressable via this env's vhost.
+        if _VNC_NETWORK not in nets:
+            continue
+        ip = nets[_VNC_NETWORK].get("IPAddress") or ""
         if short and ip:
             entries.append((short, ip))
     return entries
+
+
+def refresh_vnc_map_until_present(short_id: str, *, timeout_sec: float = 10.0,
+                                  interval_sec: float = 0.5) -> bool:
+    """Refresh the nginx VNC map and **wait** until `short_id` appears in
+    the collected entries (or timeout). Use this from request handlers
+    that have just spawned a VNC container — guarantees the user's iframe
+    won't 502 because the map is one tick behind Docker IPAM.
+
+    Returns True when the entry is present, False if the timeout expires
+    (caller can log a warning but should still let the user retry — the
+    background idle_cleanup loop will pick it up shortly anyway).
+    """
+    import time
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        refresh_vnc_map()
+        entries = dict(_collect_vnc_entries())
+        if short_id in entries:
+            return True
+        time.sleep(interval_sec)
+    # Last-attempt refresh in case the container settled right at the deadline.
+    refresh_vnc_map()
+    return short_id in dict(_collect_vnc_entries())
 
 
 def refresh_vnc_map() -> bool:
@@ -189,24 +214,48 @@ def refresh_vnc_map() -> bool:
     sleeps until either every running container has an IP, or we
     exhaust the budget (then write what we have — the systemd path
     watcher will fire on next call anyway).
+
+    Emits `[vnc-map]` log lines so operators can grep `docker logs
+    grokflow-backend-1 | grep vnc-map` and see actual write/no-op/skip
+    state — without this we silently no-op'd for 2h once (May 2026
+    incident) because the idle-cleanup container was missing the
+    vhost-dir mount.
     """
     if not _is_writable():
+        print(f"[vnc-map] skip: {VNC_MAP_PATH.parent} not writable (mount missing?)", flush=True)
         return False
     try:
         import docker  # imported lazily so unit tests don't need it
         docker.from_env()
-    except Exception:
+    except Exception as exc:
+        print(f"[vnc-map] skip: docker SDK unavailable ({type(exc).__name__})", flush=True)
         return False
 
     import time
     entries: list[tuple[str, str]] = []
     expected_count = -1
-    for attempt in range(6):  # 6 × 250ms = 1.5s total budget
+    # Wider budget (5s) — Docker IPAM can take a few seconds to attach
+    # network metadata when multiple containers spawn back-to-back, and
+    # the `entries == expected_count` break-condition needs to wait that
+    # long or we write an incomplete map (then nginx serves stale entries
+    # until the next refresh).
+    for attempt in range(20):  # 20 × 250ms = 5s total budget
         try:
             import docker as _d
             client = _d.from_env()
             running = client.containers.list(filters={"name": "grokflow-vnc-"})
-            expected_count = sum(1 for c in running if c.name.startswith("grokflow-vnc-"))
+            # Only count containers attached to THIS env's network — without
+            # this filter the count includes the other env's VNCs and never
+            # matches our entries list, so the loop wastes its whole budget
+            # and may write an empty map if our containers' IP isn't ready
+            # yet.
+            expected_count = 0
+            for c in running:
+                if not c.name.startswith("grokflow-vnc-"):
+                    continue
+                nets = (c.attrs.get("NetworkSettings", {}) or {}).get("Networks") or {}
+                if _VNC_NETWORK in nets:
+                    expected_count += 1
             entries = _collect_vnc_entries()
         except Exception:
             entries = []
@@ -219,7 +268,7 @@ def refresh_vnc_map() -> bool:
         "# Auto-generated by GrokFlow backend — do not edit by hand.",
         "# Maps VNC short_id (first 12 hex of profile UUID) -> container IP.",
         "# Refreshed whenever a VNC container is spawned or torn down.",
-        "map $vnc_short $vnc_upstream {",
+        f"map $vnc_short ${_VNC_MAP_VAR} {{",
     ]
     for short, ip in entries:
         lines.append(f"    {short} {ip};")
@@ -235,10 +284,30 @@ def refresh_vnc_map() -> bool:
         except OSError:
             existing = ""
         if existing == text:
-            return True  # no-op success
-        VNC_MAP_PATH.write_text(text, encoding="utf-8")
+            return True  # no-op success (silent — happens 4×/min from the loop)
+
+        # Atomic write via temp-file + rename. The vhost dir is bind-mounted
+        # from the host's /etc/nginx/grokflow-vhosts/ where the placeholder
+        # file is owned by root (created by install_nginx_watcher.sh under
+        # sudo). The backend gunicorn worker runs as uid 10001, so it can't
+        # `open(path, "w")` a root-owned file even though it CAN write into
+        # the dir (drwxrwsr-x with the setgid bit makes gid grokflow). Atomic
+        # rename only needs dir-write, and the resulting file becomes uid
+        # 10001:10001 — subsequent writes go direct-path. Without this fix
+        # we silently EACCES'd for hours on new VNC profiles.
+        import os
+        tmp_path = VNC_MAP_PATH.with_suffix(VNC_MAP_PATH.suffix + ".tmp")
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(tmp_path, VNC_MAP_PATH)
+        short_ids = [s for s, _ in entries]
+        print(
+            f"[vnc-map] wrote {len(entries)} entr"
+            f"{'y' if len(entries) == 1 else 'ies'}: {short_ids}",
+            flush=True,
+        )
         return True
-    except OSError:
+    except OSError as exc:
+        print(f"[vnc-map] write failed: {exc}", flush=True)
         return False
 
 

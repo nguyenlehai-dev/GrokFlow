@@ -20,225 +20,256 @@ type ToolSpec = {
   responseExample: string;
 };
 
-const BASE = "https://flowgrok.vpspanel.io.vn";
+// Use the user's current origin so cURL examples always work — every
+// tenant vhost (plxeditor.com, flowgrok.plxeditor.com, …) routes
+// /api/flow/* to the same backend. The previous hardcoded
+// `flowgrok.vpspanel.io.vn` was a stale domain that no longer resolves,
+// so partners copying cURL from these docs hit `getaddrinfo failed`.
+const BASE =
+  typeof window !== "undefined" ? window.location.origin : "https://your-grokflow-host";
 
 const SPECS: ToolSpec[] = [
   {
     method: "POST",
-    endpoint: "/api/flow/upload",
-    title: "1. Upload Inputs",
-    description:
-      "Step 1 — luôn gọi đầu tiên. Gửi 1+ file đầu vào kèm tool_name, trả về job_id dùng cho bước run.",
+    endpoint: "/api/v1/video/cut",
+    title: "Cut Video",
+    description: "Trim a segment from a video using start and end timestamps.",
     params: [
-      { name: "tool_name", type: "string", required: true, desc: "Slug: cut, merge, extract-audio, …" },
-      { name: "files", type: "file[]", required: true, desc: "Multipart files (1-10 tuỳ tool)." },
+      { name: "video", type: "File", desc: "Video file (optional if video_url/job_id is provided)" },
+      { name: "video_url", type: "String", desc: "Alternatively, a direct video URL (e.g. CDN link)" },
+      { name: "job_id", type: "String", desc: "Alternatively, an existing Job ID" },
+      { name: "start_time", type: "String", desc: "Start time (HH:MM:SS or seconds)" },
+      { name: "end_time", type: "String", desc: "End time (HH:MM:SS or seconds)" },
     ],
-    requestExample: `curl -X POST '${BASE}/api/flow/upload' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'tool_name=cut' \\
-  -F 'files=@input.mp4'`,
+    requestExample: `curl -X POST '${BASE}/api/v1/video/cut' \
+  -H 'X-API-Key: YOUR_API_KEY' \
+  -F 'video=@input.mp4' \
+  -F 'start_time=00:00:10' \
+  -F 'end_time=00:00:30'`,
     responseExample: `{
-  "job_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "input_files": [
-    { "filename": "input.mp4", "object_key": "local:f47a…/input.mp4" }
-  ],
-  "backend": "local"
-}`,
-  },
-  {
-    method: "POST",
-    endpoint: "/api/flow/upload-url",
-    title: "1b. Upload Inputs (URL bypass)",
-    description:
-      "Skip multipart bằng cách đưa URL pre-hosted. Hỗ trợ R2 (r2.dev), plxeditor.com, plenxai.com. Local-mode flow-api sẽ từ chối.",
-    params: [
-      { name: "tool_name", type: "string", required: true, desc: "Slug tool (giống /upload)." },
-      { name: "urls", type: "string[]", required: true, desc: "Danh sách URL cần xử lý." },
-    ],
-    requestExample: `curl -X POST '${BASE}/api/flow/upload-url' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -H 'Content-Type: application/json' \\
-  -d '{"tool_name":"cut","urls":["https://pub-xxx.r2.dev/input/clip.mp4"]}'`,
-    responseExample: `{
-  "job_id": "f47ac10b-…",
-  "input_files": [{ "filename": "clip.mp4", "object_key": "input/clip.mp4" }],
-  "backend": "r2"
-}`,
-  },
-  {
-    method: "POST",
-    endpoint: "/api/flow/run/cut",
-    title: "2. Cut Video",
-    description: "Cắt đoạn từ video gốc theo HH:MM:SS.",
-    params: [
-      { name: "job_id", type: "string", required: true, desc: "Trả về từ /upload." },
-      { name: "start_time", type: "string", required: true, desc: "Mốc bắt đầu HH:MM:SS." },
-      { name: "end_time", type: "string", required: true, desc: "Mốc kết thúc HH:MM:SS." },
-    ],
-    requestExample: `curl -X POST '${BASE}/api/flow/run/cut' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'job_id=f47ac10b-…' \\
-  -F 'start_time=00:00:05' \\
-  -F 'end_time=00:00:15'`,
-    responseExample: `{
-  "id": "f47ac10b-…",
-  "operation": "cut",
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
   "status": "pending",
-  "progress": 0.0
+  "message": "Processing job queued.",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": null
 }`,
   },
   {
     method: "POST",
-    endpoint: "/api/flow/run/merge",
-    title: "3. Merge Multiple Videos",
-    description: "Nối nhiều video thành 1 file theo thứ tự upload.",
-    params: [{ name: "job_id", type: "string", required: true, desc: "Job phải có 2-10 input files." }],
-    requestExample: `curl -X POST '${BASE}/api/flow/run/merge' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'job_id=f47ac10b-…'`,
-    responseExample: `{"id":"f47ac10b-…","operation":"merge","status":"pending"}`,
+    endpoint: "/api/v1/video/merge",
+    title: "Merge Multiple Videos",
+    description: "Merge or concatenate multiple video files together in sequence.",
+    params: [
+      { name: "videos", type: "File[]", desc: "Multiple video files (optional if job_id is provided)" },
+      { name: "job_id", type: "String", desc: "Alternatively, an existing Job ID" },
+    ],
+    requestExample: `curl -X POST '${BASE}/api/v1/video/merge' \
+  -H 'X-API-Key: YOUR_API_KEY' \
+  -F 'videos=@part1.mp4' \
+  -F 'videos=@part2.mp4'`,
+    responseExample: `{
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
+  "status": "pending",
+  "message": "Processing job queued.",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": null
+}`,
   },
   {
     method: "POST",
-    endpoint: "/api/flow/run/add-audio",
-    title: "4. Merge / Replace Audio",
-    description: "File 1 = video, file 2 = audio. Bật replace=true để thay sạch, false để mix.",
+    endpoint: "/api/v1/video/add-audio",
+    title: "Merge Audio Into Video",
+    description: "Add or replace the audio track in a video with a secondary audio file.",
     params: [
-      { name: "job_id", type: "string", required: true, desc: "Job upload với 2 files." },
-      { name: "replace", type: "boolean", desc: "true = thay sạch; false = mix (default)." },
+      { name: "video", type: "File", required: true, desc: "Primary video file" },
+      { name: "audio", type: "File", desc: "Secondary audio file" },
+      { name: "replace", type: "Boolean", desc: "If true, replaces existing audio. False will mix/merge them." },
     ],
-    requestExample: `curl -X POST '${BASE}/api/flow/run/add-audio' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'job_id=f47ac10b-…' \\
-  -F 'replace=true'`,
-    responseExample: `{"id":"f47ac10b-…","operation":"add-audio","status":"pending"}`,
+    requestExample: `curl -X POST '${BASE}/api/v1/video/add-audio' \
+  -H 'X-API-Key: YOUR_API_KEY' \
+  -F 'video=@video.mp4' \
+  -F 'audio=@audio.mp3' \
+  -F 'replace=false'`,
+    responseExample: `{
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
+  "status": "pending",
+  "message": "Processing job queued.",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": null
+}`,
   },
   {
     method: "POST",
-    endpoint: "/api/flow/run/extract-audio",
-    title: "5. Extract Audio",
-    description: "Tách audio track sang MP3/WAV/AAC. Default mp3.",
+    endpoint: "/api/v1/video/crop",
+    title: "Crop Video",
+    description: "Crop a video visually to specified dimensions and offsets.",
     params: [
-      { name: "job_id", type: "string", required: true, desc: "Job 1 file video." },
-      { name: "format", type: "string", desc: "mp3 | wav | aac." },
+      { name: "video", type: "File", desc: "Video file (optional if video_url/job_id is provided)" },
+      { name: "job_id", type: "String", desc: "Alternatively, an existing Job ID" },
+      { name: "width", type: "Integer", required: true, desc: "Crop width in pixels" },
+      { name: "height", type: "Integer", required: true, desc: "Crop height in pixels" },
+      { name: "x", type: "Integer", desc: "Horizontal offset from left (px)" },
+      { name: "y", type: "Integer", desc: "Vertical offset from top (px)" },
     ],
-    requestExample: `curl -X POST '${BASE}/api/flow/run/extract-audio' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'job_id=f47ac10b-…' \\
+    requestExample: `curl -X POST '${BASE}/api/v1/video/crop' \
+  -H 'X-API-Key: YOUR_API_KEY' \
+  -F 'video=@input.mp4' \
+  -F 'width=1080' \
+  -F 'height=1080' \
+  -F 'x=0' \
+  -F 'y=0'`,
+    responseExample: `{
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
+  "status": "pending",
+  "message": "Processing job queued.",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": null
+}`,
+  },
+  {
+    method: "POST",
+    endpoint: "/api/v1/video/extract-audio",
+    title: "Extract Audio",
+    description: "Extract the audio track from a video file into a specified format.",
+    params: [
+      { name: "video", type: "File", desc: "Video file (optional if job_id is provided)" },
+      { name: "job_id", type: "String", desc: "Alternatively, an existing Job ID" },
+      { name: "format", type: "String", desc: "Output audio format (mp3, wav, aac, flac)" },
+    ],
+    requestExample: `curl -X POST '${BASE}/api/v1/video/extract-audio' \
+  -H 'X-API-Key: YOUR_API_KEY' \
+  -F 'video=@input.mp4' \
   -F 'format=mp3'`,
-    responseExample: `{"id":"f47ac10b-…","operation":"extract-audio","status":"pending"}`,
+    responseExample: `{
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
+  "status": "pending",
+  "message": "Processing job queued.",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": null
+}`,
   },
   {
     method: "POST",
-    endpoint: "/api/flow/run/speed",
-    title: "6. Change Video Speed",
-    description: "0.5 = chậm 2×, 2.0 = nhanh 2×. Audio cũng điều chỉnh theo.",
+    endpoint: "/api/v1/video/speed",
+    title: "Change Video Speed",
+    description: "Change the playback speed of a video.",
     params: [
-      { name: "job_id", type: "string", required: true, desc: "Job 1 file video." },
-      { name: "speed", type: "float", required: true, desc: "Khoảng 0.25 - 4.0." },
-      { name: "adjust_audio", type: "boolean", desc: "Default true." },
+      { name: "video", type: "File", desc: "Video file (optional if job_id is provided)" },
+      { name: "job_id", type: "String", desc: "Alternatively, an existing Job ID" },
+      { name: "speed", type: "Float", required: true, desc: "Speed multiplier (0.25 to 4.0)" },
+      { name: "adjust_audio", type: "Boolean", desc: "Whether to adjust audio speed accordingly" },
     ],
-    requestExample: `curl -X POST '${BASE}/api/flow/run/speed' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'job_id=f47ac10b-…' \\
-  -F 'speed=1.5'`,
-    responseExample: `{"id":"f47ac10b-…","operation":"speed","status":"pending"}`,
+    requestExample: `curl -X POST '${BASE}/api/v1/video/speed' \
+  -H 'X-API-Key: YOUR_API_KEY' \
+  -F 'video=@input.mp4' \
+  -F 'speed=2.0' \
+  -F 'adjust_audio=true'`,
+    responseExample: `{
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
+  "status": "pending",
+  "message": "Processing job queued.",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": null
+}`,
   },
   {
     method: "POST",
-    endpoint: "/api/flow/run/resize",
-    title: "7. Resize Video",
-    description: "Đổi kích thước. Mặc định giữ aspect ratio.",
+    endpoint: "/api/v1/video/resize",
+    title: "Resize Video",
+    description: "Resize a video to specified dimensions.",
     params: [
-      { name: "job_id", type: "string", required: true, desc: "Job 1 file video." },
-      { name: "width", type: "int", required: true, desc: "Pixel mục tiêu." },
-      { name: "height", type: "int", required: true, desc: "Pixel mục tiêu." },
-      { name: "maintain_aspect", type: "boolean", desc: "Default true." },
+      { name: "video", type: "File", desc: "Video file (optional if job_id is provided)" },
+      { name: "job_id", type: "String", desc: "Alternatively, an existing Job ID" },
+      { name: "width", type: "Integer", required: true, desc: "Target width" },
+      { name: "height", type: "Integer", required: true, desc: "Target height" },
+      { name: "maintain_aspect", type: "Boolean", desc: "Maintain aspect ratio (pad if necessary)" },
     ],
-    requestExample: `curl -X POST '${BASE}/api/flow/run/resize' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'job_id=f47ac10b-…' \\
-  -F 'width=1280' \\
-  -F 'height=720'`,
-    responseExample: `{"id":"f47ac10b-…","operation":"resize","status":"pending"}`,
+    requestExample: `curl -X POST '${BASE}/api/v1/video/resize' \
+  -H 'X-API-Key: YOUR_API_KEY' \
+  -F 'video=@input.mp4' \
+  -F 'width=1280' \
+  -F 'height=720' \
+  -F 'maintain_aspect=true'`,
+    responseExample: `{
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
+  "status": "pending",
+  "message": "Processing job queued.",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": null
+}`,
   },
   {
     method: "POST",
-    endpoint: "/api/flow/run/crop",
-    title: "8. Crop Video",
-    description: "Cắt vùng theo (x, y) gốc trái và (width, height).",
+    endpoint: "/api/v1/video/extract-frames",
+    title: "Extract Frames",
+    description: "Extract specific frames from a video. At least one of first_frame / last_frame / timestamp is required.",
     params: [
-      { name: "job_id", type: "string", required: true, desc: "Job 1 file video." },
-      { name: "width", type: "int", required: true, desc: "Width vùng cắt." },
-      { name: "height", type: "int", required: true, desc: "Height vùng cắt." },
-      { name: "x", type: "int", desc: "Offset X (default 0)." },
-      { name: "y", type: "int", desc: "Offset Y (default 0)." },
+      { name: "video", type: "File", desc: "Video file (optional if job_id is provided)" },
+      { name: "job_id", type: "String", desc: "Alternatively, an existing Job ID" },
+      { name: "first_frame", type: "Boolean", desc: "Extract the first frame" },
+      { name: "last_frame", type: "Boolean", desc: "Extract the last frame" },
+      { name: "timestamp", type: "Float", desc: "Extract frame at specific second (e.g. 5.5)" },
     ],
-    requestExample: `curl -X POST '${BASE}/api/flow/run/crop' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'job_id=f47ac10b-…' \\
-  -F 'width=640' \\
-  -F 'height=360' \\
-  -F 'x=100' \\
-  -F 'y=50'`,
-    responseExample: `{"id":"f47ac10b-…","operation":"crop","status":"pending"}`,
-  },
-  {
-    method: "POST",
-    endpoint: "/api/flow/run/extract-frames",
-    title: "9. Extract Frames",
-    description: "Trích PNG. timestamp ưu tiên hơn first/last_frame.",
-    params: [
-      { name: "job_id", type: "string", required: true, desc: "Job 1 file video." },
-      { name: "first_frame", type: "boolean", desc: "Lấy frame đầu." },
-      { name: "last_frame", type: "boolean", desc: "Lấy frame cuối." },
-      { name: "timestamp", type: "float", desc: "Giây thứ X." },
-    ],
-    requestExample: `curl -X POST '${BASE}/api/flow/run/extract-frames' \\
-  -H 'Authorization: Bearer YOUR_JWT' \\
-  -F 'job_id=f47ac10b-…' \\
-  -F 'timestamp=3.5'`,
-    responseExample: `{"id":"f47ac10b-…","operation":"extract-frames","status":"pending"}`,
+    requestExample: `curl -X POST '${BASE}/api/v1/video/extract-frames' \
+  -H 'X-API-Key: YOUR_API_KEY' \
+  -F 'video=@input.mp4' \
+  -F 'first_frame=true' \
+  -F 'timestamp=5.5'`,
+    responseExample: `{
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
+  "status": "pending",
+  "message": "Processing job queued.",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": null
+}`,
   },
   {
     method: "GET",
-    endpoint: "/api/flow/jobs",
-    title: "10. List All Jobs",
-    description: "Liệt kê tất cả job của bạn. Phân trang qua skip/limit.",
+    endpoint: "/api/v1/video/jobs",
+    title: "List All Jobs",
+    description: "List all processing jobs for the current API Key account.",
     params: [
-      { name: "skip", type: "int", desc: "Default 0." },
-      { name: "limit", type: "int", desc: "Default 50, max 50." },
+      { name: "skip", type: "Integer", desc: "Pagination offset" },
+      { name: "limit", type: "Integer", desc: "Pagination limit (default 50, max 200)" },
     ],
-    requestExample: `curl '${BASE}/api/flow/jobs?skip=0&limit=20' \\
-  -H 'Authorization: Bearer YOUR_JWT'`,
-    responseExample: `{
-  "jobs": [{
-    "id": "f47ac10b-…",
+    requestExample: `curl -X GET '${BASE}/api/v1/video/jobs?skip=0&limit=50' \
+  -H 'X-API-Key: YOUR_API_KEY'`,
+    responseExample: `[
+  {
+    "id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
     "operation": "cut",
     "status": "completed",
     "progress": 100.0,
-    "output_url": "/flow-output/cut_f47ac10b.mp4",
-    "created_at": "2026-05-13T08:12:00Z",
-    "duration": 18.4
-  }],
-  "total": 1
-}`,
+    "error_message": null,
+    "output_url": "https://cdn.plxeditor.com/output/xyz.mp4",
+    "created_at": "2026-04-07T03:33:30.000Z",
+    "completed_at": "2026-04-07T03:34:10.000Z"
+  }
+]`,
   },
   {
     method: "GET",
-    endpoint: "/api/flow/jobs/{job_id}",
-    title: "11. Check Job Status (Polling)",
-    description: "UI mặc định poll mỗi 2s đến khi status = completed/failed.",
-    params: [{ name: "job_id", type: "string", required: true, desc: "Path param. ID từ /upload." }],
-    requestExample: `curl '${BASE}/api/flow/jobs/f47ac10b-…' \\
-  -H 'Authorization: Bearer YOUR_JWT'`,
+    endpoint: "/api/v1/video/jobs/{job_id}",
+    title: "Check Job Status (Polling)",
+    description: "Check the status of a scheduled processing job. Returns status (pending, processing, completed, failed) and output URL.",
+    params: [],
+    requestExample: `curl -X GET '${BASE}/api/v1/video/jobs/YOUR_JOB_ID' \
+  -H 'X-API-Key: YOUR_API_KEY'`,
     responseExample: `{
-  "id": "f47ac10b-…",
+  "job_id": "a9b92426-cc0f-412c-bd2a-fe8ef3283e58",
   "status": "completed",
-  "progress": 100.0,
-  "output_url": "/flow-output/cut_f47ac10b.mp4",
-  "file_size": 4823104,
-  "duration": 18.4
+  "message": "job completed",
+  "thumbnail_url": null,
+  "has_audio": null,
+  "output_duration": 16.02
 }`,
   },
 ];
@@ -367,12 +398,22 @@ export function FlowApiDocsPage() {
     <FlowShell workspaceLabel="API Documentation">
       <div className="space-y-4">
         <p className="text-sm text-slate-500">
-          Bộ công cụ xử lý video qua FFmpeg. Tất cả endpoints dưới đây đi qua proxy{" "}
+          Bộ công cụ xử lý video qua FFmpeg, public v1 API dưới{" "}
           <code className="rounded bg-slate-100 px-1 py-0.5 text-xs text-slate-700">
-            /api/flow/*
+            /api/v1/video/*
           </code>{" "}
-          — chỉ cần GrokFlow JWT, không cần X-API-Key.
+          — auth qua header <code className="rounded bg-slate-100 px-1 py-0.5 text-xs text-slate-700">X-API-Key</code> (Bearer JWT cũng được chấp nhận cho compat).
         </p>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          <div className="mb-1 font-medium">Cách lấy <code className="text-xs">YOUR_API_KEY</code>: vào <strong>API Keys</strong> ở sidebar → Create → copy. Hoặc dùng JWT qua login API:</div>
+          <pre className="overflow-x-auto rounded bg-slate-900 p-2 text-xs text-slate-100">{`curl -X POST '${BASE}/api/auth/login' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"you@example.com","password":"..."}'
+# → trả về { "access_token": "eyJ…", "expires_in": 86400 }`}</pre>
+          <div className="mt-1 text-xs text-slate-500">
+            JWT có hiệu lực 24h. Re-login khi hết hạn (server trả 401 → frontend đã có axios retry interceptor bảo vệ deploy nhưng KHÔNG retry 401).
+          </div>
+        </div>
         <a
           href="/api/v1/docs"
           target="_blank"

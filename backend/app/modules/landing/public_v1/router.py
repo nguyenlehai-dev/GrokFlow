@@ -20,7 +20,7 @@ router = APIRouter(prefix="/v1", tags=["public-v1"])
 class PublicJobCreate(BaseModel):
     provider: str = Field(pattern="^(grok|flow)$")
     profile_id: uuid.UUID | None = None
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=16000)
     options: dict[str, Any] | None = None
     # Optional reference image for image-to-image / image-to-video. Get the
     # file_id by first POSTing to `/v1/jobs/upload-input` — that endpoint

@@ -74,3 +74,6 @@ deploy_fe.py
 /nginx-vhosts
 /docker-volumes
 
+
+# Export staging dirs
+dist/

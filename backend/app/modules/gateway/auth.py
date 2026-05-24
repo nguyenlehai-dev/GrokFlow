@@ -17,7 +17,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 
 from app.core.deps import DbSession
-from app.core.security import decode_access_token, verify_password
+from app.core.security import decode_access_token, hash_api_key, verify_password
 from app.models import GwGatewayKey, User
 
 
@@ -51,14 +51,22 @@ async def require_caller(
     db: DbSession,
     authorization: str | None = Header(default=None),
 ) -> GatewayCaller:
+    # Error response shapes match the first-gen gateway.plxeditor.com
+    # exactly: legacy returned a flat string in `detail` (eg "Missing
+    # bearer token"), v2 originally wrapped it in a {code,message} dict.
+    # Customer integrations parse `resp.json()['detail']` as a string;
+    # the dict shape broke type-naive callers. Keep `detail` a string
+    # here, surface the code separately via a header for clients that
+    # want a stable machine-readable signal.
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "missing_auth", "message": "Authorization: Bearer <token> required"},
+            detail="Missing bearer token",
+            headers={"X-Error-Code": "missing_auth"},
         )
     token = authorization.split(" ", 1)[1].strip()
 
-    # Gateway key path
+    # Gateway key path (gwk_live_*)
     if token.startswith("gwk_"):
         prefix = token[:12]
         rows = (await db.execute(
@@ -83,7 +91,48 @@ async def require_caller(
                 continue
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "invalid_gateway_key", "message": "Gateway key không hợp lệ hoặc đã revoke"},
+            detail="Invalid bearer token",
+            headers={"X-Error-Code": "invalid_gateway_key"},
+        )
+
+    # Unified key path — accept the standard GrokFlow personal API key
+    # (uxpm_live_* by default; whatever settings.API_KEY_PREFIX is set to)
+    # so operators don't have to manage two parallel key systems on the
+    # same instance. Looks up in the api_keys table, returns a caller
+    # scoped to the key's owner.
+    #
+    # IMPORTANT: api_keys table stores key_hash as SHA256 of the FULL
+    # token (see core.security.generate_api_key), NOT bcrypt. Use
+    # hash_api_key + constant-time compare here — bcrypt's verify_password
+    # would always return False against a 64-char hex digest.
+    from app.core.config import settings
+    from app.core.security import hash_api_key_legacy
+    from app.models import ApiKey
+    if token.startswith(settings.API_KEY_PREFIX):
+        # Dual-hash lookup: peppered HMAC + legacy raw SHA256.
+        # Mirror logic ở core/deps.py để gateway dùng cùng API key
+        # với /api/client/* surface.
+        token_hash_new = hash_api_key(token)
+        token_hash_old = hash_api_key_legacy(token)
+        row = (await db.execute(
+            select(ApiKey).where(
+                ApiKey.key_hash.in_((token_hash_new, token_hash_old)),
+                ApiKey.status == "active",
+            )
+        )).scalar_one_or_none()
+        if row is not None:
+            owner = await db.get(User, row.user_id)
+            return GatewayCaller(
+                kind="gateway_key",
+                gateway_key_id=None,  # not a gw_gateway_keys row
+                allowed_functions=None,  # personal keys: no per-fn whitelist
+                label=row.name,
+                domain_id=(owner.domain_id if owner else None),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid bearer token",
+            headers={"X-Error-Code": "invalid_api_key"},
         )
 
     # Admin JWT path
@@ -91,13 +140,15 @@ async def require_caller(
     if not payload or "sub" not in payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "invalid_token", "message": "Token không hợp lệ"},
+            detail="Invalid bearer token",
+            headers={"X-Error-Code": "invalid_token"},
         )
     user = await db.get(User, payload["sub"])
     if not user or user.status != "active" or user.role not in ("admin", "super_admin"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "admin_required", "message": "Admin JWT required cho non-gateway-key calls"},
+            detail="Invalid bearer token",
+            headers={"X-Error-Code": "admin_required"},
         )
     return GatewayCaller(kind="admin", user_id=user.id, domain_id=user.domain_id)
 

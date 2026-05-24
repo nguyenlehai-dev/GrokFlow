@@ -47,6 +47,16 @@ _COOKIES_TTL_S = 600.0  # 10 min — short enough that stale cookies are
 # while the others wait; they then all see the warm cache.
 _STATSIG_LOCKS: dict[str, _asyncio_for_lock.Lock] = {}
 
+# Per-profile "API path is unhealthy" sticky flag. Set when the HTTP API
+# attempt (/conversations/new) returns provider_blocked / 403 — for the
+# next GROK_API_BLOCK_COOLDOWN_SEC seconds every job on this profile
+# skips the API attempt and goes straight to the Playwright browser
+# fallback. Eliminates the ~15s wasted on the doomed API round-trip.
+# Cleared automatically by the cooldown expiring; a successful API
+# call (none observed during cooldown) would also clear it implicitly
+# the next time the entry's timestamp is older than cooldown.
+_API_BLOCKED_UNTIL: dict[str, float] = {}
+
 
 def _statsig_lock(cache_key: str) -> _asyncio_for_lock.Lock:
     lk = _STATSIG_LOCKS.get(cache_key)
@@ -133,6 +143,43 @@ PRO_REQUIRED_HINTS = [
 ]
 
 
+async def _cdp_discover(cdp_endpoint: str, *, attempts: int = 4, delay: float = 0.5) -> tuple[str, str]:
+    """Fetch /json/version with retry. Returns (ws_url_rewritten, user_agent).
+
+    Chromium sometimes briefly returns an empty body or 500 from
+    /json/version when DevTools is mid-handshake (workers spawning tabs,
+    GC running, page navigating away). A single GET-and-decode fails
+    JSON parse — observed as `[network_error] CDP discovery: Expecting
+    value: line 1 column 1 (char 0)` cancelling jobs that would have
+    worked 200ms later.
+
+    Retry up to `attempts` times with `delay` between, then bubble the
+    last error. The total budget (4×0.5s = 2s) is small compared to a
+    job's hard cap (5-8 min), so the cost of a bad cycle is negligible.
+    """
+    import asyncio as _asyncio
+    last_err: Exception | None = None
+    for i in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=10) as cli:
+                resp = await cli.get(f"{cdp_endpoint}/json/version")
+                # Treat 5xx + empty body + non-JSON all as transient.
+                if resp.status_code >= 500 or not resp.text.strip():
+                    raise RuntimeError(f"transient: status={resp.status_code} body_len={len(resp.text)}")
+                version = resp.json()
+            ws_url = version.get("webSocketDebuggerUrl", "")
+            ua = version.get("User-Agent", "")
+            if not ws_url:
+                raise RuntimeError("no webSocketDebuggerUrl in response")
+            host = cdp_endpoint.replace("http://", "").rstrip("/")
+            return re.sub(r"ws://[^/]+", f"ws://{host}", ws_url), ua
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            if i < attempts - 1:
+                await _asyncio.sleep(delay)
+    raise last_err or RuntimeError("CDP discovery: unknown")
+
+
 class GrokProvider(Provider):
     name = "grok"
 
@@ -146,7 +193,13 @@ class GrokProvider(Provider):
     # generation queue under shared-account load took ~90-150s for images
     # and 180-300s for videos. The old timeouts caused premature retries
     # that compounded the upstream backlog.
-    IMAGE_TIMEOUT_MS = 180000  # 3 min — handles slow generations under load
+    # 90s — happy-path image jobs settle within 30s now that the loop
+    # commits on the first-match grace window (see commit 57bf9d7). The
+    # old 180s budget was a hedge against the loop running the full
+    # timeout when the URL flickered, which it no longer does. Profiles
+    # that genuinely don't render in 90s are stuck — rotate to a sibling
+    # rather than burning the budget on the same dead session.
+    IMAGE_TIMEOUT_MS = int(os.environ.get("GROK_IMAGE_TIMEOUT_MS", "90000"))
     VIDEO_TIMEOUT_MS = 360000  # 6 min — Grok video can take 90-300s
 
     async def run(self, job: JobInput) -> JobResult:
@@ -162,29 +215,39 @@ class GrokProvider(Provider):
             # RAM. The path returns None on any setup failure (cookie
             # extraction, CDP not ready) so a failure here never strands
             # the job — the Playwright flows below pick up cleanly.
-            if job.job_type == "image":
+            #
+            # ...unless this profile got a 403 / provider_blocked from the
+            # API path within the last GROK_API_BLOCK_COOLDOWN_SEC seconds.
+            # In that case skip the API attempt outright — it's near-
+            # certain to 403 again, and the ~15s round-trip to find out
+            # is pure waste on the critical path. Browser fallback takes
+            # over immediately.
+            if job.job_type == "image" and not self._api_path_blocked(job.profile_path):
                 api_result = await self._run_image_via_api(job)
                 if api_result is not None:
                     return api_result
 
-            # Video API path stays OFF. We've exhausted reasonable angles:
-            #   • upload-file fileMetadataId as parentPostId          ✗
-            #   • chat /imagine imageUuid as parentPostId             ✗
-            #   • 3 body variants (with/no parent / message-only)     ✗
-            #   • /imagine session warm-up before request             ✗
-            #   • x-xai-request-id + priority headers                 ✗
-            #   • job.attachments (real user upload) path             ✗
-            # Every combination 404s with `invalid-parent-post` while
-            # Playwright submitting through the Imagine studio UI on the
-            # SAME profile succeeds. Strong signal Grok server-side checks
-            # for an active /imagine WebSocket / SSE session that our
-            # stateless httpx call can't hold. Without reverse-engineering
-            # that channel, video must stay on Playwright.
+            # Video API path stays OFF by default. Empirical retest with
+            # curl_cffi (Chrome 124 TLS impersonation) confirmed CF is no
+            # longer mangling the request — but Grok's app server still
+            # rejects every videoize body variant we send with
+            # `invalid-parent-post`. The Playwright /imagine studio flow
+            # on the same profile, same minute, same cookies works
+            # — strong signal Grok server-side requires an active
+            # WebSocket / SSE session our stateless videoize POST can't
+            # hold. Until that channel is reverse-engineered, the API
+            # attempt only burns ~30s on the critical path (3 body
+            # variants × ~10s each) and trips an api-blocked cooldown.
+            # Net effect: pointless waste, so default OFF.
+            #
             # Re-enable for further debugging via GROK_VIDEO_API_ENABLED=1.
+            video_api_enabled = os.getenv("GROK_VIDEO_API_ENABLED", "0").lower() in (
+                "1", "true", "yes"
+            )
             if (
                 job.job_type == "video"
-                and os.getenv("GROK_VIDEO_API_ENABLED", "").lower()
-                in ("1", "true", "yes")
+                and video_api_enabled
+                and not self._api_path_blocked(job.profile_path)
             ):
                 api_result = await self._run_video_via_api(job)
                 if api_result is not None:
@@ -209,6 +272,37 @@ class GrokProvider(Provider):
     @staticmethod
     def _profile_id_from_path(profile_path: str) -> str:
         return profile_path.rstrip("/").split("/")[-1]
+
+    @staticmethod
+    def _api_path_blocked(profile_path: str) -> bool:
+        """True iff this profile is in the post-403 cooldown window.
+
+        Cooldown duration tunable via GROK_API_BLOCK_COOLDOWN_SEC
+        (default 300s = 5 min). Cleared lazily — if the recorded
+        timestamp + cooldown is in the past, the entry is removed
+        and we return False.
+        """
+        profile_id = profile_path.rstrip("/").split("/")[-1]
+        deadline = _API_BLOCKED_UNTIL.get(profile_id)
+        if deadline is None:
+            return False
+        if time.monotonic() >= deadline:
+            _API_BLOCKED_UNTIL.pop(profile_id, None)
+            return False
+        return True
+
+    @staticmethod
+    def _mark_api_blocked(profile_path: str) -> None:
+        """Record that this profile just got a 403 / provider_blocked on
+        the API path. Subsequent jobs within the cooldown window skip
+        the API attempt and go straight to the Playwright fallback."""
+        profile_id = profile_path.rstrip("/").split("/")[-1]
+        cooldown = float(os.environ.get("GROK_API_BLOCK_COOLDOWN_SEC", "300"))
+        _API_BLOCKED_UNTIL[profile_id] = time.monotonic() + cooldown
+        print(
+            f"[grok][api:{profile_id[:8]}] marked api-blocked for {int(cooldown)}s",
+            flush=True,
+        )
 
     @staticmethod
     def _log(tag: str, *args) -> None:
@@ -355,18 +449,10 @@ class GrokProvider(Provider):
             return None
         cdp_endpoint = info["cdp_endpoint"]
 
-        # Same CDP discovery dance as the other paths — devtools reports
-        # ws://localhost:9222 even though we reach it via container:9223.
+        # Retry-with-backoff helper handles the transient empty-body case
+        # we used to fail on. See `_cdp_discover` docstring.
         try:
-            async with httpx.AsyncClient(timeout=10) as cli:
-                resp = await cli.get(f"{cdp_endpoint}/json/version")
-                version = resp.json()
-                ws_url = version.get("webSocketDebuggerUrl", "")
-                browser_ua = version.get("User-Agent", "")
-            if not ws_url:
-                return None
-            host = cdp_endpoint.replace("http://", "").rstrip("/")
-            ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+            ws_url, browser_ua = await _cdp_discover(cdp_endpoint)
         except Exception as exc:  # noqa: BLE001
             self._log(tag, f"CDP discovery error: {exc}")
             return None
@@ -502,11 +588,19 @@ class GrokProvider(Provider):
 
         opts = job.options or {}
         aspect = str(opts.get("aspect_ratio") or opts.get("aspect") or "3:2")
-        quality = str(opts.get("resolution") or opts.get("quality") or "720p")
-        if quality in ("low", "draft"):
-            quality = "480p"
-        elif quality in ("high", "hd"):
-            quality = "720p"
+        # Grok's videoize endpoint only accepts the literal strings 480p,
+        # 720p, 1080p — passing anything else (eg the partner-facing
+        # "standard" / "high" / "low" labels we get on the client API)
+        # returns 400 "Resolution must be ... got <label>" and the
+        # worker falls back to Playwright. Normalise here so the API
+        # path actually runs.
+        quality_raw = str(opts.get("resolution") or opts.get("quality") or "720p").lower()
+        _RES_MAP = {
+            "480p": "480p", "low": "480p", "draft": "480p",
+            "720p": "720p", "standard": "720p", "medium": "720p", "hd": "720p", "high": "720p",
+            "1080p": "1080p", "full": "1080p", "fhd": "1080p", "ultra": "1080p",
+        }
+        quality = _RES_MAP.get(quality_raw, "720p")
         try:
             duration = int(opts.get("duration") or opts.get("video_length") or 10)
         except (TypeError, ValueError):
@@ -573,6 +667,19 @@ class GrokProvider(Provider):
             self._log(tag, f"API error: {exc.code} — {exc.message}")
             if exc.code == "provider_blocked":
                 _STATSIG_CACHE.pop(profile_id, None)
+                self._mark_api_blocked(job.profile_path)
+            # `rate_limited` with "quota exhausted" / "invalid-parent-post"
+            # is Grok's server-side rejection of every videoize body
+            # variant — not a real CF block, but functionally the same:
+            # the next video job on this profile will burn ~30s
+            # retrying the same 3 variants before falling back. Trip the
+            # cooldown so subsequent video jobs skip the API attempt
+            # entirely until the bug is reverse-engineered.
+            if exc.code == "rate_limited" and (
+                "quota exhausted" in (exc.message or "")
+                or "invalid-parent-post" in (exc.message or "")
+            ):
+                self._mark_api_blocked(job.profile_path)
             if exc.code == "cookie_expired":
                 return JobResult(
                     success=False,
@@ -669,6 +776,11 @@ class GrokProvider(Provider):
             _STATSIG_CACHE.pop(profile_id, None)
             _STATSIG_CACHE.pop(f"{profile_id}:video", None)
             _COOKIES_CACHE.pop(profile_id, None)
+            if exc.code == "provider_blocked":
+                # CF / statsig saying no. Mark this profile so the next
+                # several minutes of jobs skip the API attempt entirely
+                # — saves ~15s/job on the critical path.
+                self._mark_api_blocked(job.profile_path)
             if exc.code == "cookie_expired":
                 return JobResult(
                     success=False,
@@ -720,15 +832,8 @@ class GrokProvider(Provider):
             return None
         cdp_endpoint = info["cdp_endpoint"]
 
-        # Same CDP WS-URL rewrite as the legacy flow uses.
         try:
-            async with httpx.AsyncClient(timeout=10) as cli:
-                resp = await cli.get(f"{cdp_endpoint}/json/version")
-                ws_url = resp.json().get("webSocketDebuggerUrl", "")
-            if not ws_url:
-                return None
-            host = cdp_endpoint.replace("http://", "").rstrip("/")
-            ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+            ws_url, _ = await _cdp_discover(cdp_endpoint)
         except Exception as exc:  # noqa: BLE001
             self._log(tag, f"CDP discovery error: {exc}")
             return None
@@ -841,10 +946,51 @@ class GrokProvider(Provider):
                 # project sidebar icon) and download THAT instead of the
                 # actual generated image, producing tiny WebP files
                 # totally unrelated to the prompt.
+                # Grok renders in TWO phases at the same chat bubble:
+                #   1. Within ~3-5s an /generated/ URL appears holding a
+                #      low-res placeholder (~24 KB JPEG, smeared mosaic).
+                #   2. 20-45s later the bubble's <img src> swaps to a
+                #      different /generated/ URL holding the final
+                #      ~200 KB-1 MB image.
+                # Old code broke on the FIRST /generated/ match — it
+                # downloaded the phase-1 mosaic, marked the job success,
+                # and partners got blur as their result. Fix: collect
+                # URLs over a settling window and only return the URL
+                # that's been the LATEST observed for STABLE_WINDOW_SEC.
                 timeout_s = self.IMAGE_TIMEOUT_MS / 1000
+                # How long the same final-URL must remain "latest" before
+                # we commit. Originally 12s — empirically that proved too
+                # generous: when Grok streams the result the <img src>
+                # toggles between phase-1 / phase-2 / cleared a few times
+                # before settling, and a 12s stability window never holds,
+                # so the loop ran the full timeout (150s+) before the
+                # worker retried. 6s catches the typical settle pattern
+                # and still skips the early blur thumbnail.
+                STABLE_WINDOW_SEC = float(os.environ.get(
+                    "GROK_IMAGE_STABLE_WINDOW_SEC", "6",
+                ))
+                # Floor on total wait — Grok almost never finishes in <8s
+                # even when the phase-1 URL is up. Don't even consider a
+                # match before this so we never short-circuit out of the
+                # phase-2 swap. Halved from 20s.
+                MIN_WAIT_SEC = float(os.environ.get(
+                    "GROK_IMAGE_MIN_WAIT_SEC", "10",
+                ))
                 start = time.monotonic()
                 found_url: str | None = None
                 last_log = -30
+                latest_url: str | None = None
+                latest_seen_at: float | None = None
+                first_match_at: float | None = None
+                # Once a /generated/ URL appears in the DOM at all, commit
+                # to whatever's latest after a short grace period. The
+                # earlier "stay stable for N seconds" approach drove the
+                # loop into the full 150s timeout whenever Grok flickered
+                # the <img src> (which it does, often) — the URL is the
+                # right one even when the DOM toggles it on and off.
+                FIRST_MATCH_GRACE = float(os.environ.get(
+                    "GROK_IMAGE_FIRST_MATCH_GRACE", "8",
+                ))
                 while time.monotonic() - start < timeout_s:
                     elapsed = int(time.monotonic() - start)
                     try:
@@ -866,12 +1012,43 @@ class GrokProvider(Provider):
                         urls = []
                         all_grok_urls = []
                     if urls:
-                        # Use LAST match — chat appends new bubbles to
-                        # the bottom, so the freshest generated image is
-                        # at the end of the list.
-                        found_url = urls[-1]
-                        self._log(tag, f"image url after {elapsed}s: {found_url[:80]}…")
-                        break
+                        # Track the LAST URL in DOM order — chat appends
+                        # new bubbles to the bottom, so the freshest
+                        # render is at the end of the list.
+                        current_last = urls[-1]
+                        now = time.monotonic()
+                        if first_match_at is None:
+                            first_match_at = now
+                        if current_last != latest_url:
+                            if latest_url is not None:
+                                self._log(
+                                    tag,
+                                    f"image url swapped after {elapsed}s: "
+                                    f"…{latest_url[-40:]} → …{current_last[-40:]}",
+                                )
+                            latest_url = current_last
+                            latest_seen_at = now
+                        # Commit when (a) we've waited the floor AND
+                        # (b) either the URL has been stable for the
+                        # short stable window, OR the grace period since
+                        # FIRST sighting expired (catches flickering DOM).
+                        stable_ok = (
+                            latest_seen_at is not None
+                            and (now - latest_seen_at) >= STABLE_WINDOW_SEC
+                        )
+                        grace_ok = (
+                            first_match_at is not None
+                            and (now - first_match_at) >= FIRST_MATCH_GRACE
+                        )
+                        if elapsed >= MIN_WAIT_SEC and (stable_ok or grace_ok):
+                            found_url = latest_url
+                            self._log(
+                                tag,
+                                f"image url committed after {elapsed}s "
+                                f"(reason={'stable' if stable_ok else 'grace'}): "
+                                f"{found_url[:80]}…",
+                            )
+                            break
                     if elapsed - last_log >= 30:
                         # Dump any Grok-CDN URLs we DID see so we can
                         # debug filter false-negatives without a fresh
@@ -882,7 +1059,7 @@ class GrokProvider(Provider):
                         else:
                             self._log(tag, f"polling chat… {elapsed}s — 0 grok assets yet")
                         last_log = elapsed
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(3)
 
                 if not found_url:
                     return JobResult(
@@ -897,17 +1074,25 @@ class GrokProvider(Provider):
 
                 # Pull the image bytes through the SAME Chromium so it
                 # carries the auth cookies Grok requires on its asset CDN.
+                # Tightened timeout 60s -> 25s and split into connect/read
+                # phases — a stalled CDN connect used to occupy a worker
+                # for the full minute, blocking sibling jobs even when
+                # the asset would have failed instantly.
+                download_t0 = time.monotonic()
                 try:
                     cookies = await ctx.cookies("https://grok.com")
                     jar = {c["name"]: c["value"] for c in cookies}
-                    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as cli:
+                    timeout_cfg = httpx.Timeout(connect=8.0, read=25.0, write=25.0, pool=8.0)
+                    async with httpx.AsyncClient(timeout=timeout_cfg, follow_redirects=True) as cli:
                         r = await cli.get(found_url, cookies=jar)
+                    dl_sec = int(time.monotonic() - download_t0)
                     if r.status_code != 200 or not r.content:
                         return JobResult(
                             success=False, error_code="network_error",
-                            error_message=f"Image download {r.status_code} (len={len(r.content)})",
+                            error_message=f"Image download {r.status_code} (len={len(r.content)}) after {dl_sec}s",
                             retryable=True,
                         )
+                    self._log(tag, f"image downloaded in {dl_sec}s ({len(r.content)} bytes)")
                     mime = r.headers.get("content-type", "image/png").split(";")[0]
                     ext = mime.split("/")[-1] or "png"
                     return JobResult(
@@ -920,9 +1105,10 @@ class GrokProvider(Provider):
                         )],
                     )
                 except Exception as exc:  # noqa: BLE001
+                    dl_sec = int(time.monotonic() - download_t0)
                     return JobResult(
                         success=False, error_code="network_error",
-                        error_message=f"download failed: {exc}",
+                        error_message=f"download failed after {dl_sec}s: {exc}",
                         retryable=True,
                     )
             finally:
@@ -996,20 +1182,10 @@ class GrokProvider(Provider):
         cdp_endpoint = info["cdp_endpoint"]  # e.g. http://grokflow-vnc-xxx:9223
         prompt_text = self._compose_prompt(job)
 
-        # Chrome's /json/version returns wsEndpoint with Host we sent (localhost:9222
-        # because nginx proxy rewrites Host to satisfy Chrome). Playwright would try
-        # to connect to that literal URL and fail (ECONNREFUSED). Fetch + rewrite
-        # the ws URL to point at our reverse proxy host:port.
+        # _cdp_discover retries up to 4× with 500ms backoff to ride out
+        # transient empty-body / 5xx responses from a busy Chromium.
         try:
-            async with httpx.AsyncClient(timeout=10) as c:
-                resp = await c.get(f"{cdp_endpoint}/json/version")
-                ws_url = resp.json().get("webSocketDebuggerUrl", "")
-            if not ws_url:
-                return JobResult(success=False, error_code="browser_crashed",
-                                 error_message="No wsEndpoint from /json/version", retryable=True)
-            # ws://localhost:9222/devtools/browser/<id> → ws://<container>:9223/devtools/browser/<id>
-            host = cdp_endpoint.replace("http://", "").rstrip("/")
-            ws_url = re.sub(r"ws://[^/]+", f"ws://{host}", ws_url)
+            ws_url, _ = await _cdp_discover(cdp_endpoint)
         except Exception as exc:  # noqa: BLE001
             return JobResult(success=False, error_code="network_error",
                              error_message=f"CDP discovery: {exc}", retryable=True)
@@ -1132,30 +1308,46 @@ class GrokProvider(Provider):
                         )
                     raise
 
+                # Cheap pre-checks BEFORE the 30s prompt-bar wait — fail
+                # fast on the known non-recoverable states (Cloudflare /
+                # login redirect) instead of burning the full wait window.
+                title_pre = await page.title()
+                if "Just a moment" in title_pre or "Cloudflare" in title_pre:
+                    return JobResult(success=False, error_code="cookie_expired",
+                                     error_message="Cloudflare challenge — re-login via Auto login")
+                if any(kw in page.url.lower() for kw in ("login", "sign-in", "signin", "auth")):
+                    return JobResult(success=False, error_code="cookie_expired",
+                                     error_message=f"Redirected to login: {page.url}")
+
                 # Wait for the prompt-bar to actually render before any radio
                 # click attempts. Without this, on a busy Chromium the React
                 # tree isn't mounted yet → the Image/Video radios + duration
                 # buttons don't exist → all our clicks no-op silently.
+                #
+                # 30s (was 15s): production Grok pages occasionally take
+                # 20-25s to hydrate when the VPS is under load OR Grok's CDN
+                # is slow. A 15s ceiling tripped legit jobs into a fake
+                # rate_limited rotation → profile churn for no reason.
+                # Configurable via PROMPT_BAR_TIMEOUT_MS env for ops tuning.
+                _bar_timeout_ms = int(os.getenv("PROMPT_BAR_TIMEOUT_MS", "30000"))
                 try:
                     await page.wait_for_selector(
                         "[role=radio], button[aria-label='Submit']",
-                        timeout=15000, state="visible",
+                        timeout=_bar_timeout_ms, state="visible",
                     )
                 except PWTimeout:
+                    # One last CF / login redirect probe — Grok sometimes
+                    # injects the challenge mid-load, so the title check
+                    # earlier missed it.
+                    title_late = await page.title()
+                    if "Just a moment" in title_late or "Cloudflare" in title_late:
+                        return JobResult(success=False, error_code="cookie_expired",
+                                         error_message="Cloudflare challenge — re-login via Auto login")
                     return JobResult(
                         success=False, error_code="rate_limited",
-                        error_message="Prompt bar didn't render in 15s — Chromium overloaded.",
+                        error_message=f"Prompt bar didn't render in {_bar_timeout_ms // 1000}s — Chromium overloaded.",
                         retryable=True,
                     )
-
-                title = await page.title()
-                if "Just a moment" in title or "Cloudflare" in title:
-                    return JobResult(success=False, error_code="cookie_expired",
-                                     error_message="Cloudflare challenge — re-login via Auto login")
-                cur_url = page.url
-                if any(kw in cur_url.lower() for kw in ("login", "sign-in", "signin", "auth")):
-                    return JobResult(success=False, error_code="cookie_expired",
-                                     error_message=f"Redirected to login: {cur_url}")
 
                 content = (await page.content()).lower()
                 if "captcha" in content:
@@ -1317,27 +1509,73 @@ class GrokProvider(Provider):
                         pass
                 await asyncio.sleep(0.15)
 
-                # Slow type: each character → keydown/press/up events that
-                # ProseMirror's plugin chain handles and updates state for.
-                # Per-tab CDP target — concurrent tabs each get their own
-                # event stream, no focus contention.
                 pm_text = ""
-                try:
-                    await page.keyboard.type(prompt_text, delay=12)
-                    await asyncio.sleep(0.3)
-                    pm_text = await page.evaluate(
-                        """() => {
-                            const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
-                            return pm ? (pm.innerText || '').trim() : '';
-                        }"""
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    self._log(tag, f"keyboard.type failed: {exc}")
+                # Strategy split by length:
+                #   • >= 500 chars → PASTE first. keyboard.type at 12ms/char
+                #     takes 55s for a 4.6k-char director-style prompt, and
+                #     ProseMirror's IME composer fires onChange after every
+                #     single key — by the time the loop ends, React's render
+                #     queue is way behind and the Submit handler reads
+                #     stale state, causing the "click registered but no
+                #     /api/imagine call" symptom.
+                #   • < 500 chars → keep keyboard.type. Short prompts are
+                #     ~5s of typing and behave more naturally for Grok's
+                #     anti-bot heuristics.
+                # Both paths still run a paste-event fallback if the first
+                # method left PM empty (e.g. paste blocked by CSP).
+                use_paste_first = len(prompt_text) >= 500
 
-                self._log(tag, f"prompt typed via keyboard.type (len={len(prompt_text)}, pm_filled={bool(pm_text)})")
+                if use_paste_first:
+                    # Single clipboard paste — one onChange in React,
+                    # one transaction in ProseMirror. PM's clipboard
+                    # plugin runs its own parser so the text shows up
+                    # natively in the editor.
+                    try:
+                        await page.evaluate(
+                            """(args) => {
+                                const [el, text] = args;
+                                if (!el) return false;
+                                const dt = new DataTransfer();
+                                dt.setData('text/plain', text);
+                                const ev = new ClipboardEvent('paste', {
+                                    bubbles: true, cancelable: true, clipboardData: dt,
+                                });
+                                try { el.focus(); } catch (e) {}
+                                el.dispatchEvent(ev);
+                                const inner = el.querySelector('[contenteditable="true"]') || el;
+                                if (inner !== el) inner.dispatchEvent(ev);
+                                return true;
+                            }""",
+                            [prompt_el, prompt_text],
+                        )
+                        await asyncio.sleep(0.4)
+                        pm_text = await page.evaluate(
+                            """() => {
+                                const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
+                                return pm ? (pm.innerText || '').trim() : '';
+                            }"""
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self._log(tag, f"paste-first failed: {exc}")
+                    self._log(tag, f"prompt pasted (len={len(prompt_text)}, pm_filled={bool(pm_text)})")
 
-                # Fallback paste-event if typing somehow produced nothing.
                 if not pm_text:
+                    # Either short prompt path, or paste-first didn't fill PM.
+                    try:
+                        await page.keyboard.type(prompt_text, delay=12)
+                        await asyncio.sleep(0.3)
+                        pm_text = await page.evaluate(
+                            """() => {
+                                const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror');
+                                return pm ? (pm.innerText || '').trim() : '';
+                            }"""
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self._log(tag, f"keyboard.type failed: {exc}")
+                    self._log(tag, f"prompt typed via keyboard.type (len={len(prompt_text)}, pm_filled={bool(pm_text)})")
+
+                # Fallback paste-event if BOTH paths above left PM empty.
+                if not pm_text and not use_paste_first:
                     self._log(tag, "keyboard.type produced empty PM, trying paste event")
                     injected = await page.evaluate(
                         """(args) => {
@@ -1386,18 +1624,47 @@ class GrokProvider(Provider):
                 # short debounce (~150-300ms); without this wait the submit
                 # handler may read an empty React state even when the DOM
                 # has the typed text.
-                await asyncio.sleep(0.6)
+                #
+                # Scale the initial wait with prompt length. Long prompts
+                # (3000+ chars) saw React's controlled-input reconcilation
+                # take 1-2s on slow VNCs; the old fixed 0.6s slept past
+                # the DOM update but BEFORE React's onChange landed, so
+                # the subsequent click fired with React state still empty.
+                # Grok's onSubmit reads from React state, treats it as
+                # blank, and silently no-ops the API call — manifesting
+                # as the "submit clicked but generate_api_called=False"
+                # symptom that fast-fails our worker.
+                #
+                # Heuristic: 0.6s baseline + 1 extra second per 2000 chars.
+                # 4500-char prompts get ~3s, short prompts stay snappy.
+                prompt_len = len(job.prompt or "")
+                react_settle = 0.6 + min(4.0, prompt_len / 2000.0)
+                await asyncio.sleep(react_settle)
                 btn_enabled = False
-                for _ in range(20):
+                pm_state_ok = False
+                for _ in range(40):
+                    pm_state_ok = await page.evaluate(
+                        f"""() => {{
+                            // Check the actual PM textContent matches what
+                            // we typed. If it does, React's state has the
+                            // value too (PM mirrors state on every keystroke).
+                            const pm = document.querySelector('.tiptap.ProseMirror, .ProseMirror, [contenteditable="true"]');
+                            if (!pm) return false;
+                            const txt = (pm.textContent || '').trim();
+                            return txt.length >= {max(1, prompt_len - 10)};
+                        }}"""
+                    )
                     btn_enabled = await page.evaluate(
                         """() => {
                             const b = document.querySelector("button[aria-label='Submit']");
                             return !!b && !b.disabled && b.offsetParent !== null;
                         }"""
                     )
-                    if btn_enabled:
+                    if btn_enabled and pm_state_ok:
                         break
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.25)
+                if btn_enabled and not pm_state_ok:
+                    self._log(tag, f"warn: btn enabled but PM textContent shorter than prompt ({prompt_len} chars expected)")
 
                 # Submit chain ordered by trustedness — Grok's anti-bot
                 # likely checks event.isTrusted in the React onSubmit:
@@ -1583,27 +1850,47 @@ class GrokProvider(Provider):
                 # care about <video> elements with non-empty src; for image jobs
                 # we care about <img> elements. Track stability separately.
                 want_video = job.job_type == "video"
-                # Adaptive timeout + stability window. Image jobs finish fast
-                # so we lock in the result aggressively (3s after first image).
-                # Video jobs may stream multiple thumbnail updates so we wait
-                # a bit longer for the URL set to settle.
+                # Adaptive timeout + stability window.
+                #
+                # Stability used to be 3s for image. That was too tight:
+                # Grok now serves the result in two phases at the same
+                # chat bubble — a ~24 KB blur placeholder appears within
+                # 3-5s, then the final ~200 KB-1 MB image swaps in
+                # 20-45s later. A 3s window let us commit on the blur
+                # before the swap, and partners received the mosaic as
+                # their "successful" result. 12s closes the swap reliably
+                # without making fast jobs feel sluggish.
+                #
+                # Video stays at 6s — its update cycle is slower (only
+                # one URL ever appears) so the old window was fine.
                 timeout_ms = self.VIDEO_TIMEOUT_MS if want_video else self.IMAGE_TIMEOUT_MS
                 deadline = time.monotonic() + timeout_ms / 1000
-                STABILITY_SECONDS = 6.0 if want_video else 3.0
+                STABILITY_SECONDS = 6.0 if want_video else float(
+                    os.environ.get("GROK_IMAGE_STABLE_WINDOW_SEC", "6"),
+                )
                 last_change_at: float | None = None
                 new_urls_set: set[str] = set()
                 new_video_urls: set[str] = set()
 
                 next_progress_log = time.monotonic() + 15
-                # Fast-fail watchdog for video jobs only. Old behaviour was
-                # "no <video> in 90s → fail" which gave false positives
-                # whenever Grok was just slow (90-150s is normal under
-                # load). New rule: only fast-fail if we can confirm Grok
-                # NEVER fired a generation API call after submit. If the
-                # call DID fire, Grok is just slow — wait the full
-                # VIDEO_TIMEOUT_MS (6 min). 120s gives enough head-room
-                # before we conclude the call truly never came.
-                stuck_check_deadline = time.monotonic() + 120 if want_video else None
+                # Fast-fail watchdog for "Grok ignored submit" — applies
+                # to both image and video, with different head-rooms.
+                #
+                # Trigger: N seconds after submit with ZERO media on page
+                # AND `generate_call_seen["hit"] == False` (network probe
+                # never saw a /api/imagine or /api/conversations call).
+                # That combo means Grok received the click but silently
+                # dropped it — shadow-ban / CF block / statsig downgrade.
+                # No amount of further polling helps; rotate now.
+                #
+                # Image: 45s (real images render in 15-30s, anything past
+                #   45s with no API call is dead). Before this watchdog
+                #   image jobs blocked the full 5-minute IMAGE_TIMEOUT
+                #   and then surfaced as TargetClosedError when the page
+                #   crashed mid-wait.
+                # Video: 120s (genuine video renders take 60-150s under
+                #   load, so we wait longer before declaring death).
+                stuck_check_deadline = time.monotonic() + (120 if want_video else 45)
 
                 while time.monotonic() < deadline:
                     cur_imgs = await self._collect_image_urls(page) - seen_urls
@@ -1629,33 +1916,34 @@ class GrokProvider(Provider):
                         next_progress_log = time.monotonic() + 30
                         self._log(tag, f"polling… imgs={len(new_urls_set)} vids={len(new_video_urls)} elapsed={int(time.monotonic() - (deadline - timeout_ms/1000))}s")
 
-                    # Watchdog: video job + 120s passed + still no <video>
-                    # element on page. Two interpretations:
+                    # Watchdog: post-submit + N seconds + still no media
+                    # of the wanted type. Two interpretations:
                     #   (a) generate_call_seen.hit == False → Grok never
                     #       hit the generation API since submit. Could be
                     #       silent throttle / shadow-ban / CF block.
                     #       Fast-fail with rate_limited → worker rotates.
                     #   (b) generate_call_seen.hit == True → generation
                     #       API DID fire; Grok just hasn't rendered the
-                    #       <video> tag yet (90-150s legitimate under
-                    #       load). DON'T fail — let polling continue to
-                    #       the full 6-min deadline.
+                    #       result yet. DON'T fail — keep polling to the
+                    #       full deadline.
                     # Watchdog only triggers once (sets deadline=None).
+                    media_seen = bool(new_video_urls if want_video else new_urls_set)
                     if (
                         stuck_check_deadline is not None
                         and time.monotonic() >= stuck_check_deadline
-                        and not new_video_urls
+                        and not media_seen
                     ):
                         stuck_check_deadline = None  # only check once
+                        watchdog_secs = 120 if want_video else 45
                         if not generate_call_seen["hit"]:
-                            self._log(tag, "fast-fail: 120s post-submit, vids=0, no generate API call — Grok ignored submit")
+                            self._log(tag, f"fast-fail: {watchdog_secs}s post-submit, no media, no generate API call — Grok ignored submit")
                             return JobResult(
                                 success=False, error_code="rate_limited",
                                 error_message="Grok không nhận submit (không có /api/imagine call) — profile có thể bị throttle. Rotating.",
                                 retryable=True,
                             )
                         else:
-                            self._log(tag, f"slow gen: 120s post-submit but generate API call seen — waiting full {timeout_ms // 1000}s")
+                            self._log(tag, f"slow gen: {watchdog_secs}s post-submit but generate API call seen — waiting full {timeout_ms // 1000}s")
 
                     # In-loop text scanning was removed: it generated too many
                     # false-positives by matching phrases that appear in chat
@@ -1801,18 +2089,26 @@ class GrokProvider(Provider):
                     await asyncio.wait_for(page.close(), timeout=3)
                 except Exception:  # noqa: BLE001
                     pass
-            # Also sweep any stray `/imagine/post/<id>` result tabs that this
-            # job's submit-then-result navigation may have spawned. Each
-            # lingering tab eats ~100MB Chromium RAM. We only touch tabs
-            # with this exact URL shape — sibling jobs' /imagine prompt tabs
-            # are NEVER on /post/ until they finish, so this is collision-safe.
+            # Also sweep any stray result tabs that this job's submit-then-
+            # result navigation may have spawned. Each lingering tab eats
+            # ~150-300MB Chromium RAM.
+            #
+            # Grok URL patterns we close:
+            #   /imagine/post/<id>         — legacy result URL (pre Q2 2026)
+            #   /project/<id>?chat=<id>    — current shape after a job
+            #   /chat/<id>, /share/<id>    — direct chat / share links
+            #
+            # Sibling jobs' /imagine prompt tabs DON'T match any of these
+            # until they themselves finish, so this is collision-safe with
+            # concurrent workers on the same profile.
+            _STALE = ("/imagine/post/", "?chat=", "/chat/", "/share/")
             try:
                 if 'context' in locals() and context is not None:
                     for p in list(context.pages):
                         if p is page:
                             continue
                         u = (p.url or "")
-                        if "/imagine/post/" in u:
+                        if any(s in u for s in _STALE):
                             try:
                                 await asyncio.wait_for(p.close(), timeout=2)
                                 self._log(tag, f"GC closed result tab: …{u[-40:]}")

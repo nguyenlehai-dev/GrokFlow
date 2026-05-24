@@ -103,7 +103,9 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      # Host port overridable so prod (default 8000) and staging
+      # (e.g. 18000 via .env.staging) can coexist on the same host.
+      - "${BACKEND_HOST_PORT:-8000}:8000"
     volumes:
       - storage_data:/app/storage
       # Bind mount so paths inside backend match host paths (needed for spawning VNC).
@@ -200,6 +202,11 @@ services:
     volumes:
       - ./browser_profiles:/app/browser_profiles
       - /var/run/docker.sock:/var/run/docker.sock
+      # Same vhosts dir as backend — vnc_map_loop refreshes _vnc_map.conf
+      # every 15s. Without this mount the loop silently no-ops (the
+      # `_is_writable()` guard returns False) and the map drifts whenever
+      # docker IPAM re-assigns IPs after a deploy / container recreate.
+      - /etc/nginx/grokflow-vhosts:/host_nginx_vhosts
     command: ["python", "-m", "app.workers.idle_cleanup"]
     # Same reason as worker — disable inherited curl-based healthcheck.
     healthcheck:
@@ -241,7 +248,9 @@ services:
     image: grokflow/frontend:${TAG:-latest}
     restart: unless-stopped
     ports:
-      - "5173:80"
+      # Host port overridable so prod (default 5173) and staging
+      # (e.g. 15173 via .env.staging) can coexist on the same host.
+      - "${FRONTEND_HOST_PORT:-5173}:80"
     # Frontend doesn't need host.docker.internal anymore (the legacy
     # gatewaygrok proxy is gone). Remove this block if you don't host
     # any other side-services on the VPS that nginx needs to reach.

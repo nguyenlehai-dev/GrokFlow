@@ -9,6 +9,7 @@ import type { Plan } from "../models/plan";
 import { usersService } from "../services/users.service";
 import { domainsService } from "../services/domains.service";
 import { rolesService } from "../services/roles.service";
+import { toolInstallsService, type ToolInstallAdmin } from "../services/toolInstalls.service";
 import { NULL_FK_SENTINEL } from "../utils/sentinels";
 
 // --- Per-user permissions modal --------------------------------------------
@@ -32,6 +33,7 @@ export function UserPermissionsModal({
 
   const [planId, setPlanId] = useState<string>(user.plan_id ?? "");
   const [domainId, setDomainId] = useState<string>(user.domain_id ?? "");
+  const [toolInstallId, setToolInstallId] = useState<string>(user.tool_install_id ?? "");
   const [roleId, setRoleId] = useState<string>(user.role_id ?? "");
   const [roleTier, setRoleTier] = useState<string>(user.role ?? "user");
   const [featOverride, setFeatOverride] = useState<Record<string, boolean>>(
@@ -58,6 +60,30 @@ export function UserPermissionsModal({
     queryFn: () => domainsService.listAs<DomainOpt>(),
     enabled: isSuper,
   });
+  // Tool install list — only loaded for super_admin so we can offer the
+  // "swap a user from web→kiosk" path in the same modal. List fetch is
+  // cheap (capped at 200) and only fires when modal is open.
+  const { data: toolInstalls } = useQuery<ToolInstallAdmin[]>({
+    queryKey: ["admin-tool-installs", "for-permissions"],
+    queryFn: () => toolInstallsService.list({ limit: 200 }),
+    enabled: isSuper,
+  });
+
+  // Mutex helpers. The backend enforces "EITHER domain OR tool_install"
+  // (DB invariant), and we mirror that here so the UI doesn't let the
+  // admin save a contradictory pair. Picking one auto-clears the other.
+  const onDomainPick = (id: string) => {
+    setDomainId(id);
+    if (id) setToolInstallId("");
+    setRoleId(""); // domain change → role from old domain is invalid
+  };
+  const onToolPick = (id: string) => {
+    setToolInstallId(id);
+    if (id) {
+      setDomainId("");
+      setRoleId("");
+    }
+  };
   // Roles for the user's (current/edited) domain.
   const { data: roles } = useQuery<RoleOpt[]>({
     queryKey: ["admin-roles-for-user", domainId],
@@ -66,12 +92,6 @@ export function UserPermissionsModal({
     enabled: !!domainId,
   });
 
-  // When domain changes, clear role (the role wouldn't be valid in the new
-  // domain anyway — backend rejects it).
-  const onDomainChange = (id: string) => {
-    setDomainId(id);
-    setRoleId("");
-  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -87,6 +107,7 @@ export function UserPermissionsModal({
       };
       if (isSuper) {
         body.domain_id = domainId || NULL_FK_SENTINEL;
+        body.tool_install_id = toolInstallId || NULL_FK_SENTINEL;
       }
       return usersService.update(user.id, body);
     },
@@ -193,7 +214,7 @@ export function UserPermissionsModal({
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   {t("admin.up_domain_label")}
                 </label>
-                <select className="input" value={domainId} onChange={(e) => onDomainChange(e.target.value)}>
+                <select className="input" value={domainId} onChange={(e) => onDomainPick(e.target.value)}>
                   <option value="">{t("admin.up_domain_global")}</option>
                   {(domains ?? []).filter((d) => d.hostname !== "*").map((d) => (
                     <option key={d.id} value={d.id}>{d.hostname} — {d.label}</option>
@@ -205,6 +226,32 @@ export function UserPermissionsModal({
               </div>
             )}
           </div>
+          {isSuper && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Tool Install (desktop kiosk)
+              </label>
+              <select
+                className="input"
+                value={toolInstallId}
+                onChange={(e) => onToolPick(e.target.value)}
+              >
+                <option value="">— Không gán (user dùng web qua Domain) —</option>
+                {(toolInstalls ?? []).map((ti) => (
+                  <option key={ti.id} value={ti.id}>
+                    {ti.label || ti.tool_id}
+                    {ti.machine_name ? ` · ${ti.machine_name}` : ""}
+                    {ti.assigned_user_email && ti.assigned_user_email !== user.email
+                      ? ` (đã pin cho ${ti.assigned_user_email})`
+                      : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1.5">
+                Bind user vào 1 install desktop. <strong>Mutex với Domain</strong> — chọn cái này sẽ tự xoá Domain (DB không cho phép cả hai). Để trống nếu khách dùng web.
+              </p>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">
               {t("admin.up_role_label")}

@@ -100,6 +100,10 @@ export async function retryJob(jobId: string): Promise<FlowJob> {
   return r.data;
 }
 
+export async function deleteJob(jobId: string): Promise<void> {
+  await flowApi.delete(`/api/flow/jobs/${jobId}`);
+}
+
 export async function getHealth(): Promise<{ status: string; storage_backend?: string }> {
   const r = await flowApi.get("/api/flow/health");
   return r.data;

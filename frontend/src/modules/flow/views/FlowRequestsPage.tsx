@@ -77,6 +77,23 @@ export function FlowRequestsPage() {
     onError: () => toast(t("flow.requests_retry_failed"), "error"),
   });
 
+  // Delete is irreversible — confirm via window.confirm rather than
+  // sliding in a modal. Failed-job rows pile up after each upstream bug
+  // (the dummy.txt ffmpeg dumps from before the upload validator
+  // shipped, for one); without a delete path the list grows forever
+  // and operators ignore the page entirely.
+  const remove = useMutation({
+    mutationFn: (id: string) => flowApi.delete(`/api/flow/jobs/${id}`),
+    onSuccess: () => {
+      toast("Đã xóa job", "success");
+      qc.invalidateQueries({ queryKey: ["flow-jobs"] });
+    },
+    onError: (e: any) => {
+      const msg = e?.response?.data?.detail ?? "Xóa job lỗi";
+      toast(typeof msg === "string" ? msg : "Xóa job lỗi", "error");
+    },
+  });
+
   // Filter client-side (BE list is already paginated). For a small page
   // this is faster + no extra params to plumb through; if we ever paginate
   // server-side with these filters, move them up to query params.
@@ -194,7 +211,18 @@ export function FlowRequestsPage() {
               : t("flow.requests_empty_no_match")}
           </div>
         ) : (
-          filtered.map((j) => <JobRow key={j.id} job={j} onRetry={() => retry.mutate(j.id)} />)
+          filtered.map((j) => (
+            <JobRow
+              key={j.id}
+              job={j}
+              onRetry={() => retry.mutate(j.id)}
+              onDelete={() => {
+                if (window.confirm(`Xóa job ${j.id.slice(0, 8)} (${j.operation})? Không thể hoàn tác.`)) {
+                  remove.mutate(j.id);
+                }
+              }}
+            />
+          ))
         )}
       </div>
 
@@ -231,7 +259,7 @@ export function FlowRequestsPage() {
   );
 }
 
-function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
+function JobRow({ job, onRetry, onDelete }: { job: FlowJob; onRetry: () => void; onDelete: () => void }) {
   const { t } = useTranslation();
   const visual = STATUS_VISUAL[job.status] ?? STATUS_VISUAL.pending;
   const Icon = visual.icon;
@@ -276,6 +304,18 @@ function JobRow({ job, onRetry }: { job: FlowJob; onRetry: () => void }) {
               title={t("flow.requests_retry_title")}
             >
               <PlayCircle size={14} /> {t("flow.requests_retry")}
+            </button>
+          )}
+          {/* Delete — only for terminal-state rows. Active jobs would need
+              a cancel flow first; the backend refuses to delete them. */}
+          {(job.status === "failed" || job.status === "completed") && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="btn-ghost text-xs inline-flex items-center gap-1 text-rose-600 hover:bg-rose-50"
+              title="Xóa job (không thể hoàn tác)"
+            >
+              <X size={14} /> Xóa
             </button>
           )}
           {job.status === "completed" && job.output_url && (

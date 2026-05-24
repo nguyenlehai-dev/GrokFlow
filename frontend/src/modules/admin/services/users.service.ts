@@ -28,4 +28,44 @@ export const usersService = {
         `/api/admin/users/${userId}/effective-entitlements`,
       )
       .then((r) => r.data),
+
+  quickProvision: (payload: QuickProvisionIn) =>
+    api
+      .post<QuickProvisionOut>("/api/admin/users/quick-provision", payload)
+      .then((r) => r.data),
 };
+
+export interface QuickProvisionIn {
+  email: string;
+  password: string;
+  full_name: string;
+  role?: "user" | "admin" | "support";
+  plan_id?: string | null;
+  domain_id?: string | null;
+  new_domain?: {
+    hostname: string;
+    label?: string | null;
+    jobs_quota_per_day?: number | null;
+  } | null;
+  tool_install_id?: string | null;
+  pin_as_only_user?: boolean;
+  create_api_key?: boolean;
+  api_key_name?: string;
+  api_key_providers?: string[];
+  api_key_job_types?: string[];
+  api_key_daily_limit?: number;
+}
+
+export interface QuickProvisionOut {
+  user_id: string;
+  user_email: string;
+  domain_id: string | null;
+  domain_hostname: string | null;
+  tool_install_id?: string | null;
+  tool_install_label?: string | null;
+  api_key: string | null;
+  api_key_id: string | null;
+  api_key_prefix: string | null;
+  login_url: string;
+  note: string;
+}

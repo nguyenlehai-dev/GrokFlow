@@ -23,8 +23,11 @@ from app.core.exceptions import InvalidCredentials, InvalidPayload, NotFound, Pe
 from app.core.security import create_short_token, decode_access_token
 from app.core.tenant import scope_by_user_domain
 from app.core.deps import SuperAdminUser
-from app.services.nginx_sync import refresh_vnc_map
-from app.models import Domain, GrokProject, Job, Profile, ProjectDomainAssignment, User
+from app.services.nginx_sync import refresh_vnc_map, refresh_vnc_map_until_present
+from app.models import (
+    Domain, GrokProject, Job, Profile,
+    ProjectDomainAssignment, ProjectToolInstallAssignment, User,
+)
 from app.modules.admin.audit import service as audit
 
 
@@ -162,18 +165,46 @@ async def list_profiles(user: CurrentUser, db: DbSession) -> list[Profile]:
             .order_by(Profile.created_at.desc())
         )
     else:
-        # Customer pool: admin-owned, logged_in, visible to my domain.
-        q = (
-            select(Profile)
-            .join(User, User.id == Profile.user_id)
-            .where(
-                User.role.in_(("admin", "super_admin")),
-                Profile.status == "logged_in",
-                (User.domain_id == user.domain_id)
-                | Profile.id.in_(_profile_ids_assigned_to_domain(user.domain_id)),
+        # Customer pool: admin-owned, logged_in, visible to my scope.
+        # Scope rules (mutex enforced at user level):
+        #   - tool_install_id set → only profiles whose projects are
+        #     assigned to that install. Domain bound user fields are
+        #     ignored on this branch because tool wins by spec.
+        #   - domain_id set      → profiles owned by admin in my domain
+        #     OR profiles whose projects are loaned to my domain.
+        #   - neither             → empty pool. Scopeless customers
+        #     shouldn't see any profile (was a hole previously — same-
+        #     null domain comparison silently matched all the admin
+        #     profiles whose owner also had domain_id=null).
+        if user.tool_install_id:
+            q = (
+                select(Profile)
+                .join(User, User.id == Profile.user_id)
+                .where(
+                    User.role.in_(("admin", "super_admin")),
+                    Profile.status == "logged_in",
+                    Profile.id.in_(
+                        _profile_ids_assigned_to_tool_install(user.tool_install_id)
+                    ),
+                )
+                .order_by(Profile.created_at.desc())
             )
-            .order_by(Profile.created_at.desc())
-        )
+        elif user.domain_id:
+            q = (
+                select(Profile)
+                .join(User, User.id == Profile.user_id)
+                .where(
+                    User.role.in_(("admin", "super_admin")),
+                    Profile.status == "logged_in",
+                    (User.domain_id == user.domain_id)
+                    | Profile.id.in_(_profile_ids_assigned_to_domain(user.domain_id)),
+                )
+                .order_by(Profile.created_at.desc())
+            )
+        else:
+            # Scopeless customer — return empty list. Was previously
+            # leaking admin profiles because NULL=NULL silently matched.
+            q = select(Profile).where(Profile.id == uuid.UUID(int=0))
     result = await db.execute(q)
     return list(result.scalars().all())
 
@@ -193,6 +224,28 @@ def _profile_ids_assigned_to_domain(domain_id):
         .where(
             ProjectDomainAssignment.domain_id == domain_id,
             ProjectDomainAssignment.enabled.is_(True),
+        )
+        .scalar_subquery()
+    )
+
+
+def _profile_ids_assigned_to_tool_install(install_id):
+    """Tool-install variant of _profile_ids_assigned_to_domain.
+
+    Used by the kiosk-bound customer path in list_profiles so a desktop
+    tool user only sees profiles whose projects have an explicit
+    ProjectToolInstallAssignment row for their install. Without this,
+    every kiosk would see every admin-owned logged_in profile — defeating
+    the per-install scoping super_admin set up via /admin/tool-installs."""
+    return (
+        select(GrokProject.profile_id)
+        .join(
+            ProjectToolInstallAssignment,
+            ProjectToolInstallAssignment.project_id == GrokProject.id,
+        )
+        .where(
+            ProjectToolInstallAssignment.tool_install_id == install_id,
+            ProjectToolInstallAssignment.enabled.is_(True),
         )
         .scalar_subquery()
     )
@@ -498,30 +551,31 @@ async def start_vnc_session(profile_id: uuid.UUID, admin: AdminUser, db: DbSessi
                            metadata={"container": info["container_name"], "reused": info.get("reused")})
     await db.commit()
 
-    # Tell nginx where this new container lives so the iframe URL routes.
-    # No-op when the host vhost dir isn't mounted (dev / tests).
-    refresh_vnc_map()
-    # Schedule a second refresh ~4s later to catch any race where the
-    # container's NetworkSettings.Networks wasn't populated yet at the
-    # moment of the first refresh — most common when the user clicks
-    # Auto-login on multiple profiles in quick succession and Docker's
-    # IPAM is briefly behind. asyncio.create_task is fire-and-forget;
-    # the second refresh is best-effort and never blocks the response.
-    import asyncio as _asyncio
-
-    async def _delayed_refresh() -> None:
-        await _asyncio.sleep(4)
-        try:
-            refresh_vnc_map()
-        except Exception:  # noqa: BLE001 — never crash on the followup
-            pass
-
-    _asyncio.create_task(_delayed_refresh())
-
     # Per-profile noVNC route. Nginx proxies /vnc/<short-id>/ → <container>:6901
     # `path` param tells noVNC to open WS at /vnc/<short>/websockify (its default
     # 'websockify' resolves to root, breaking the routing).
     short = str(profile.id).replace("-", "")[:12]
+
+    # Block until nginx map contains this short_id (up to 10s). Without
+    # this wait, the user's iframe race with Docker IPAM and nginx sees
+    # `_none_` for ~1-3s after spawn → 502 Bad Gateway. Doing the sync
+    # poll here (rather than fire-and-forget) means the endpoint takes
+    # an extra ~1s on average but the user NEVER sees the 502 flash.
+    import asyncio as _asyncio
+    map_written = await _asyncio.to_thread(
+        refresh_vnc_map_until_present, short, timeout_sec=10.0
+    )
+    # Nginx-reload settle window. After the backend writes the map file,
+    # the host's systemd path watcher (grokflow-nginx-reload.path) fires
+    # an inotify event → runs `nginx -t && nginx -s reload`. That takes
+    # ~0.5-1s end-to-end. Returning immediately races the user's iframe
+    # against the in-flight reload — first request still hits the old
+    # cached map → 502. A short async sleep here gives the reload time
+    # to complete before we hand the URL to the frontend. Skip the wait
+    # when the map didn't actually need to change (refresh_vnc_map_until_present
+    # found short_id was already present → no inotify event triggered).
+    if map_written:
+        await _asyncio.sleep(1.2)
     # Return RELATIVE URL — the browser resolves it against the page's
     # current origin. This matters in multi-tenant deploys where a user
     # may be browsing tenant A (e.g. nexoratech.com.vn) while the API
@@ -621,6 +675,97 @@ async def disable_profile(profile_id: uuid.UUID, admin: AdminUser, db: DbSession
 
 
 _RUNNING_JOB_STATES = ("running", "processing_provider", "uploading_result")
+
+
+class ResetCdpOut(BaseModel):
+    profile_id: uuid.UUID
+    profile_status: str
+    container_was_removed: bool
+    map_refreshed: bool
+    next_action: str  # always "auto_login" — user clicks Auto-login next
+    message: str
+
+
+@router.post("/{profile_id}/reset-cdp", response_model=ResetCdpOut)
+async def reset_cdp(
+    profile_id: uuid.UUID, admin: AdminUser, db: DbSession,
+) -> ResetCdpOut:
+    """One-click recovery for a broken VNC profile.
+
+    When Chromium crashes inside a VNC container but Docker still
+    reports the container as 'healthy' (kasmweb daemon up, browser
+    dead), every job assigned to that profile hits
+    `[network_error] CDP discovery: Expecting value` and gets
+    cancelled. Manual fix used to be SSH + `docker restart` —
+    this endpoint replaces that with one click.
+
+    What it does:
+      1. Tear down the VNC + Chromium container for this profile
+         (vnc_manager.stop_for_profile)
+      2. Refresh the nginx VNC short-id → IP map (so /vnc/<short>/
+         no longer routes to a ghost container)
+      3. Reset profile.status to 'need_login' so the worker pool
+         skips it until admin re-runs Auto-login
+
+    After this call, admin clicks 'Auto-login' on the row — that
+    spawns a fresh container with a clean Chromium, and the new
+    /vnc/<short>/ route is wired up by start-vnc-session as usual.
+
+    Safe to call at any time. Does NOT touch other profiles. Does
+    NOT touch host nginx config (use the system-level /heal for
+    that).
+    """
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise NotFound("profile")
+    await _assert_profile_accessible(db, admin, profile)
+    await _assert_action_allowed(db, admin, "stop_vnc")
+
+    container_was_removed = False
+    try:
+        vnc_manager.stop_for_profile(str(profile.id))
+        container_was_removed = True
+    except Exception:  # noqa: BLE001
+        # Container may have already been gone — that's fine, the
+        # subsequent map-refresh will drop any stale entry anyway.
+        pass
+
+    map_refreshed = False
+    try:
+        map_refreshed = refresh_vnc_map()
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Clear active job counters too — if Chromium crashed mid-job,
+    # the slot was never released. Without this reset, the profile
+    # would refuse new jobs after Auto-login because active_jobs >=
+    # max_concurrent_jobs (sticky from the crashed run).
+    profile.active_jobs = 0
+    profile.active_video_jobs = 0
+    profile.status = "need_login"
+    profile.error_message = None
+
+    await audit.log_action(
+        db, user_id=admin.id, action="reset_cdp",
+        target_type="profile", target_id=profile.id,
+        metadata={
+            "container_was_removed": container_was_removed,
+            "map_refreshed": map_refreshed,
+        },
+    )
+    await db.commit()
+
+    return ResetCdpOut(
+        profile_id=profile.id,
+        profile_status=profile.status,
+        container_was_removed=container_was_removed,
+        map_refreshed=map_refreshed,
+        next_action="auto_login",
+        message=(
+            "VNC container đã bị xoá + map nginx được làm mới. "
+            "Click Auto-login để tạo phiên Chromium mới."
+        ),
+    )
 
 
 @router.post("/{profile_id}/reset-stuck", response_model=ProfileOut)
