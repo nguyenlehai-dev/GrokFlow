@@ -97,6 +97,25 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         print(f"[startup] vnc pool keeper failed to start: {exc}", flush=True)
 
+    # Security check: profile directory permissions. Chromium cookies
+    # store on Linux không encrypted natively → ai có read access tới
+    # browser_profiles/ là hijack được Grok account. Tối thiểu enforce
+    # 0o700 trên parent dir + warn nếu world-readable.
+    try:
+        from pathlib import Path
+        base = Path(settings.PROFILE_BASE_PATH).resolve()
+        if base.exists():
+            mode = base.stat().st_mode & 0o777
+            if mode & 0o077:
+                print(
+                    f"[startup] ⚠ PROFILE_BASE_PATH {base} có permissions {oct(mode)} "
+                    f"(world/group readable). Đang chmod 700 — khuyến nghị LUKS volume.",
+                    flush=True,
+                )
+                base.chmod(0o700)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] profile perm check failed: {exc}", flush=True)
+
     yield
     # On shutdown: stop background tasks + drain the shared httpx pool.
     for t in (vnc_events_task, tab_gc_task, cdp_watchdog_task, relogin_watchdog_task, pool_keeper_task):

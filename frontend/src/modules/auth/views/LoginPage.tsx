@@ -57,15 +57,18 @@ export function LoginPage({ forceTemplate }: { forceTemplate?: "default" | "admi
     return <Navigate to={dest} replace />;
   }
 
+  // 2FA flow state: server responds 401 totp_required khi user có
+  // totp_enabled. FE chuyển sang form nhập code mà KHÔNG mất email/
+  // password (lưu trong needTotp). Submit lại kèm totp_code.
+  const [needTotp, setNeedTotp] = useState<LoginFormValues | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+
   const onSubmit = handleSubmit(async (values: LoginFormValues) => {
     setError(null);
     try {
       const data = await authService.login(values);
       const me = await authService.meWithToken(data.access_token);
       setAuth(data.access_token, me);
-      // Tool-scoped users (desktop kiosk) land directly on the branded
-      // creator workspace, bypassing the admin sidebar/dashboard. Web
-      // admins keep their existing flow.
       const target =
         me?.tool_install_id
           ? "/create-video-pro"
@@ -74,9 +77,46 @@ export function LoginPage({ forceTemplate }: { forceTemplate?: "default" | "admi
             : firstAllowedPath();
       navigate(target);
     } catch (e: any) {
+      const code = e?.response?.data?.detail?.code;
+      // 401 + code='totp_required' / 'totp_invalid' → chuyển sang form
+      // nhập 2FA, giữ credentials trong state. KHÔNG show "wrong
+      // password" — user thấy "nhập code" sau khi password đã pass server.
+      if (code === "totp_required" || code === "totp_invalid") {
+        setNeedTotp(values);
+        if (code === "totp_invalid") {
+          setError(t("auth.totp_invalid", "Mã 2FA sai hoặc đã hết hạn"));
+          setTotpCode("");
+        }
+        return;
+      }
       setError(e?.response?.data?.detail?.message ?? t("auth.login_failed", "Login failed"));
     }
   });
+
+  const submitTotp = async () => {
+    if (!needTotp || !totpCode) return;
+    setError(null);
+    try {
+      const data = await authService.login({ ...needTotp, totp_code: totpCode });
+      const me = await authService.meWithToken(data.access_token);
+      setAuth(data.access_token, me);
+      const target =
+        me?.tool_install_id
+          ? "/create-video-pro"
+          : (me?.role === "admin" || me?.role === "super_admin")
+            ? "/dashboard"
+            : firstAllowedPath();
+      navigate(target);
+    } catch (e: any) {
+      const code = e?.response?.data?.detail?.code;
+      if (code === "totp_invalid") {
+        setError(t("auth.totp_invalid", "Mã 2FA sai. Thử lại."));
+        setTotpCode("");
+        return;
+      }
+      setError(e?.response?.data?.detail?.message ?? t("auth.login_failed", "Login failed"));
+    }
+  };
 
   // Until domain config has resolved we don't know which template the
   // domain wants, and rendering the fallback briefly flashes the wrong
@@ -85,6 +125,78 @@ export function LoginPage({ forceTemplate }: { forceTemplate?: "default" | "admi
   // the eye since the load typically completes in <100ms.
   if (!forceTemplate && !loaded) {
     return <div className="min-h-screen bg-slate-900" aria-busy="true" />;
+  }
+
+  // Khi cần 2FA, render UI inline thay layout. Đơn giản, không nhân
+  // đôi 2 layout admin/default vì 2FA prompt giống nhau ở mọi domain.
+  if (needTotp) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
+        <div className="w-full max-w-sm bg-white/5 backdrop-blur rounded-2xl border border-white/10 p-6 space-y-4">
+          <div className="text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-emerald-500/15 ring-1 ring-emerald-400/30 grid place-items-center mb-3">
+              <span className="text-emerald-300 text-xl">🔐</span>
+            </div>
+            <h1 className="text-lg font-bold text-slate-100">Xác thực 2 lớp</h1>
+            <p className="text-xs text-slate-400 mt-1">
+              Mở app Authenticator của bạn, nhập 6-digit code dưới đây
+            </p>
+          </div>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 font-mono text-2xl tracking-widest text-center focus:border-emerald-400 focus:outline-none"
+            value={totpCode}
+            onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ""))}
+            onKeyDown={(e) => e.key === "Enter" && totpCode.length === 6 && submitTotp()}
+            placeholder="000000"
+            autoFocus
+          />
+          {error && <p className="text-xs text-rose-400 text-center">{error}</p>}
+          <button
+            type="button"
+            onClick={submitTotp}
+            disabled={totpCode.length !== 6}
+            className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium disabled:opacity-50"
+          >
+            Xác thực
+          </button>
+          <details className="text-xs text-slate-400">
+            <summary className="cursor-pointer text-center hover:text-slate-200">
+              Mất điện thoại? Dùng backup code
+            </summary>
+            <p className="mt-2 text-center">
+              Nhập 1 trong 8 backup codes (10 ký tự) thay vì 6-digit code.
+              Mỗi code dùng được 1 lần.
+            </p>
+            <div className="mt-2 flex justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  const longCode = prompt("Backup code (10 ký tự):");
+                  if (longCode && longCode.trim()) {
+                    setTotpCode(longCode.trim());
+                    setTimeout(submitTotp, 100);
+                  }
+                }}
+                className="text-amber-400 hover:underline"
+              >
+                Dùng backup code
+              </button>
+            </div>
+          </details>
+          <button
+            type="button"
+            onClick={() => { setNeedTotp(null); setTotpCode(""); setError(null); }}
+            className="w-full text-xs text-slate-500 hover:text-slate-300 py-1"
+          >
+            ← Quay lại login
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const template = forceTemplate ?? domainTemplate;

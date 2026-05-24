@@ -4,6 +4,7 @@ import { User as UserIcon, Lock, Save, Eye, EyeOff } from "lucide-react";
 import { toast } from "@/components/ui/Toast";
 import { useAuthStore } from "@/core/auth/store";
 import { api } from "@/core/api/axios";
+import { TwoFactorSection } from "./TwoFactorSection";
 
 /** Self-service account settings. User updates own profile + changes
  *  password. Super_admin có cùng quyền nhưng qua Admin → Users với
@@ -183,6 +184,8 @@ export function AccountPage() {
           {changePassword.isPending ? "Đang đổi..." : "Đổi mật khẩu"}
         </button>
       </section>
+
+      <TwoFactorSection />
 
       <p className="text-xs text-slate-400 text-center">
         Mọi thay đổi đều được log; super_admin có thể audit và reset password khi cần.

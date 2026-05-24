@@ -21,13 +21,40 @@ PROVIDER_HOMES: dict[str, str] = {
 def ensure_profile_dir(profile_path: str) -> Path:
     p = Path(profile_path).resolve()
     p.mkdir(parents=True, exist_ok=True)
+    # Hardening: chmod 700 (owner-only). Chromium cookies trong
+    # <profile>/Default/Cookies (SQLite) trên Linux không có
+    # OS-level encryption — đối thủ với file-read access đọc được.
+    # Chmod 700 giảm bề mặt từ "mọi process trên VPS" xuống "process
+    # cùng UID". Real protection vẫn phải là filesystem-level LUKS
+    # ở ops layer.
+    try:
+        p.chmod(0o700)
+    except OSError:
+        pass  # Best-effort — Windows / mount lạ không support chmod
     return p
 
 
 def remove_profile_dir(profile_path: str) -> None:
+    """Defense-in-depth: scrub cookie data before rmtree. Chromium
+    Cookies file là SQLite — chỉ rmtree xong file vẫn còn trên disk
+    cho đến khi block bị overwrite. Mở file zero-fill trước khi
+    rmtree khiến forensic recovery (PhotoRec, extundelete) khó hơn.
+
+    KHÔNG đảm bảo wipe 100% — chỉ raise the bar. Production secret
+    cần LUKS-encrypted volume."""
     p = Path(profile_path).resolve()
-    if p.exists() and p.is_dir():
-        shutil.rmtree(p, ignore_errors=True)
+    if not p.exists() or not p.is_dir():
+        return
+    cookies_file = p / "Default" / "Cookies"
+    if cookies_file.is_file():
+        try:
+            size = cookies_file.stat().st_size
+            with cookies_file.open("r+b") as f:
+                f.write(b"\x00" * size)
+                f.flush()
+        except OSError:
+            pass
+    shutil.rmtree(p, ignore_errors=True)
 
 
 def _normalize_cookie(c: dict) -> dict:
