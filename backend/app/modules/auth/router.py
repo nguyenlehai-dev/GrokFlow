@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Request
 from sqlalchemy import select
 
 from app.core.config import settings
@@ -23,9 +23,21 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    payload: LoginRequest, db: DbSession,
+    payload: LoginRequest, db: DbSession, request: Request,
     x_tool_install_id: str | None = Header(default=None, alias="X-Tool-Install-Id"),
 ) -> TokenResponse:
+    # Rate-limit BEFORE bcrypt verify — bcrypt mất ~150ms/attempt, đủ
+    # cho password-spray nếu không guard. Lấy IP từ cf-connecting-ip
+    # (Cloudflare layer), fallback X-Forwarded-For, fallback client host.
+    # See enforce_login_rate_limit comment cho ngưỡng cụ thể.
+    from app.core.rate_limit import enforce_login_rate_limit
+    client_ip = (
+        request.headers.get("cf-connecting-ip")
+        or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
+    await enforce_login_rate_limit(client_ip, payload.email)
+
     # Enforce per-install policy BEFORE checking credentials, so an
     # unapproved kiosk can never log anyone in (even with a valid
     # password). Rules when the header is present:
@@ -159,6 +171,34 @@ async def login(
                 403, "domain_disabled",
                 "Tenant đang bị tạm dừng. Liên hệ admin để kích hoạt lại.",
             )
+
+    # 2FA gate. Apply cho user có totp_enabled=true bất kể role —
+    # super_admin set 2FA cho mình thì server tôn trọng.
+    # Code chấp nhận: 6-digit TOTP hoặc 10-char backup code.
+    if user.totp_enabled and user.totp_secret:
+        from app.core.totp import verify_totp_code, verify_backup_code
+        provided = (payload.totp_code or "").strip()
+        if not provided:
+            raise AppError(401, "totp_required", "Cần mã 2FA (6 chữ số từ Authenticator)")
+        ok = False
+        if len(provided) == 6 and provided.isdigit():
+            ok = verify_totp_code(user.totp_secret, provided)
+        elif len(provided) == 10:
+            # Backup code path. Verify + remove khỏi list (single-use).
+            matched, new_codes = verify_backup_code(
+                list(user.totp_backup_codes or []), provided,
+            )
+            if matched:
+                user.totp_backup_codes = new_codes
+                ok = True
+        if not ok:
+            await audit.log_action(
+                db, user_id=user.id, action="login_failed",
+                target_type="user", target_id=user.id,
+                metadata={"reason": "totp_invalid", "email": payload.email},
+            )
+            await db.commit()
+            raise AppError(401, "totp_invalid", "Mã 2FA sai hoặc đã dùng")
 
     token = create_access_token(subject=str(user.id), extra={"role": user.role})
     await audit.log_action(db, user_id=user.id, action="login", target_type="user", target_id=user.id)
@@ -420,4 +460,84 @@ async def change_password(
     if not verify_password(payload.current_password, user.password_hash):
         raise AppError(403, "wrong_current_password", "Mật khẩu hiện tại không đúng")
     user.password_hash = hash_password(payload.new_password)
+    await db.commit()
+
+
+# ─── 2FA TOTP ────────────────────────────────────────────────────────────
+# Flow:
+#   1. User vào /account → click "Bật 2FA" → POST /api/auth/2fa/setup
+#      → server tạo secret + lưu encrypted nhưng totp_enabled=false
+#      → trả về otpauth URI để FE render QR
+#   2. User scan QR bằng Authenticator app → nhập 6-digit code
+#      → POST /api/auth/2fa/verify với code
+#      → server verify, set totp_enabled=true, sinh + trả 8 backup codes
+#   3. Login sau đó cần totp_code
+#   4. Disable: POST /api/auth/2fa/disable với password (require auth)
+
+class TotpSetupOut(BaseModel):
+    """Trả secret + uri cho FE render QR. Secret cũng show dưới dạng
+    text để user nhập manually nếu camera không scan được QR."""
+    secret: str
+    provisioning_uri: str
+
+
+class TotpVerifyIn(BaseModel):
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class TotpVerifyOut(BaseModel):
+    enabled: bool
+    backup_codes: list[str]  # plaintext, show 1 lần
+
+
+class TotpDisableIn(BaseModel):
+    """Disable 2FA cần password (chống attacker active session disable
+    2FA → giảm khó takeover account về sau)."""
+    password: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/2fa/setup", response_model=TotpSetupOut)
+async def totp_setup(user: CurrentUser, db: DbSession) -> TotpSetupOut:
+    """Bắt đầu setup 2FA — tạo secret mới (đè secret cũ nếu user re-setup).
+    totp_enabled chỉ flip sau khi verify code đầu tiên."""
+    from app.core.totp import new_totp_secret, encrypt_secret, provisioning_uri
+    secret = new_totp_secret()
+    user.totp_secret = encrypt_secret(secret)
+    user.totp_enabled = False
+    user.totp_backup_codes = None
+    await db.commit()
+    return TotpSetupOut(
+        secret=secret,
+        provisioning_uri=provisioning_uri(secret, user.email),
+    )
+
+
+@router.post("/2fa/verify", response_model=TotpVerifyOut)
+async def totp_verify(
+    payload: TotpVerifyIn, user: CurrentUser, db: DbSession,
+) -> TotpVerifyOut:
+    """Verify 6-digit code lần đầu → enable 2FA + return 8 backup codes
+    (plaintext, chỉ hiện 1 lần). User PHẢI copy/print trước khi đóng."""
+    from app.core.totp import verify_totp_code, new_backup_codes
+    if not user.totp_secret:
+        raise AppError(400, "totp_not_setup", "Chưa setup 2FA — gọi /2fa/setup trước")
+    if not verify_totp_code(user.totp_secret, payload.code):
+        raise AppError(400, "totp_invalid", "Mã 2FA sai. Thử lại sau ~30s.")
+    user.totp_enabled = True
+    plaintext, hashed = new_backup_codes(8)
+    user.totp_backup_codes = hashed
+    await db.commit()
+    return TotpVerifyOut(enabled=True, backup_codes=plaintext)
+
+
+@router.post("/2fa/disable", status_code=204, response_model=None)
+async def totp_disable(
+    payload: TotpDisableIn, user: CurrentUser, db: DbSession,
+) -> None:
+    from app.core.security import verify_password
+    if not verify_password(payload.password, user.password_hash):
+        raise AppError(403, "wrong_password", "Mật khẩu không đúng")
+    user.totp_secret = None
+    user.totp_enabled = False
+    user.totp_backup_codes = None
     await db.commit()

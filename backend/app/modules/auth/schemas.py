@@ -12,6 +12,12 @@ class LoginRequest(BaseModel):
     # validator still runs on whatever the client supplied.
     email: PermissiveEmail
     password: str
+    # 2FA: optional. Server returns 401 totp_required khi user có
+    # totp_enabled=true mà field này thiếu/sai. FE prompt nhập rồi
+    # POST lại cùng email+password+totp_code. Cũng chấp nhận backup
+    # code 10 ký tự ở field này (server tự phân biệt 6-digit vs
+    # 10-char alphanumeric).
+    totp_code: str | None = None
 
     @model_validator(mode="before")
     @classmethod

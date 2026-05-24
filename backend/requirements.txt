@@ -32,3 +32,5 @@ croniter==3.0.3
 pytest==8.3.3
 pytest-asyncio==0.24.0
 aiosqlite==0.20.0
+# 2FA TOTP — RFC 6238. Tạo secret + verify code 6 digits cho admin login.
+pyotp==2.9.0

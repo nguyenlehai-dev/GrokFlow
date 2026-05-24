@@ -11,7 +11,7 @@ from app.core.exceptions import (
     InvalidCredentials,
     PermissionDenied,
 )
-from app.core.security import decode_access_token, hash_api_key
+from app.core.security import decode_access_token, hash_api_key, hash_api_key_legacy
 from app.models import ApiKey, Domain, User
 from sqlalchemy import select
 
@@ -134,14 +134,28 @@ async def get_api_key_principal(
         raw = authorization.split(" ", 1)[1]
     else:
         raise InvalidApiKey()
-    key_hash = hash_api_key(raw)
-    result = await db.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
+    # Dual-hash lookup cho migration sang peppered HMAC: thử HMAC mới
+    # trước, fallback SHA256 cũ. Sau khi rotate hết key cũ + audit
+    # confirm không còn raw SHA256 trong DB, có thể bỏ legacy nhánh.
+    key_hash_new = hash_api_key(raw)
+    key_hash_old = hash_api_key_legacy(raw)
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.key_hash.in_((key_hash_new, key_hash_old)))
+    )
     api_key = result.scalar_one_or_none()
     if not api_key or api_key.status != "active":
         raise InvalidApiKey()
     user = await db.get(User, api_key.user_id)
     if not user or user.status != "active":
         raise InvalidApiKey()
+    # Lazy migrate: nếu key vẫn dùng hash cũ, upgrade ngay sau verify
+    # thành công. Không block request — fire-and-forget.
+    if api_key.key_hash == key_hash_old:
+        api_key.key_hash = key_hash_new
+        try:
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            await db.rollback()  # silent — re-attempt next call
     return api_key, user
 
 

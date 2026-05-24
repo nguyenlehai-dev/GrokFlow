@@ -106,12 +106,18 @@ async def require_caller(
     # hash_api_key + constant-time compare here — bcrypt's verify_password
     # would always return False against a 64-char hex digest.
     from app.core.config import settings
+    from app.core.security import hash_api_key_legacy
     from app.models import ApiKey
     if token.startswith(settings.API_KEY_PREFIX):
-        token_hash = hash_api_key(token)
+        # Dual-hash lookup: peppered HMAC + legacy raw SHA256.
+        # Mirror logic ở core/deps.py để gateway dùng cùng API key
+        # với /api/client/* surface.
+        token_hash_new = hash_api_key(token)
+        token_hash_old = hash_api_key_legacy(token)
         row = (await db.execute(
             select(ApiKey).where(
-                ApiKey.key_hash == token_hash, ApiKey.status == "active",
+                ApiKey.key_hash.in_((token_hash_new, token_hash_old)),
+                ApiKey.status == "active",
             )
         )).scalar_one_or_none()
         if row is not None:
